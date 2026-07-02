@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Flight Dashboard</title>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #111; color: #eee; padding: 20px; }
+        .dashboard { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; }
+        .widget { border: 1px solid #333; padding: 20px; background: #1a1a1a; border-radius: 12px; }
+        .label { color: #888; font-size: 0.8rem; text-transform: uppercase; margin-bottom: 5px; }
+        .value { font-size: 1.5rem; font-weight: bold; }
+        #status { margin-bottom: 20px; color: #444; }
+    </style>
+</head>
+<body>
+    <h1>Flight Data</h1>
+    <div id="status">Connecting...</div>
+    
+    <div class="dashboard">
+        <div class="widget"><div class="label">IAS</div><div class="value" id="airspeed">0</div><span class="label">kt</span></div>
+        <div class="widget"><div class="label">Ground Speed</div><div class="value" id="groundspeed">0</div><span class="label">kt</span></div>
+        <div class="widget"><div class="label">Vertical Speed</div><div class="value" id="vspeed">0</div><span class="label">ft/min</span></div>
+        <div class="widget"><div class="label">Altitude (MSL)</div><div class="value" id="altitude">0</div><span class="label">ft</span></div>
+        <div class="widget"><div class="label">Landing Gear</div><div class="value" id="gear">Unknown</div></div>
+    </div>
+
+    <script>
+        const socket = io('http://localhost:3000');
+        socket.on('connect', () => document.getElementById('status').innerText = "System Connected");
+        
+        socket.on('telemetry_update', (payload) => {
+            const { command, data } = payload;
+
+            // Conversion Logic
+            if (command === "aircraft/0/indicated_airspeed") {
+                document.getElementById('airspeed').innerText = Math.round(data * 1.943844);
+            }
+            if (command === "aircraft/0/groundspeed") {
+                document.getElementById('groundspeed').innerText = Math.round(data * 1.943844);
+            }
+            if (command === "aircraft/0/vertical_speed") {
+                document.getElementById('vspeed').innerText = Math.round(data * 196.8504);
+            }
+            if (command === "aircraft/0/altitude_msl") {
+                document.getElementById('altitude').innerText = Math.round(data);
+            }
+            if (command === "aircraft/0/systems/landing_gear/state") {
+                const states = ["Down", "Moving", "Up"];
+                document.getElementById('gear').innerText = states[data] || "Unknown";
+            }
+        });
+    </script>
+</body>
+</html>
