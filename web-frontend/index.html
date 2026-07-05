@@ -3,741 +3,451 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Co-Pilot Flight Deck Core</title>
+    <title>Co-Pilot Flight Deck</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Plus+Jakarta+Sans:wght@400;600;800&display=swap" rel="stylesheet">
     <style>
-        body {
-            font-family: 'Plus Jakarta Sans', sans-serif;
-            background: radial-gradient(circle at 50% 110%, #151a24 0%, #0d1017 100%);
-            color: #e2e8f0;
-        }
-        .mono-font {
-            font-family: 'JetBrains Mono', monospace;
-        }
-        .glow-green {
-            box-shadow: 0 0 12px rgba(34, 197, 94, 0.4);
-        }
-        .glow-amber {
-            box-shadow: 0 0 12px rgba(245, 158, 11, 0.4);
-        }
-        .glow-red {
-            box-shadow: 0 0 15px rgba(239, 68, 68, 0.6);
-        }
-        .terminal-scroll::-webkit-scrollbar {
-            width: 6px;
-        }
-        .terminal-scroll::-webkit-scrollbar-thumb {
-            background-color: #334155;
-            border-radius: 3px;
-        }
+        body { background-color: #0f172a; color: #f8fafc; font-family: 'Inter', sans-serif; cursor: pointer; }
+        .metric-card { background-color: #1e293b; border: 1px solid #334155; border-radius: 0.5rem; padding: 1rem; }
+        .metric-label { font-size: 0.75rem; text-transform: uppercase; color: #94a3b8; font-weight: 600; margin-bottom: 0.25rem; }
+        .metric-value { font-size: 1.25rem; font-weight: 700; font-family: monospace; }
+        #log-container { max-height: 250px; overflow-y: auto; }
+        #audio-unlock-banner { background-color: #f59e0b; color: #fff; text-align: center; padding: 0.5rem; font-weight: bold; }
     </style>
 </head>
-<body class="min-h-screen p-4 md:p-8 flex flex-col justify-between">
+<body class="p-6" id="app-body">
+    <div id="audio-unlock-banner">Telemetry connects automatically. Click anywhere on the background to unlock Voice/Audio features.</div>
 
-    <header class="w-full max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-800 pb-6 gap-4">
-        <div>
-            <div class="flex items-center gap-3">
-                <span class="w-3 h-3 rounded-full bg-emerald-500 animate-pulse glow-green"></span>
-                <h1 class="text-2xl font-extrabold tracking-tight text-white">Co-Pilot Core</h1>
-            </div>
-            <p class="text-sm text-slate-400 mt-1">Automatic flight systems parsing & smart audio transceiver.</p>
-        </div>
-        <div class="flex items-center gap-4">
-            <div class="bg-slate-900/80 border border-slate-800 rounded-xl px-4 py-2.5 flex items-center gap-3">
-                <div class="text-right">
-                    <span class="text-xs text-slate-400 block font-medium uppercase tracking-wider">Device Connection</span>
-                    <span id="state-label" class="text-sm font-bold text-slate-200">Waiting for Auto-Discovery...</span>
-                </div>
-            </div>
-            <button onclick="testSystem()" class="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition duration-200 shadow-lg shadow-indigo-900/40">
-                MIC TEST
-            </button>
-        </div>
-    </header>
-
-    <main class="w-full max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6 my-8 flex-grow">
-        
-        <!-- Live Cockpit Status Panel -->
-        <div class="bg-slate-900/50 backdrop-blur-md border border-slate-800/80 rounded-2xl p-6 flex flex-col justify-between shadow-xl">
+    <div class="max-w-6xl mx-auto mt-4">
+        <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6 border-b border-slate-700 pb-4">
             <div>
-                <h2 class="text-lg font-bold text-white mb-4">Live Flight Instruments</h2>
-                <div class="grid grid-cols-2 gap-4">
-                    <div class="bg-slate-950/40 border border-slate-800 p-4 rounded-xl">
-                        <span class="text-xs text-slate-500 block">Indicated Airspeed</span>
-                        <div class="flex items-baseline gap-1 mt-1">
-                            <span id="airspeed" class="text-2xl font-black text-white mono-font">0</span>
-                            <span class="text-xs text-slate-400">KT</span>
-                        </div>
-                    </div>
-                    <div class="bg-slate-950/40 border border-slate-800 p-4 rounded-xl">
-                        <span class="text-xs text-slate-500 block">Ground Speed</span>
-                        <div class="flex items-baseline gap-1 mt-1">
-                            <span id="groundspeed" class="text-2xl font-black text-white mono-font">0</span>
-                            <span class="text-xs text-slate-400">KT</span>
-                        </div>
-                    </div>
-                    <div class="bg-slate-950/40 border border-slate-800 p-4 rounded-xl">
-                        <span class="text-xs text-slate-500 block">Vertical Speed</span>
-                        <div class="flex items-baseline gap-1 mt-1">
-                            <span id="vertical-speed" class="text-2xl font-black text-white mono-font">0</span>
-                            <span class="text-xs text-slate-400">FPM</span>
-                        </div>
-                    </div>
-                    <div class="bg-slate-950/40 border border-slate-800 p-4 rounded-xl">
-                        <span class="text-xs text-slate-500 block">Altitude MSL</span>
-                        <div class="flex items-baseline gap-1 mt-1">
-                            <span id="altitude-msl" class="text-2xl font-black text-white mono-font">0</span>
-                            <span class="text-xs text-slate-400">FT</span>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="mt-4 bg-slate-950/40 border border-slate-800 p-4 rounded-xl">
-                    <div class="flex justify-between items-center text-xs">
-                        <span class="text-slate-500">Aircraft ID:</span>
-                        <span id="aircraft-id-display" class="font-bold text-indigo-400 uppercase tracking-widest">DETECTING...</span>
-                    </div>
-                    <div class="flex justify-between items-center text-xs mt-2">
-                        <span class="text-slate-500">Total Weight:</span>
-                        <span id="aircraft-weight-display" class="font-bold text-slate-300 mono-font">0 KG</span>
-                    </div>
-                    <div class="flex justify-between items-center text-xs mt-2">
-                        <span class="text-slate-500">Nearest Station:</span>
-                        <span id="nearest-airport-display" class="font-bold text-emerald-400 mono-font">----</span>
-                    </div>
+                <h1 class="text-2xl font-bold tracking-tight text-emerald-400">Infinite Co-Pilot System</h1>
+                <div class="text-xs text-slate-400 flex items-center gap-2 mt-1">
+                    <span>Status:</span>
+                    <span id="conn-status" class="font-bold text-amber-500">AWAITING AUTO-DISCOVERY...</span>
                 </div>
             </div>
-
-            <div class="mt-6 border-t border-slate-800/60 pt-6">
-                <span class="text-xs text-slate-400 block mb-2 uppercase tracking-wider font-semibold">Calculated Takeoff Speeds</span>
-                <div class="grid grid-cols-3 gap-2 text-center">
-                    <div class="bg-slate-950/50 border border-slate-800/80 p-2.5 rounded-xl">
-                        <span class="text-[10px] text-slate-500 block">V1</span>
-                        <span id="calculated-v1" class="text-base font-black text-white mono-font">--</span>
-                    </div>
-                    <div class="bg-slate-950/50 border border-slate-800/80 p-2.5 rounded-xl">
-                        <span class="text-[10px] text-slate-500 block">VR</span>
-                        <span id="calculated-vr" class="text-base font-black text-white mono-font">--</span>
-                    </div>
-                    <div class="bg-slate-950/50 border border-slate-800/80 p-2.5 rounded-xl">
-                        <span class="text-[10px] text-slate-500 block">V2</span>
-                        <span id="calculated-v2" class="text-base font-black text-white mono-font">--</span>
-                    </div>
-                </div>
+            
+            <!-- Manual IP Connection Bar -->
+            <div class="flex items-center gap-2 bg-slate-800 p-2 rounded-lg border border-slate-700 text-sm">
+                <span class="text-xs text-slate-400">Manual IP:</span>
+                <input type="text" id="manual-ip-input" placeholder="e.g. 192.168.1.5" class="bg-slate-900 border border-slate-700 text-slate-200 px-2 py-1 rounded w-36 outline-none focus:border-emerald-500 transition font-mono text-xs">
+                <button id="manual-connect-btn" class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-3 py-1 rounded text-xs transition active:scale-95">Connect</button>
             </div>
+            
+            <div id="audio-status" class="text-slate-400 font-bold bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700 text-sm">AUDIO LOCKED</div>
         </div>
 
-        <div class="bg-slate-900/50 backdrop-blur-md border border-slate-800/80 rounded-2xl p-6 shadow-xl flex flex-col justify-between">
-            <div>
-                <h2 class="text-lg font-bold text-white mb-4">Cockpit Switch Panel</h2>
-                <div class="grid grid-cols-2 gap-3 text-xs">
-                    <div class="flex items-center justify-between bg-slate-950/20 border border-slate-800 p-3 rounded-xl">
-                        <span>Main Battery</span>
-                        <span id="sw-battery" class="w-2.5 h-2.5 rounded-full bg-slate-700"></span>
-                    </div>
-                    <div class="flex items-center justify-between bg-slate-950/20 border border-slate-800 p-3 rounded-xl">
-                        <span>APU Power</span>
-                        <span id="sw-apu" class="w-2.5 h-2.5 rounded-full bg-slate-700"></span>
-                    </div>
-                    <div class="flex items-center justify-between bg-slate-950/20 border border-slate-800 p-3 rounded-xl">
-                        <span>Parking Brake</span>
-                        <span id="sw-brake" class="w-2.5 h-2.5 rounded-full bg-slate-700"></span>
-                    </div>
-                    <div class="flex items-center justify-between bg-slate-950/20 border border-slate-800 p-3 rounded-xl">
-                        <span>Pushback State</span>
-                        <span id="sw-push" class="w-2.5 h-2.5 rounded-full bg-slate-700"></span>
-                    </div>
-                    <div class="flex items-center justify-between bg-slate-950/20 border border-slate-800 p-3 rounded-xl">
-                        <span>Seatbelt Sign</span>
-                        <span id="sw-seatbelts" class="w-2.5 h-2.5 rounded-full bg-slate-700"></span>
-                    </div>
-                    <div class="flex items-center justify-between bg-slate-950/20 border border-slate-800 p-3 rounded-xl">
-                        <span>No Smoking</span>
-                        <span id="sw-nosmoking" class="w-2.5 h-2.5 rounded-full bg-slate-700"></span>
-                    </div>
-                </div>
+        <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-6">
+            <!-- Flight Data -->
+            <div class="metric-card"><div class="metric-label">Aircraft</div><div id="ui-name" class="metric-value text-blue-400">---</div></div>
+            <div class="metric-card"><div class="metric-label">Weight (KG)</div><div id="ui-weight" class="metric-value">0</div></div>
+            <div class="metric-card"><div class="metric-label">IAS (KTS)</div><div id="ui-ias" class="metric-value">0</div></div>
+            <div class="metric-card"><div class="metric-label">GS (KTS)</div><div id="ui-gs" class="metric-value">0</div></div>
+            <div class="metric-card"><div class="metric-label">VS (FPM)</div><div id="ui-vs" class="metric-value">0</div></div>
+            <div class="metric-card"><div class="metric-label">MSL (FT)</div><div id="ui-msl" class="metric-value">0</div></div>
+            
+            <!-- Core Systems -->
+            <div class="metric-card"><div class="metric-label">Gear</div><div id="ui-gear" class="metric-value">---</div></div>
+            <div class="metric-card"><div class="metric-label">Flaps</div><div id="ui-flaps" class="metric-value">---</div></div>
+            <div class="metric-card"><div class="metric-label">Spoilers</div><div id="ui-spoilers" class="metric-value">---</div></div>
+            <div class="metric-card"><div class="metric-label">Brakes</div><div id="ui-brakes" class="metric-value">---</div></div>
+            <div class="metric-card"><div class="metric-label">Autopilot</div><div id="ui-autopilot" class="metric-value">---</div></div>
+            <div class="metric-card"><div class="metric-label">Throttle</div><div id="ui-throttle" class="metric-value">0%</div></div>
 
-                <div class="grid grid-cols-4 gap-2 mt-4 text-center">
-                    <div class="bg-slate-950/30 border border-slate-800 p-2 rounded-lg">
-                        <span class="text-[10px] text-slate-400 block mb-1">NAV</span>
-                        <div id="ind-nav" class="w-2 h-2 rounded-full bg-slate-700 mx-auto"></div>
-                    </div>
-                    <div class="bg-slate-950/30 border border-slate-800 p-2 rounded-lg">
-                        <span class="text-[10px] text-slate-400 block mb-1">BEACON</span>
-                        <div id="ind-beacon" class="w-2 h-2 rounded-full bg-slate-700 mx-auto"></div>
-                    </div>
-                    <div class="bg-slate-950/30 border border-slate-800 p-2 rounded-lg">
-                        <span class="text-[10px] text-slate-400 block mb-1">STROBE</span>
-                        <div id="ind-strobe" class="w-2 h-2 rounded-full bg-slate-700 mx-auto"></div>
-                    </div>
-                    <div class="bg-slate-950/30 border border-slate-800 p-2 rounded-lg">
-                        <span class="text-[10px] text-slate-400 block mb-1">LAND</span>
-                        <div id="ind-land" class="w-2 h-2 rounded-full bg-slate-700 mx-auto"></div>
-                    </div>
-                </div>
-            </div>
+            <!-- Power & Ground -->
+            <div class="metric-card"><div class="metric-label">Battery</div><div id="ui-battery" class="metric-value">---</div></div>
+            <div class="metric-card"><div class="metric-label">APU</div><div id="ui-apu" class="metric-value">---</div></div>
+            <div class="metric-card"><div class="metric-label">Pushback</div><div id="ui-pushback" class="metric-value">---</div></div>
+            <div class="metric-card"><div class="metric-label">Engine 1</div><div id="ui-engines" class="metric-value">---</div></div>
+            <div class="metric-card"><div class="metric-label">Seatbelt</div><div id="ui-seatbelt" class="metric-value">---</div></div>
+            <div class="metric-card"><div class="metric-label">No Smoking</div><div id="ui-smoking" class="metric-value">---</div></div>
 
-            <!-- Caution Warning Box -->
-            <div id="warning-box" class="mt-4 border border-red-900/60 bg-red-950/20 rounded-xl p-4 hidden flex items-center gap-3 animate-pulse">
-                <div class="w-3.5 h-3.5 bg-red-600 rounded-full glow-red"></div>
-                <div>
-                    <span class="text-xs font-black text-red-500 block tracking-widest uppercase">MASTER CAUTION</span>
-                    <span class="text-xs text-red-400">PARKING BRAKES STILL SET WITH ENGINE THRUST ACTIVE!</span>
-                </div>
-            </div>
+            <!-- Environment & Lights -->
+            <div class="metric-card"><div class="metric-label">Beacon</div><div id="ui-beacon" class="metric-value">---</div></div>
+            <div class="metric-card"><div class="metric-label">Strobe</div><div id="ui-strobe" class="metric-value">---</div></div>
+            <div class="metric-card"><div class="metric-label">Nav Lights</div><div id="ui-nav" class="metric-value">---</div></div>
+            <div class="metric-card"><div class="metric-label">Landing Lts</div><div id="ui-landing" class="metric-value">---</div></div>
+            <div class="metric-card"><div class="metric-label">Local Time</div><div id="ui-time" class="metric-value">---</div></div>
+            <div class="metric-card"><div class="metric-label">Nearest Apt</div><div id="ui-airport" class="metric-value">---</div></div>
         </div>
 
-        <div class="bg-slate-900/50 backdrop-blur-md border border-slate-800/80 rounded-2xl p-6 shadow-xl flex flex-col justify-between">
-            <div class="flex-grow flex flex-col h-full justify-between">
-                <div class="flex justify-between items-center mb-4">
-                    <h2 class="text-lg font-bold text-white">VHF Transceiver Log</h2>
-                    <span class="text-[10px] px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300 uppercase tracking-widest font-bold">COM1 Active</span>
-                </div>
-                
-                <div id="log-console" class="bg-slate-950/80 border border-slate-800/80 rounded-xl p-4 h-64 overflow-y-auto terminal-scroll text-xs mono-font flex flex-col gap-2">
-                    <div class="text-slate-500">System Ready. Establishing direct VHF link...</div>
-                </div>
+        <div class="bg-slate-800 border border-slate-700 rounded-lg p-4 shadow-inner">
+            <h2 class="text-sm uppercase text-slate-400 font-bold mb-3 border-b border-slate-700 pb-2">Co-Pilot Speech Log</h2>
+            <div id="log-container" class="font-mono text-sm text-slate-300 space-y-1">
+                <div class="text-slate-500">System initialized. Awaiting telemetry...</div>
             </div>
         </div>
-    </main>
-
-    <!-- UI Footer -->
-    <footer class="w-full max-w-7xl mx-auto border-t border-slate-800/60 pt-4 flex flex-col md:flex-row justify-between items-center text-xs text-slate-500 gap-2">
-        <span>© 2026 Co-Pilot Automated Flight Operations.</span>
-        <span>Autopilot Auto-Tracker Active.</span>
-    </footer>
+    </div>
 
     <script>
         const socket = io('http://localhost:3000');
-        
-        // --- LIVE RADIO EFFECT AUDIO ENGINE ---
         let audioCtx = null;
-        let sirenOsc1 = null;
-        let sirenOsc2 = null;
-        let sirenGain = null;
-        let isSirenPlaying = false;
-
-        function initAudioContext() {
-            if (!audioCtx) {
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            }
-        }
-
-        // Play synthetic voice with simulated VHF transceiver static filter
-        function playCallout(text) {
-            initAudioContext();
-            
-            // Log to visual terminal
-            const consoleBox = document.getElementById("log-console");
-            const entry = document.createElement("div");
-            entry.innerHTML = `<span class="text-indigo-400">[VHF COM1]</span> <span class="text-slate-100">${text.toUpperCase()}</span>`;
-            consoleBox.appendChild(entry);
-            consoleBox.scrollTop = consoleBox.scrollHeight;
-
-            if (!('speechSynthesis' in window)) return;
-
-            // Generate temporary white noise for Radio "click" burst
-            playRadioClick();
-
-            setTimeout(() => {
-                const utterance = new SpeechSynthesisUtterance(text);
-                
-                // CRITICAL CHORE: Set TTS speed to 1.5x as requested by user
-                utterance.rate = 1.5; 
-                utterance.pitch = 0.95; // Slightly lower pitch for cockpit authority
-
-                // Use the default English voice
-                const voices = window.speechSynthesis.getVoices();
-                const engVoice = voices.find(v => v.lang.includes('en-US')) || voices[0];
-                if (engVoice) utterance.voice = engVoice;
-
-                window.speechSynthesis.speak(utterance);
-            }, 150);
-        }
-
-        // Simulates radio mic key/unkey white noise bursts
-        function playRadioClick() {
-            if (!audioCtx) return;
-            const bufferSize = audioCtx.sampleRate * 0.08;
-            const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
-            const data = buffer.getChannelData(0);
-            for (let i = 0; i < bufferSize; i++) {
-                data[i] = Math.random() * 2 - 1;
-            }
-
-            const noise = audioCtx.createBufferSource();
-            noise.buffer = buffer;
-
-            // Transceiver filter: High Pass + Band Pass to sound like a speaker horn
-            const filter = audioCtx.createBiquadFilter();
-            filter.type = "bandpass";
-            filter.frequency.value = 1000;
-            filter.Q.value = 2.0;
-
-            const gain = audioCtx.createGain();
-            gain.gain.value = 0.08;
-
-            noise.connect(filter);
-            filter.connect(gain);
-            gain.connect(audioCtx.destination);
-            noise.start();
-        }
-
-        // Cockpit Master Caution Warning alert sound loop (747 style warning)
-        function startWarningSiren() {
-            initAudioContext();
-            if (isSirenPlaying) return;
-            isSirenPlaying = true;
-
-            sirenGain = audioCtx.createGain();
-            sirenGain.gain.setValueAtTime(0.2, audioCtx.currentTime);
-
-            // Alternating cockpit warning sound oscillators (Dual pitch siren)
-            sirenOsc1 = audioCtx.createOscillator();
-            sirenOsc1.type = "sine";
-            sirenOsc1.frequency.setValueAtTime(800, audioCtx.currentTime);
-
-            sirenOsc2 = audioCtx.createOscillator();
-            sirenOsc2.type = "sine";
-            sirenOsc2.frequency.setValueAtTime(400, audioCtx.currentTime);
-
-            // Connect everything
-            sirenOsc1.connect(sirenGain);
-            sirenOsc2.connect(sirenGain);
-            sirenGain.connect(audioCtx.destination);
-
-            sirenOsc1.start();
-            sirenOsc2.start();
-
-            // Alternate frequencies to make an authentic warning alarm sound
-            let high = true;
-            this.sirenInterval = setInterval(() => {
-                if (!isSirenPlaying) return;
-                const time = audioCtx.currentTime;
-                if (high) {
-                    sirenOsc1.frequency.setValueAtTime(850, time);
-                    sirenOsc2.frequency.setValueAtTime(850, time);
-                } else {
-                    sirenOsc1.frequency.setValueAtTime(0, time);
-                    sirenOsc2.frequency.setValueAtTime(0, time);
-                }
-                high = !high;
-            }, 180);
-        }
-
-        function stopWarningSiren() {
-            if (!isSirenPlaying) return;
-            isSirenPlaying = false;
-            clearInterval(this.sirenInterval);
-            try {
-                sirenOsc1.stop();
-                sirenOsc2.stop();
-            } catch(e){}
-        }
-
-        function testSystem() {
-            playCallout("Core sound transceiver active. System check complete.");
-        }
-
-        // --- MASTER STATE MACHINE ENGINE ---
-        let currentAircraftId = "UNKNOWN";
-        let aircraftWeight = 0;
-        let isAircraftOnGround = true;
-        let lastBrakesState = false;
-        let lastBatteryState = null;
-        let lastApuState = null;
-        let lastPushbackState = null;
-        let lastSeatbeltsState = null;
-        let lastNoSmokingState = null;
+        let audioUnlocked = false;
         
-        let lastLights = { nav: null, beacon: null, strobe: null, land: null };
-        let lastFlapsIndex = -1;
-        let lastSpoilersIndex = -1;
-        let lastAutopilotState = null;
+        window.speechQueue = []; 
 
-        // Session Callout locks (fires once per session as requested)
-        let sessionFlags = {
-            safetyBriefing: false,
-            prepareTakeoff: false,
-            vSpeedsAnnounced: false,
-            climb5k: false,
-            climb15k: false,
-            climb24k: false,
-            climb10kLights: false,
-            cabinMealCruise: false,
-            descentBriefing: false,
-            welcomeArrival: false
+        const state = { 
+            name: '', livery: '', weight: 0, 
+            ias: 0, gs: 0, vs: 0, msl: 0, throttle: 0, onGround: true,
+            gear: -1, flaps: -1, brakes: -1, spoilers: -1, autopilot: -1,
+            battery: -1, apu: -1, pushback: -1, seatbelt: -1, smoking: -1,
+            beacon: -1, strobe: -1, nav: -1, landing: -1,
+            engines: {}, // Holds state of all 4 engines
+            time: '', airport: ''
+        };
+        
+        const flags = { 
+            eightyKnots: false, vSpeed: false, positiveRate: false, welcome: false,
+            alt5k: false, alt10k: false, alt15k: false, alt24k: false, sirenPlaying: false
         };
 
-        // Simulated local variables for warning trigger
-        let enginesOn = false;
-        let engine0Throttle = 0;
-        let engine1Throttle = 0;
+        const airportCities = {
+            "KJFK": "New York", "KLAX": "Los Angeles", "EGLL": "London", "LFPG": "Paris",
+            "EDDF": "Frankfurt", "RJTT": "Tokyo", "OMDB": "Dubai", "VHHH": "Hong Kong",
+            "WSSS": "Singapore", "YSSY": "Sydney", "KSFO": "San Francisco", "KORD": "Chicago"
+        };
 
-        // Smart dynamic V-Speeds store
-        let currentV1 = 0;
-        let currentVr = 0;
-        let currentV2 = 0;
-
-        // Weather & Airport tracking
-        let nearestStation = "----";
-        let outsideTempCelsius = 15;
-        let localTimeRaw = "00:00";
-
-        // V-Speed weights logic map
-        function calculateVSpeeds(aircraftId, weightKG) {
-            const id = aircraftId.toUpperCase();
-            let v1 = 135, vr = 140, v2 = 145; // default fallback
-
-            if (id.includes("777") || id.includes("787") || id.includes("747") || id.includes("350") || id.includes("380")) {
-                // HEAVY AIRCRAFT
-                let ratio = Math.max(0, Math.min(1, (weightKG - 140000) / (340000 - 140000)));
-                v1 = Math.round(128 + ratio * 22);
-                vr = Math.round(134 + ratio * 22);
-                v2 = Math.round(142 + ratio * 22);
-            } else if (id.includes("737") || id.includes("320") || id.includes("321") || id.includes("319")) {
-                // MEDIUM AIRCRAFT
-                let ratio = Math.max(0, Math.min(1, (weightKG - 40000) / (80000 - 40000)));
-                v1 = Math.round(120 + ratio * 20);
-                vr = Math.round(125 + ratio * 20);
-                v2 = Math.round(132 + ratio * 20);
-            } else {
-                // LIGHTS & PROPS
-                let ratio = Math.max(0, Math.min(1, weightKG / 6000));
-                v1 = Math.round(62 + ratio * 15);
-                vr = Math.round(68 + ratio * 15);
-                v2 = Math.round(74 + ratio * 15);
-            }
-
-            currentV1 = v1;
-            currentVr = vr;
-            currentV2 = v2;
-
-            document.getElementById('calculated-v1').innerText = v1 + " KT";
-            document.getElementById('calculated-vr').innerText = vr + " KT";
-            document.getElementById('calculated-v2').innerText = v2 + " KT";
-        }
-
-        // Determine correct greeting for arrival message
-        function getGreeting(timeStr) {
-            try {
-                const parts = timeStr.split(':');
-                const hours = parseInt(parts[0]);
-                if (hours >= 4 && hours < 12) return "morning";
-                if (hours >= 12 && hours < 17) return "afternoon";
-                return "evening";
-            } catch(e) {
-                return "day";
-            }
-        }
-
-        socket.on('telemetry_update', (payload) => {
-            const { command, data } = payload;
-
-            // Parse metadata
-            if (command === "aircraft/0/aircraft_id") {
-                currentAircraftId = data;
-                document.getElementById('aircraft-id-display').innerText = data.replace("aircraft_", "").toUpperCase();
-                calculateVSpeeds(currentAircraftId, aircraftWeight);
-            }
-
-            if (command === "aircraft/0/systems/load/total_weight") {
-                aircraftWeight = Math.round(data);
-                document.getElementById('aircraft-weight-display').innerText = aircraftWeight.toLocaleString() + " KG";
-                calculateVSpeeds(currentAircraftId, aircraftWeight);
-            }
-
-            // Real local time
-            if (command === "simulator/time_local") {
-                localTimeRaw = data; 
-            }
-
-            // Ground checking
-            if (command === "aircraft/0/is_on_ground") {
-                isAircraftOnGround = (data === true || data === 1);
-            }
-
-            // Dynamic airport checking
-            if (command === "infiniteflight/nearest_airport") {
-                nearestStation = data || "----";
-                document.getElementById('nearest-airport-display').innerText = nearestStation;
-            }
-
-            // Temperature mapping
-            if (command === "environment/temperature") {
-                outsideTempCelsius = Math.round(data);
-            }
-
-            // Basic instruments parsing
-            if (command === "aircraft/0/indicated_airspeed") {
-                const ias = Math.round(data);
-                document.getElementById('airspeed').innerText = ias;
-
-                // 80 Knots Callout
-                if (ias >= 80 && ias < 85 && !isAircraftOnGround === false) {
-                    if (!sessionFlags.prepareTakeoff) { 
-                        // Only trigger roll events once during rollout
-                        sessionFlags.prepareTakeoff = true;
-                        playCallout("Eighty Knots");
-                    }
-                }
+        document.getElementById('app-body').addEventListener('click', () => {
+            if (!audioUnlocked) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const silent = new SpeechSynthesisUtterance('');
+                silent.volume = 0;
+                window.speechSynthesis.speak(silent);
                 
-                // Rotation speeds parsing
-                if (currentVr > 0 && ias >= currentVr && ias < currentVr + 4 && !isAircraftOnGround === false) {
-                    if (!sessionFlags.vSpeedsAnnounced) {
-                        sessionFlags.vSpeedsAnnounced = true;
-                        playCallout("Rotate");
-                    }
-                }
-            }
-
-            if (command === "aircraft/0/groundspeed") {
-                const gs = Math.round(data * 1.94384); // Convert MPS to Knots
-                document.getElementById('groundspeed').innerText = gs;
-
-                // Landing Arrival announcement trigger: ground speed slows to less than 30 knots on ground
-                if (isAircraftOnGround && gs < 30 && gs > 5 && sessionFlags.safetyBriefing) {
-                    if (!sessionFlags.welcomeArrival) {
-                        sessionFlags.welcomeArrival = true;
-                        const greeting = getGreeting(localTimeRaw);
-                        const welcomeAnnouncement = `Ladies and gentlemen, welcome to ${nearestStation}. The local time is ${localTimeRaw}, and the outside temperature is ${outsideTempCelsius} degrees. Please remain seated with your seatbelt securely fastened until the aircraft has come to a complete stop and the seatbelt sign has been switched off. Please take care when opening the overhead lockers, as items may have shifted during the flight. Before leaving the aircraft, please ensure you have all of your personal belongings. On behalf of the entire crew, thank you for flying with us today. We hope you have enjoyed your flight and look forward to welcoming you onboard again soon. Have a wonderful ${greeting}.`;
-                        playCallout(welcomeAnnouncement);
-                    }
-                }
-            }
-
-            if (command === "aircraft/0/vertical_speed") {
-                const vs = Math.round(data * 196.85); // Convert to feet per minute
-                document.getElementById('vertical-speed').innerText = vs;
-            }
-
-            if (command === "aircraft/0/altitude_msl") {
-                // Altitude in IF comes in METERS. Dynamic conversion: meters to feet
-                const altFt = Math.round(data * 3.28084);
-                document.getElementById('altitude-msl').innerText = altFt.toLocaleString();
-
-                // Elevation callouts
-                if (altFt > 5000 && altFt < 5500 && !sessionFlags.climb5k) {
-                    sessionFlags.climb5k = true;
-                    playCallout("Five Thousand Feet");
-                }
-                if (altFt > 15000 && altFt < 15500 && !sessionFlags.climb15k) {
-                    sessionFlags.climb15k = true;
-                    playCallout("Fifteen Thousand Feet");
-                }
-                if (altFt > 24000 && altFt < 24500 && !sessionFlags.climb24k) {
-                    sessionFlags.climb24k = true;
-                    playCallout("Twenty Four Thousand Feet");
-                }
-                if (altFt > 10000 && !sessionFlags.climb10kLights) {
-                    sessionFlags.climb10kLights = true;
-                    playCallout("Passing ten thousand feet. Turn off landing lights.");
-                }
-            }
-
-            // Power/Battery status
-            if (command === "simulator/ui_helpers/systems/electrical/main_battery_button/on") {
-                const isOn = (data === true || data === 1);
-                if (lastBatteryState !== isOn) {
-                    lastBatteryState = isOn;
-                    const badge = document.getElementById('sw-battery');
-                    badge.className = `w-2.5 h-2.5 rounded-full ${isOn ? 'bg-emerald-500 glow-green' : 'bg-slate-700'}`;
-                    playCallout(`Main Battery ${isOn ? "On" : "Off"}`);
-                }
-            }
-
-            // APU Switch
-            if (command === "aircraft/0/systems/apu/apu/state") {
-                if (lastApuState !== data) {
-                    lastApuState = data;
-                    const badge = document.getElementById('sw-apu');
-                    const states = { 0: "Off", 1: "Starting", 2: "Running" };
-                    badge.className = `w-2.5 h-2.5 rounded-full ${data > 0 ? 'bg-emerald-500 glow-green' : 'bg-slate-700'}`;
-                    playCallout(`APU ${states[data] || "Off"}`);
-                }
-            }
-
-            // Parking brake alert & trigger engine checks
-            if (command === "aircraft/0/systems/engines/0/state") {
-                enginesOn = (data === 2);
-            }
-            if (command === "aircraft/0/systems/engines/0/throttle_lever") {
-                engine0Throttle = data;
-                checkBrakesSiren();
-            }
-            if (command === "aircraft/0/systems/engines/1/throttle_lever") {
-                engine1Throttle = data;
-                checkBrakesSiren();
-            }
-
-            if (command === "aircraft/0/systems/parking_brake/state") {
-                const isSet = (data === true || data === 1);
-                if (lastBrakesState !== isSet) {
-                    lastBrakesState = isSet;
-                    const badge = document.getElementById('sw-brake');
-                    badge.className = `w-2.5 h-2.5 rounded-full ${isSet ? 'bg-amber-500 glow-amber' : 'bg-slate-700'}`;
-                    playCallout(`Parking Brake ${isSet ? "Set" : "Released"}`);
-                }
-                checkBrakesSiren();
-            }
-
-            // Pushback Status
-            if (command === "aircraft/0/is_pushback_active") {
-                const isActive = (data === true || data === 1);
-                if (lastPushbackState !== isActive) {
-                    lastPushbackState = isActive;
-                    const badge = document.getElementById('sw-push');
-                    badge.className = `w-2.5 h-2.5 rounded-full ${isActive ? 'bg-emerald-500 glow-green' : 'bg-slate-700'}`;
-                    playCallout(`Pushback ${isActive ? "Started" : "Completed"}`);
-                }
-            }
-
-            // Seatbelt & Safety Briefing state
-            if (command === "aircraft/0/systems/signs/seatbelt") {
-                const isOn = (data === true || data === 1);
-                if (lastSeatbeltsState !== isOn) {
-                    lastSeatbeltsState = isOn;
-                    const badge = document.getElementById('sw-seatbelts');
-                    badge.className = `w-2.5 h-2.5 rounded-full ${isOn ? 'bg-emerald-500 glow-green' : 'bg-slate-700'}`;
-                    
-                    // Safety Briefing: seat belt turned on while aircraft is on the ground
-                    if (isOn && isAircraftOnGround && !sessionFlags.safetyBriefing) {
-                        sessionFlags.safetyBriefing = true;
-                        playCallout("Safety briefing initiated. Cabin crew, please welcome all passengers onboard.");
-                    } else if (!isOn && !isAircraftOnGround && !sessionFlags.cabinMealCruise) {
-                        // Turned off in air -> Cruise briefing
-                        sessionFlags.cabinMealCruise = true;
-                        playCallout("Ladies and gentlemen, you can now unfasten your seatbelt. Cabin crew will be handing out meals soon, in the meantime, enjoy our in flight entertainment.");
-                    }
-                }
-            }
-
-            // No Smoking Sw
-            if (command === "aircraft/0/systems/signs/no_smoking") {
-                const isOn = (data === true || data === 1);
-                if (lastNoSmokingState !== isOn) {
-                    lastNoSmokingState = isOn;
-                    const badge = document.getElementById('sw-nosmoking');
-                    badge.className = `w-2.5 h-2.5 rounded-full ${isOn ? 'bg-emerald-500 glow-green' : 'bg-slate-700'}`;
-                    playCallout(`No Smoking sign toggled`);
-                }
-            }
-
-            // Individual Lights mapping
-            if (command === "aircraft/0/systems/nav_lights_switch") {
-                const state = (data === true || data === 1);
-                if (lastLights.nav !== state) {
-                    lastLights.nav = state;
-                    document.getElementById('ind-nav').className = `w-2 h-2 rounded-full mx-auto ${state ? 'bg-emerald-500 glow-green' : 'bg-slate-700'}`;
-                    playCallout(`Nav Lights ${state ? "On" : "Off"}`);
-                }
-            }
-
-            if (command === "aircraft/0/systems/light_controller/beacon_lights_controller/state") {
-                const state = (data === true || data === 1);
-                if (lastLights.beacon !== state) {
-                    lastLights.beacon = state;
-                    document.getElementById('ind-beacon').className = `w-2 h-2 rounded-full mx-auto ${state ? 'bg-red-500 glow-red' : 'bg-slate-700'}`;
-                    playCallout(`Beacon Lights ${state ? "On" : "Off"}`);
-                }
-            }
-
-            if (command === "aircraft/0/systems/strobe_lights_switch") {
-                const state = (data === true || data === 1);
-                if (lastLights.strobe !== state) {
-                    lastLights.strobe = state;
-                    document.getElementById('ind-strobe').className = `w-2 h-2 rounded-full mx-auto ${state ? 'bg-slate-200 shadow-white' : 'bg-slate-700'}`;
-                    
-                    // Strobe turned on when on ground -> Prepare for takeoff & speeds
-                    if (state && isAircraftOnGround && !sessionFlags.prepareTakeoff) {
-                        playCallout(`Strobe lights on. Cabin crew, prepare for takeoff.`);
-                        setTimeout(() => {
-                            playCallout(`Takeoff performance calculated. Our rotation speed V R is ${currentVr} knots. V 2 is ${currentV2} knots.`);
-                        }, 5000);
-                    } else {
-                        playCallout(`Strobe Lights ${state ? "On" : "Off"}`);
-                    }
-                }
-            }
-
-            if (command === "aircraft/0/systems/landing_lights_switch") {
-                const state = (data === true || data === 1);
-                if (lastLights.land !== state) {
-                    lastLights.land = state;
-                    document.getElementById('ind-land').className = `w-2 h-2 rounded-full mx-auto ${state ? 'bg-slate-100 shadow-white' : 'bg-slate-700'}`;
-                    playCallout(`Landing Lights ${state ? "On" : "Off"}`);
-                }
-            }
-
-            // Spoilers: Fixed logic parsing: 0=OFF, 1=FLIGHT, 2=ARMED as requested
-            if (command === "aircraft/0/systems/spoilers/state") {
-                if (lastSpoilersIndex !== data) {
-                    lastSpoilersIndex = data;
-                    const spoilerMap = { 0: "Spoilers Off", 1: "Spoilers Flight", 2: "Spoilers Armed" };
-                    playCallout(spoilerMap[data] || "Spoilers Retracted");
-                }
-            }
-
-            // Flaps Config based on Aircraft category
-            if (command === "aircraft/0/systems/flaps/state") {
-                if (lastFlapsIndex !== data) {
-                    lastFlapsIndex = data;
-                    const id = currentAircraftId.toUpperCase();
-                    if (id.includes("320") || id.includes("350") || id.includes("380") || id.includes("A3")) {
-                        // Airbus Configuration
-                        const abMap = { 0: "Flaps Zero", 1: "Flaps One", 2: "Flaps Two", 3: "Flaps Three", 4: "Flaps Full" };
-                        playCallout(abMap[data] || `Flaps index ${data}`);
-                    } else {
-                        // Boeing degrees configuration
-                        const boeMap = { 0: "Flaps Up", 1: "Flaps One", 2: "Flaps Five", 3: "Flaps Fifteen", 4: "Flaps Thirty" };
-                        playCallout(boeMap[data] || `Flaps ${data}`);
-                    }
-                }
-            }
-
-            // Landing Gear: UP/DOWN toggle logic
-            if (command === "aircraft/0/systems/landing_gear/state") {
-                const badge = document.getElementById('gear-badge');
-                // Corrected dynamic inversion based on your telemetry checks
-                const isDown = (data === 0); 
-                badge.innerText = isDown ? "DOWN" : "UP";
-                badge.className = `px-2.5 py-1 text-[10px] font-bold rounded-lg ${isDown ? 'bg-emerald-950 text-emerald-400' : 'bg-slate-800 text-slate-400'}`;
-            }
-
-            // Autopilot Status
-            if (command === "aircraft/0/systems/autopilot/on") {
-                const isOn = (data === true || data === 1);
-                if (lastAutopilotState !== isOn) {
-                    lastAutopilotState = isOn;
-                    const badge = document.getElementById('ap-badge');
-                    badge.innerText = isOn ? "ON" : "OFF";
-                    badge.className = `px-2.5 py-1 text-[10px] font-bold rounded-lg ${isOn ? 'bg-indigo-950 text-indigo-400' : 'bg-slate-800 text-slate-400'}`;
-                    playCallout(`Autopilot ${isOn ? "Engaged" : "Disengaged"}`);
-                }
+                audioUnlocked = true;
+                document.getElementById('audio-unlock-banner').style.display = 'none';
+                document.getElementById('audio-status').innerText = 'AUDIO ACTIVE';
+                document.getElementById('audio-status').className = 'text-emerald-400 font-bold bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700 text-sm';
             }
         });
 
-        // Safe checklist sirens
-        function checkBrakesSiren() {
-            const hasThrottle = (engine0Throttle > 0.05 || engine1Throttle > 0.05);
-            if (hasThrottle && lastBrakesState && enginesOn) {
-                document.getElementById('warning-box').classList.remove('hidden');
-                startWarningSiren();
-            } else {
-                document.getElementById('warning-box').classList.add('hidden');
-                stopWarningSiren();
-            }
+        const updateUI = (id, text) => {
+            const el = document.getElementById(id);
+            if(el) el.innerText = text;
+        };
+
+        const logSpeech = (text) => {
+            const container = document.getElementById('log-container');
+            const time = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.innerHTML = `<span class="text-emerald-500">[${time}]</span> <span class="text-white">🎙️ "${text}"</span>`;
+            container.appendChild(logEntry);
+            container.scrollTop = container.scrollHeight;
         }
 
-        socket.on('connect', () => {
-            document.getElementById('state-label').innerText = "Connected (Auto-Discovered)";
-            playCallout("VHF connection established. Flight data core is online.");
+        const speak = (text) => {
+            logSpeech(text);
+            if (!audioUnlocked) return;
+            
+            setTimeout(() => {
+                const u = new SpeechSynthesisUtterance(text);
+                u.rate = 1.25;
+                window.speechQueue.push(u);
+                u.onend = () => {
+                    const index = window.speechQueue.indexOf(u);
+                    if (index > -1) window.speechQueue.splice(index, 1);
+                };
+                window.speechSynthesis.speak(u);
+            }, 150);
+        };
+
+        const playSiren = () => {
+            if(!audioCtx || flags.sirenPlaying) return;
+            flags.sirenPlaying = true;
+            
+            const osc = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            osc.type = 'square';
+            osc.frequency.setValueAtTime(440, audioCtx.currentTime);
+            osc.frequency.setValueAtTime(880, audioCtx.currentTime + 0.25);
+            gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            osc.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            osc.start(); 
+            osc.stop(audioCtx.currentTime + 0.5);
+
+            setTimeout(() => { flags.sirenPlaying = false; }, 500);
+        };
+
+        socket.on('connection_status', (data) => {
+            const connStatusEl = document.getElementById('conn-status');
+            if (!connStatusEl) return;
+            
+            if (data.status === 'connected') {
+                connStatusEl.innerText = `CONNECTED TO ${data.ip}`;
+                connStatusEl.className = "font-bold text-emerald-400";
+            } else if (data.status === 'connecting') {
+                connStatusEl.innerText = `CONNECTING TO ${data.ip}...`;
+                connStatusEl.className = "font-bold text-amber-400";
+            } else {
+                connStatusEl.innerText = "AWAITING AUTO-DISCOVERY...";
+                connStatusEl.className = "font-bold text-amber-500";
+            }
         });
 
-        socket.on('disconnect', () => {
-            document.getElementById('state-label').innerText = "VHF Link Disconnected";
+        document.getElementById('manual-connect-btn').addEventListener('click', () => {
+            const ip = document.getElementById('manual-ip-input').value.trim();
+            if (ip) {
+                logSpeech(`Manual override requested for IP: ${ip}`);
+                socket.emit('force_connect', { ip: ip });
+            } else {
+                logSpeech("Please enter a valid IP address.");
+            }
+        });
+
+        const calculateVSpeeds = (aircraftName, weightKG) => {
+            const weightTonnes = weightKG / 1000;
+            const name = aircraftName.toUpperCase();
+            let vr = 140, v1 = 135, v2 = 150;
+
+            if (name.includes("A320")) { vr = Math.round(134 + ((weightTonnes - 62)/2)); v1 = vr - 5; v2 = vr + 12; }
+            else if (name.includes("777-3") || name.includes("77W")) { vr = Math.round(158 + ((weightTonnes - 250)/2)); v1 = vr - 5; v2 = vr + 13; }
+            else if (name.includes("777-2") || name.includes("772") || name.includes("77L")) { vr = Math.round(151 + ((weightTonnes - 220)/2)); v1 = vr - 5; v2 = vr + 13; }
+            else if (name.includes("737-8")) { vr = Math.round(138 + ((weightTonnes - 65)/2)); v1 = vr - 4; v2 = vr + 11; }
+            else if (name.includes("A350") || name.includes("A359")) { vr = Math.round(154 + ((weightTonnes - 220)/2)); v1 = vr - 5; v2 = vr + 12; }
+            else if (name.includes("A330-3") || name.includes("A333")) { vr = Math.round(150 + ((weightTonnes - 180)/2)); v1 = vr - 5; v2 = vr + 12; }
+            else { vr = Math.round(140 + ((weightTonnes - 60)/2)); v1 = vr - 5; v2 = vr + 12; }
+            
+            return { v1, vr, v2 };
+        };
+
+        socket.on('telemetry_update', (p) => {
+            const { command, data } = p;
+
+            if(command === "aircraft/0/name") { state.name = data; updateUI('ui-name', `${state.name} (${state.livery})`); }
+            if(command === "aircraft/0/livery") { state.livery = data; updateUI('ui-name', `${state.name} (${state.livery})`); }
+            if(command === "aircraft/0/systems/load/total_weight") { state.weight = data; updateUI('ui-weight', Math.round(data)); }
+            if(command === "aircraft/0/is_on_ground") { state.onGround = data; } 
+            if(command === "aircraft/0/systems/engines/0/throttle_lever") { state.throttle = data; updateUI('ui-throttle', Math.round(data * 100) + '%'); }
+
+            if(command === "aircraft/0/indicated_airspeed") {
+                const kts = data * 1.94384;
+                updateUI('ui-ias', Math.round(kts));
+                
+                if (state.onGround && kts >= 80 && state.ias < 80 && !flags.eightyKnots) {
+                    speak("80 knots");
+                    flags.eightyKnots = true;
+                }
+                if (state.onGround && kts >= 40 && !flags.vSpeed && state.weight > 0) {
+                    const speeds = calculateVSpeeds(state.name, state.weight);
+                    flags.vSpeed = true; 
+                    speak(`V1 ${speeds.v1}, Rotate, V2 ${speeds.v2}`);
+                }
+                state.ias = kts;
+            }
+
+            if(command === "aircraft/0/groundspeed") {
+                state.gs = data * 1.94384;
+                updateUI('ui-gs', Math.round(state.gs));
+                
+                if (state.onGround && state.gs < 30 && flags.vSpeed === true && !flags.welcome) {
+                    const cityName = airportCities[state.airport] || state.airport || "your destination";
+                    speak(`Ladies and gentlemen, welcome to ${cityName}. The local time is ${state.time}. Please remain seated with your seatbelt fastened until the aircraft has come to a complete stop.`);
+                    flags.welcome = true;
+                }
+            }
+
+            if(command === "aircraft/0/vertical_speed") {
+                // Convert raw m/s to feet per minute (FPM)
+                const fpm = data * 196.85;
+                updateUI('ui-vs', Math.round(fpm));
+                if (!state.onGround && fpm > 400 && !flags.positiveRate) {
+                    speak("Positive rate, Gear up");
+                    flags.positiveRate = true;
+                }
+                state.vs = fpm;
+            }
+
+            if(command === "aircraft/0/altitude_msl") {
+                const alt = data;
+                updateUI('ui-msl', Math.round(alt));
+                
+                if (state.msl < 5000 && alt >= 5000 && !flags.alt5k) { speak("Passing 5,000"); flags.alt5k = true; }
+                if (state.msl > 5000 && alt <= 5000 && flags.alt5k) { speak("Passing 5,000"); flags.alt5k = false; }
+                
+                if (state.msl < 10000 && alt >= 10000 && !flags.alt10k) { speak("Passing 10,000, Landing lights off"); flags.alt10k = true; }
+                if (state.msl > 10000 && alt <= 10000 && flags.alt10k) { speak("Passing 10,000"); flags.alt10k = false; }
+                
+                if (state.msl < 15000 && alt >= 15000 && !flags.alt15k) { speak("Passing 15,000"); flags.alt15k = true; }
+                if (state.msl > 15000 && alt <= 15000 && flags.alt15k) { speak("Passing 15,000"); flags.alt15k = false; }
+                
+                if (state.msl < 24000 && alt >= 24000 && !flags.alt24k) { speak("Passing 24,000"); flags.alt24k = true; }
+                if (state.msl > 24000 && alt <= 24000 && flags.alt24k) { speak("Passing 24,000"); flags.alt24k = false; }
+                
+                state.msl = alt;
+            }
+
+            if(command === "simulator/time_local") {
+                const ticks = BigInt(data);
+                const epochTicks = 621355968000000000n;
+                if (ticks > epochTicks) {
+                    const ms = Number((ticks - epochTicks) / 10000n);
+                    state.time = new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    updateUI('ui-time', state.time);
+                }
+            }
+            if(command === "infiniteflight/nearest_airport") { state.airport = data; updateUI('ui-airport', data); }
+
+            if(command === "aircraft/0/systems/battery/main_battery/amp_draw") {
+                const isOn = data > 0;
+                if (state.battery === 0 && isOn) speak("Battery on");
+                else if (state.battery === 1 && !isOn) speak("Battery off");
+                state.battery = isOn ? 1 : 0;
+                updateUI('ui-battery', isOn ? "ON" : "OFF");
+            }
+
+            if(command === "aircraft/0/systems/apu/apu/state") {
+                if (state.apu !== -1 && data !== state.apu) {
+                    if (data === 0) speak("APU off");
+                    else if (data === 1) speak("APU starting");
+                    else if (data === 2) speak("APU on");
+                }
+                state.apu = data;
+                updateUI('ui-apu', data === 0 ? "OFF" : (data === 1 ? "STARTING" : "ON"));
+            }
+
+            // Engine state mapping for engines 1-4 (indices 0-3)
+            const engineMap = {
+                "aircraft/0/systems/engines/0/state": 1,
+                "aircraft/0/systems/engines/1/state": 2,
+                "aircraft/0/systems/engines/2/state": 3,
+                "aircraft/0/systems/engines/3/state": 4
+            };
+            if(engineMap[command]) {
+                const engNum = engineMap[command];
+                const oldState = state.engines[engNum];
+                if (oldState !== undefined && oldState !== data) {
+                    if (data === 1) speak(`Engine ${engNum} starting`);
+                    else if (data === 2) speak(`Engine ${engNum} started`);
+                    else if (data === 0) speak(`Engine ${engNum} shutdown`);
+                }
+                state.engines[engNum] = data;
+
+                // Build a status list of running engines for the dashboard
+                const activeEngines = Object.entries(state.engines)
+                    .filter(([_, s]) => s === 2)
+                    .map(([num, _]) => num)
+                    .sort()
+                    .join(", ");
+                
+                let displayStatus = "OFF";
+                if (activeEngines) {
+                    displayStatus = `ENG ${activeEngines} ON`;
+                } else if (Object.values(state.engines).some(s => s === 1)) {
+                    displayStatus = "STARTING";
+                }
+                updateUI('ui-engines', displayStatus);
+            }
+
+            if(command === "aircraft/0/is_pushback_active") {
+                const isPushing = data === 1 || data === true;
+                if (state.pushback === 0 && isPushing) speak("Pushback started");
+                else if (state.pushback === 1 && !isPushing) speak("Pushback ended");
+                state.pushback = isPushing ? 1 : 0;
+                updateUI('ui-pushback', isPushing ? "ACTIVE" : "OFF");
+            }
+
+            if(command === "aircraft/0/systems/autopilot/on") {
+                const isAuto = data === 1 || data === true;
+                if (state.autopilot === 0 && isAuto) speak("Autopilot on");
+                else if (state.autopilot === 1 && !isAuto) speak("Autopilot off");
+                state.autopilot = isAuto ? 1 : 0;
+                updateUI('ui-autopilot', isAuto ? "ON" : "OFF");
+            }
+
+            // Light switches map (values are Boolean: true/false)
+            const lightMap = {
+                "aircraft/0/systems/beacon_lights_switch": { key: 'beacon', name: 'Beacon lights' },
+                "aircraft/0/systems/nav_lights_switch": { key: 'nav', name: 'Navigation lights' },
+                "aircraft/0/systems/strobe_lights_switch": { key: 'strobe', name: 'Strobe lights' },
+                "aircraft/0/systems/landing_lights_switch": { key: 'landing', name: 'Landing lights' }
+            };
+            if (lightMap[command]) {
+                const info = lightMap[command];
+                const isOn = (data === 1 || data === true);
+                const stateValue = isOn ? 1 : 0;
+                if (state[info.key] !== -1 && state[info.key] !== stateValue) {
+                    speak(`${info.name} ${isOn ? 'on' : 'off'}`);
+                }
+                state[info.key] = stateValue;
+                updateUI(`ui-${info.key}`, isOn ? 'ON' : 'OFF');
+            }
+
+            // Seatbelt / No Smoking (values are Boolean: true/false)
+            if(command === "aircraft/0/systems/signs/seatbelt") {
+                const isOn = (data === 1 || data === true);
+                const stateValue = isOn ? 1 : 0;
+                if (state.seatbelt !== -1 && stateValue !== state.seatbelt) {
+                    speak(`Seatbelt signs ${isOn ? 'on' : 'off'}`);
+                }
+                state.seatbelt = stateValue;
+                updateUI('ui-seatbelt', isOn ? "ON" : "OFF");
+            }
+            if(command === "aircraft/0/systems/signs/no_smoking") {
+                const isOn = (data === 1 || data === true);
+                const stateValue = isOn ? 1 : 0;
+                if (state.smoking !== -1 && stateValue !== state.smoking) {
+                    speak(`No smoking signs ${isOn ? 'on' : 'off'}`);
+                }
+                state.smoking = stateValue;
+                updateUI('ui-smoking', isOn ? "ON" : "OFF");
+            }
+
+            if(command === "aircraft/0/systems/landing_gear/state") {
+                const isUp = (data === 2 || data === 5 || data === 0);
+                const isDown = (data === 1);
+                updateUI('ui-gear', isDown ? "DOWN" : (isUp ? "UP" : "MOVING"));
+                
+                if (state.gear !== -1 && data !== state.gear) {
+                    if (isDown && state.gear !== 1) speak("Gears Down");
+                    else if (isUp && !(state.gear === 2 || state.gear === 5 || state.gear === 0)) speak("Landing gear up");
+                }
+                state.gear = data;
+            }
+
+            // Parking brake (value is Boolean: true/false)
+            if(command === "aircraft/0/systems/parking_brake/state") {
+                const isSet = (data === 1 || data === true);
+                const stateValue = isSet ? 1 : 0;
+                updateUI('ui-brakes', isSet ? "SET" : "REL");
+                if (state.brakes !== -1 && stateValue !== state.brakes) {
+                    if (isSet) speak("Parking brakes set");
+                    else speak("Parking brakes released");
+                }
+                state.brakes = stateValue;
+            }
+            
+            // Siren warning: Trigger if any engine is running, brakes are set, and throttle is applied
+            const anyEngineRunning = Object.values(state.engines || {}).some(s => s === 2);
+            if (anyEngineRunning && state.brakes === 1 && state.throttle > 0.05) {
+                playSiren();
+            }
+
+            if(command === "aircraft/0/systems/spoilers/state") {
+                const map = { 0: "OFF", 1: "FLIGHT", 2: "ARMED" };
+                updateUI('ui-spoilers', map[data] || data);
+                if (state.spoilers !== -1 && state.spoilers !== data) speak(`Spoilers ${map[data] ? map[data].toLowerCase() : data}`);
+                state.spoilers = data;
+            }
+
+            if(command === "aircraft/0/systems/flaps/state") {
+                if(data !== state.flaps && state.name !== '') {
+                    const isBoeing = state.name.toUpperCase().includes('7');
+                    let spokenFlap = data; 
+                    if (isBoeing) {
+                        const bMap = { 0: "up", 1: "1", 2: "5", 3: "15", 4: "20", 5: "25", 6: "30" };
+                        spokenFlap = bMap[data] !== undefined ? bMap[data] : data;
+                    } else {
+                        const aMap = { 0: "up", 1: "1", 2: "2", 3: "3", 4: "full" };
+                        spokenFlap = aMap[data] !== undefined ? aMap[data] : data;
+                    }
+                    if (data !== 0) speak(`Flaps ${spokenFlap}`);
+                    else speak("Flaps up");
+                    updateUI('ui-flaps', spokenFlap);
+                    state.flaps = data;
+                }
+            }
         });
     </script>
 </body>
