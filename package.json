@@ -1,0 +1,17 @@
+{
+	"name": "infinite-copilot",
+	"version": "1.0.0",
+	"description": "Flight Deck Dashboard - Backend + Frontend",
+	"private": true,
+	"scripts": {
+		"start": "concurrently \"npm start --prefix proxy-backend\" \"npm run dev --prefix web-frontend\"",
+		"dev": "concurrently \"npm run dev --prefix proxy-backend\" \"npm run dev --prefix web-frontend\"",
+		"backend": "npm start --prefix proxy-backend",
+		"backend:dev": "npm run dev --prefix proxy-backend",
+		"frontend": "npm run dev --prefix web-frontend",
+		"install:all": "npm install && npm install --prefix proxy-backend && npm install --prefix web-frontend"
+	},
+	"devDependencies": {
+		"concurrently": "^8.2.2"
+	}
+}
