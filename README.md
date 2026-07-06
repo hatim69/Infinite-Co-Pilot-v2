@@ -1,15 +1,17 @@
-# Infinite Co-Pilot
+# FlightDeck
 
-> A second-screen flight assistant for Infinite Flight, focused on cockpit-aware callouts, bilingual briefings, and flight-phase intelligence.
+> Your intelligent second seat.
+
+FlightDeck is a second-screen flight assistant built for Infinite Flight, providing cockpit-aware callouts, smart briefings, telemetry awareness, and crew-style assistance.
 
 ## Overview
 
-Infinite Co-Pilot is a work-in-progress companion app for Infinite Flight. The goal is not to be a raw telemetry dump, but a practical co-pilot layer that listens to the flight state, understands the phase of flight, and responds with useful pilot-facing callouts.
+FlightDeck is a work-in-progress companion app for Infinite Flight. The goal is not to be a raw telemetry dump, but a practical assistant layer that listens to the flight state, understands the phase of flight, and responds with useful pilot-facing callouts.
 
 The project is being rebuilt in a simpler, cleaner form:
 
 - one lightweight Node.js proxy backend
-- one static web frontend
+- one static web frontend (React/Vite)
 - a source-aware telemetry model that can evolve toward live data plus future fallback modes
 - voice-first features such as safety briefings, V-speed callouts, and cabin announcements
 
@@ -29,7 +31,7 @@ The rebuild starts basic and intentional. The initial scope is centered on:
 
 - bilingual airline safety briefings
 - automatic V-speed calculation
-- V1 / Vr / V2 callouts from the co-pilot
+- V1 / Vr / V2 callouts from the FlightDeck Assistant
 - flap-related callouts such as flap-up reminders
 - gear-up callouts after positive rate
 - arrival and landing callouts later in the roadmap
@@ -66,9 +68,9 @@ The proxy backend is the core of the system. It handles connection logic, field 
 | Layer               | Tools                                                |
 | ------------------- | ---------------------------------------------------- |
 | Backend             | Node.js, Express, Socket.IO, ifc2, Axios, dotenv     |
-| Frontend            | HTML, CSS, vanilla JavaScript, Socket.IO client      |
+| Frontend            | React, Vite, Tailwind CSS v4, Socket.IO client       |
 | Transport           | WebSocket-style realtime updates                     |
-| Future UI direction | React, TypeScript, mapping support, mobile packaging |
+| Future UI direction | TypeScript, mapping support, mobile packaging        |
 
 ## Project Structure
 
@@ -78,7 +80,7 @@ The proxy backend is the core of the system. It handles connection logic, field 
 | [proxy-backend/ifc-handler.js](proxy-backend/ifc-handler.js) | IFC2 helper wrapper              |
 | [proxy-backend/package.json](proxy-backend/package.json)     | Backend scripts and dependencies |
 | [proxy-backend/README.md](proxy-backend/README.md)           | Backend-specific notes           |
-| [web-frontend/index.html](web-frontend/index.html)           | Current frontend prototype       |
+| [web-frontend/index.html](web-frontend/index.html)           | Current frontend entrypoint      |
 | [README.md](README.md)                                       | This project overview            |
 
 ## How To Run
@@ -117,7 +119,13 @@ http://localhost:3000
 
 ### 4. Open the frontend
 
-The backend serves the current frontend from the `web-frontend` folder, so once the server is running, open the local site in your browser.
+The frontend is a Vite + React application.
+
+```bash
+cd web-frontend
+npm install
+npm run dev
+```
 
 ## Development Notes
 
@@ -125,13 +133,12 @@ The backend serves the current frontend from the `web-frontend` folder, so once 
 - The backend should stay source-aware and avoid assuming every telemetry key is always present.
 - Callouts should be phase-based and pilot-useful, not constant or noisy.
 - Language support should feel like an airline assistant, not a literal translator.
-- The UI direction is still flexible, so the README intentionally focuses on product shape rather than final visuals.
 
 ## Future Features
 
 | Priority | Feature                              | Why It Matters                                             |
 | -------- | ------------------------------------ | ---------------------------------------------------------- |
-| High     | Smart cabin briefings                | Gives the app its co-pilot identity                        |
+| High     | Smart cabin briefings                | Gives the app its assistant identity                       |
 | High     | More aircraft-specific V-speed logic | Makes the callouts feel believable across aircraft types   |
 | High     | Flap and gear callouts               | Core takeoff flow automation                               |
 | High     | Phase-of-flight detection            | Keeps announcements aligned with the actual flight         |
@@ -145,7 +152,7 @@ The backend serves the current frontend from the `web-frontend` folder, so once 
 
 ```mermaid
 timeline
-	title Infinite Co-Pilot Roadmap
+	title FlightDeck Roadmap
 	Basic rebuild : Clean backend / frontend separation
 	Flight logic : V-speeds, flap callouts, gear-up logic
 	Voice layer : Safety briefings and cabin announcements
@@ -160,6 +167,4 @@ This project is a companion tool, not an aviation authority system. Any operatio
 
 ## Status
 
-Infinite Co-Pilot is currently a work in progress. The app is being simplified first, with the most important early goal being a clean base for bilingual briefings and automated co-pilot callouts.
-
-If you want, I can next turn this README into a more polished landing-page style version with badges, screenshots, and a tighter roadmap layout once the UI direction is finalized.
+FlightDeck is currently a work in progress. The app is being simplified first, with the most important early goal being a clean base for bilingual briefings and automated crew callouts.
