@@ -1,2 +1,2 @@
-node_modules/ 
-proxy-backend/node_modules/ 
+**/node_modules/
+.env
