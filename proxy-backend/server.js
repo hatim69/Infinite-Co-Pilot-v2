@@ -131,8 +131,10 @@ function connectToIF(ip) {
 					"aircraft/0/groundspeed",
 					"aircraft/0/vertical_speed",
 					"aircraft/0/altitude_msl",
+					"aircraft/0/altitude_agl",
 					"aircraft/0/systems/landing_gear/state",
 					"aircraft/0/systems/battery/main_battery/amp_draw",
+					"aircraft/0/systems/battery/main_battery/voltage",
 					"aircraft/0/aircraft_id",
 					"aircraft/0/is_on_ground",
 					"aircraft/0/systems/flaps/state",
@@ -187,9 +189,9 @@ function connectToIF(ip) {
 	}
 }
 
-// Serializes BigInt values as standard Numbers to prevent WebSocket protocol crashes
+// Serializes BigInt values as strings to preserve precision for WebSockets
 BigInt.prototype.toJSON = function () {
-	return Number(this);
+	return this.toString();
 };
 
 IFC2.eventEmitter.on("IFC2data", (data) => {

@@ -52,8 +52,15 @@ const CockpitOverview = ({ telemetry, isConnected }) => {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
           <div>
             <div className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-2">Altitude</div>
-            <div className="text-3xl font-mono font-bold text-slate-100">
-              {telemetry.msl > 0 ? Math.round(telemetry.msl).toLocaleString() : '0'} <span className="text-base text-slate-500">FT</span>
+            <div className="text-3xl font-mono font-bold text-slate-100 flex items-baseline gap-2">
+              <div>
+                {telemetry.agl > 0 ? Math.round(telemetry.agl).toLocaleString() : '0'} 
+                <span className="text-sm text-slate-500 ml-1">AGL</span>
+              </div>
+            </div>
+            <div className="text-lg font-mono font-semibold text-slate-400 mt-1">
+              {telemetry.msl > 0 ? Math.round(telemetry.msl).toLocaleString() : '0'} 
+              <span className="text-xs text-slate-500 ml-1">MSL</span>
             </div>
           </div>
           <div>

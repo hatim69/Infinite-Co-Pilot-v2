@@ -21,22 +21,22 @@ const airportCities = {
 	KORD: "Chicago",
 };
 
-// Adjust this if you want altitude callouts to be more or less strict near threshold values.
+// Adjust these if you want threshold callouts to be more or less strict near the edge.
 const ALTITUDE_CALLOUT_BUFFER_FT = 100;
+const AIRSPEED_CALLOUT_BUFFER_KTS = 3;
 
-const crossedAltitudeThreshold = (
-	previousAltitudeFt,
-	currentAltitudeFt,
-	thresholdFt,
+const crossedThreshold = (
+	previousValue,
+	currentValue,
+	thresholdValue,
+	bufferValue,
 ) => {
-	const lowerBound = thresholdFt - ALTITUDE_CALLOUT_BUFFER_FT;
-	const upperBound = thresholdFt + ALTITUDE_CALLOUT_BUFFER_FT;
+	const lowerBound = thresholdValue - bufferValue;
+	const upperBound = thresholdValue + bufferValue;
 
 	return {
-		ascending:
-			previousAltitudeFt < lowerBound && currentAltitudeFt >= upperBound,
-		descending:
-			previousAltitudeFt > upperBound && currentAltitudeFt <= lowerBound,
+		ascending: previousValue < lowerBound && currentValue >= upperBound,
+		descending: previousValue > upperBound && currentValue <= lowerBound,
 	};
 };
 
@@ -55,6 +55,7 @@ export const useTelemetry = () => {
 		gs: 0,
 		vs: 0,
 		msl: 0,
+		agl: 0,
 		throttle: 0,
 		onGround: true,
 		gear: -1,
@@ -63,6 +64,8 @@ export const useTelemetry = () => {
 		spoilers: -1,
 		autopilot: -1,
 		battery: -1,
+		batteryAmp: 0,
+		batteryVolts: 0,
 		apu: -1,
 		pushback: -1,
 		seatbelt: -1,
@@ -137,13 +140,19 @@ export const useTelemetry = () => {
 					updateNext("throttle", data);
 
 				if (command === "aircraft/0/indicated_airspeed") {
+					const previousAirspeedKts = state.ias;
 					const kts = data * 1.94384;
 					updateNext("ias", kts);
+					const airspeedCrossing = crossedThreshold(
+						previousAirspeedKts,
+						kts,
+						80,
+						AIRSPEED_CALLOUT_BUFFER_KTS,
+					);
 
 					if (
 						state.onGround &&
-						kts >= 80 &&
-						state.ias < 80 &&
+						airspeedCrossing.ascending &&
 						!flags.eightyKnots
 					) {
 						speak("80 knots", "callout");
@@ -151,7 +160,12 @@ export const useTelemetry = () => {
 					}
 					if (
 						state.onGround &&
-						kts >= 40 &&
+						crossedThreshold(
+							previousAirspeedKts,
+							kts,
+							40,
+							AIRSPEED_CALLOUT_BUFFER_KTS,
+						).ascending &&
 						!flags.vSpeed &&
 						state.weight > 0
 					) {
@@ -192,20 +206,17 @@ export const useTelemetry = () => {
 				if (command === "aircraft/0/vertical_speed") {
 					const fpm = data * 196.85;
 					updateNext("vs", fpm);
-					if (!state.onGround && fpm > 400 && !flags.positiveRate) {
-						speak("Positive rate. Gear up.", "callout");
-						flags.positiveRate = true;
-					}
 				}
 
 				if (command === "aircraft/0/altitude_msl") {
 					const previousAltitudeFt = state.msl;
 					updateNext("msl", data);
 					const altitudeCrossing = (thresholdFt) =>
-						crossedAltitudeThreshold(
+						crossedThreshold(
 							previousAltitudeFt,
 							data,
 							thresholdFt,
+							ALTITUDE_CALLOUT_BUFFER_FT,
 						);
 
 					if (altitudeCrossing(5000).ascending && !flags.alt5k) {
@@ -245,6 +256,19 @@ export const useTelemetry = () => {
 					}
 				}
 
+				if (command === "aircraft/0/altitude_agl") {
+					const agl = data * 3.28084;
+					updateNext("agl", agl);
+					
+					// Reimplement positive rate for V2 flyaway limit (from friend's code)
+					const speeds = calculateVSpeeds(state.name, state.weight);
+					const properFlyawaySpeed = speeds.v2 > 60 ? speeds.v2 : 130;
+					if (!state.onGround && state.vs > 300 && agl >= 300 && state.ias >= properFlyawaySpeed && !flags.positiveRate) {
+						speak("Positive rate. Gear up.", "callout");
+						flags.positiveRate = true;
+					}
+				}
+
 				if (command === "simulator/time_local") {
 					updateNext("time", formatTime(data));
 				}
@@ -257,11 +281,27 @@ export const useTelemetry = () => {
 					command ===
 					"aircraft/0/systems/battery/main_battery/amp_draw"
 				) {
-					const isOn = data > 0;
-					if (state.battery === 0 && isOn)
-						speak("Battery on.", "notice");
-					else if (state.battery === 1 && !isOn)
-						speak("Battery off.", "notice");
+					updateNext("batteryAmp", data);
+					const amp = data || 0;
+					const volts = state.batteryVolts || 0;
+					const isOn = amp > 0 || volts > 12;
+					
+					if (state.battery === 0 && isOn) speak("Battery on.", "notice");
+					else if (state.battery === 1 && !isOn) speak("Battery off.", "notice");
+					updateNext("battery", isOn ? 1 : 0);
+				}
+
+				if (
+					command ===
+					"aircraft/0/systems/battery/main_battery/voltage"
+				) {
+					updateNext("batteryVolts", data);
+					const amp = state.batteryAmp || 0;
+					const volts = data || 0;
+					const isOn = amp > 0 || volts > 12;
+					
+					if (state.battery === 0 && isOn) speak("Battery on.", "notice");
+					else if (state.battery === 1 && !isOn) speak("Battery off.", "notice");
 					updateNext("battery", isOn ? 1 : 0);
 				}
 
