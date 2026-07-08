@@ -4,6 +4,7 @@ const socketIo = require("socket.io");
 const IFC2 = require("ifc2");
 const path = require("path");
 const dgram = require("dgram");
+const net = require("net");
 
 const app = express();
 const server = http.createServer(app);
@@ -36,6 +37,48 @@ server.listen(3000, () => {
 let isConnected = false;
 let lastDataTime = 0;
 let currentDeviceIP = null;
+
+function cleanupIFC2() {
+	console.log("[PROXY] Cleaning up IFC2 connection and listeners...");
+	
+	// Reset IFC2 internal state
+	if (IFC2) {
+		IFC2.isConnected = false;
+		IFC2.isWaiting = false;
+		IFC2.isPollWaiting = false;
+		IFC2.q = [];
+		IFC2.pollQ = [];
+		IFC2.waitList = [];
+		IFC2.ifData = {};
+		IFC2.pollBuffer = null;
+		IFC2.qBuffer = null;
+
+		// Clean up sockets
+		const socketNames = ['clientSocket', 'manifestSocket', 'pollSocket'];
+		socketNames.forEach(sName => {
+			if (IFC2.infiniteFlight && IFC2.infiniteFlight[sName]) {
+				const socket = IFC2.infiniteFlight[sName];
+				try {
+					socket.destroy();
+					socket.removeAllListeners();
+				} catch (e) {
+					console.error(`[PROXY] Error destroying ${sName}:`, e);
+				}
+				delete IFC2.infiniteFlight[sName];
+				IFC2.infiniteFlight[sName] = new net.Socket();
+			}
+		});
+
+		// Reset manifest variables
+		if (IFC2.infiniteFlight) {
+			IFC2.infiniteFlight.manifestData = "";
+			IFC2.infiniteFlight.manifestByName = {};
+			IFC2.infiniteFlight.manifestByCommand = {};
+			IFC2.infiniteFlight.manifestLength = 0;
+			IFC2.infiniteFlight.manifestBuffer = null;
+		}
+	}
+}
 
 const discoverySocket = dgram.createSocket("udp4");
 discoverySocket.bind(15000, "0.0.0.0");
@@ -110,6 +153,8 @@ function connectToIF(ip) {
 
 	// Broadcast connecting state to frontend
 	io.emit("connection_status", { status: "connecting", ip: ip });
+
+	cleanupIFC2();
 
 	isConnected = true;
 	currentDeviceIP = ip;
@@ -199,10 +244,21 @@ IFC2.eventEmitter.on("IFC2data", (data) => {
 	io.emit("telemetry_update", { command: data.command, data: data.data });
 });
 
-IFC2.eventEmitter.on("IFC2error", (err) => {
-	console.error("[PROXY] IFC2 Connection Error:", err);
-	isConnected = false;
-	io.emit("connection_status", { status: "disconnected" });
+// Listen to IFC2 messages and errors
+IFC2.eventEmitter.on("IFC2msg", (msg) => {
+	if (msg) {
+		if (msg.type === "error") {
+			console.error(`[PROXY] IFC2 Connection Error (${msg.context}):`, msg.msg);
+			if (isConnected) {
+				isConnected = false;
+				currentDeviceIP = null;
+				cleanupIFC2();
+				io.emit("connection_status", { status: "disconnected" });
+			}
+		} else {
+			console.log(`[PROXY] IFC2 Info (${msg.context}):`, msg.msg);
+		}
+	}
 });
 
 // Detects silent TCP socket freezes and triggers automatic reconnections
@@ -213,6 +269,7 @@ setInterval(() => {
 		);
 		isConnected = false;
 		currentDeviceIP = null;
+		cleanupIFC2();
 		io.emit("connection_status", { status: "disconnected" });
 	}
 }, 4000);
