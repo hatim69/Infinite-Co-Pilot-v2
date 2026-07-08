@@ -30,10 +30,20 @@ export const calculateVSpeeds = (aircraftName, weightKG) => {
 };
 
 export const formatTime = (ticks) => {
-  const epochTicks = 621355968000000000n;
-  if (BigInt(ticks) > epochTicks) {
-    const ms = Number((BigInt(ticks) - epochTicks) / 10000n);
-    return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  try {
+    const rawTicks = BigInt(ticks);
+    // 1 tick = 100ns -> 10,000 ticks = 1ms
+    const totalMs = rawTicks / 10000n;
+    
+    // Extract just the time of day (milliseconds since midnight)
+    // There are 86,400,000 milliseconds in a day
+    const msSinceMidnight = Number(totalMs % 86400000n);
+    
+    const hours = Math.floor(msSinceMidnight / 3600000);
+    const minutes = Math.floor((msSinceMidnight % 3600000) / 60000);
+    
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+  } catch (e) {
+    return '---';
   }
-  return '---';
 };

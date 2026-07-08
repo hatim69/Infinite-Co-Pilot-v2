@@ -90,6 +90,7 @@ export const useTelemetry = () => {
 		alt10k: false,
 		alt15k: false,
 		alt24k: false,
+		boardingAnnouncementPlayed: false,
 	});
 
 	useEffect(() => {
@@ -395,22 +396,59 @@ export const useTelemetry = () => {
 				if (command === "aircraft/0/systems/signs/seatbelt") {
 					const isOn = data === 1 || data === true;
 					const stateValue = isOn ? 1 : 0;
-					if (state.seatbelt !== -1 && stateValue !== state.seatbelt)
-						speak(
-							`Seatbelt signs ${isOn ? "on" : "off"}.`,
-							"notice",
-						);
+					if (state.seatbelt !== -1 && stateValue !== state.seatbelt) {
+						const chime = new Audio('/chime.mp3');
+						
+						// Play boarding announcement when seatbelts are first turned on, on the ground
+						if (isOn && state.onGround && !flags.boardingAnnouncementPlayed) {
+							flags.boardingAnnouncementPlayed = true;
+							chime.onended = () => {
+								setTimeout(() => {
+									const getAnnouncementFile = (livery) => {
+										const l = (livery || '').toLowerCase();
+										if (l.includes('air france')) return 'air-france.mp3';
+										if (l.includes('air india')) return 'air-india.mp3';
+										if (l.includes('british airways')) return 'british-airways.mp3';
+										if (l.includes('delta')) return 'delta.mp3';
+										if (l.includes('emirates')) return 'emirates.mp3';
+										if (l.includes('qatar')) return 'qatar.mp3';
+										return 'indigo.mp3'; // Default fallback
+									};
+									const file = getAnnouncementFile(state.livery);
+									const audio = new Audio(`/announcements/${file}`);
+									audio.onended = () => {
+										speechManager.setDucking(false);
+										setTimeout(() => {
+											new Audio('/chime.mp3').play().catch(e => console.error("End chime failed:", e));
+										}, 1500);
+									};
+									speechManager.setDucking(true);
+									audio.play().catch(e => {
+										speechManager.setDucking(false);
+										console.error("Boarding announcement play failed:", e);
+									});
+								}, 1500);
+							};
+							chime.play().catch(e => console.error("Start chime failed:", e));
+							speak(`Seatbelt signs on.`, "notice");
+						} else {
+							chime.play().catch(e => console.error("Chime failed:", e));
+							speak(`Seatbelt signs ${isOn ? "on" : "off"}.`, "notice");
+						}
+					}
 					updateNext("seatbelt", stateValue);
 				}
 
 				if (command === "aircraft/0/systems/signs/no_smoking") {
 					const isOn = data === 1 || data === true;
 					const stateValue = isOn ? 1 : 0;
-					if (state.smoking !== -1 && stateValue !== state.smoking)
+					if (state.smoking !== -1 && stateValue !== state.smoking) {
+						new Audio('/chime.mp3').play().catch(e => console.error("Chime failed:", e));
 						speak(
 							`No smoking signs ${isOn ? "on" : "off"}.`,
 							"notice",
 						);
+					}
 					updateNext("smoking", stateValue);
 				}
 

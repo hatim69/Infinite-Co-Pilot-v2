@@ -9,6 +9,11 @@ class SpeechManager {
 		this.lastSpokenAt = 0;
 		this.cachedVoice = null;
 		this.voicePromise = null;
+		this.isDucking = false;
+	}
+
+	setDucking(active) {
+		this.isDucking = active;
 	}
 
 	setLogger(loggerFn) {
@@ -91,7 +96,13 @@ class SpeechManager {
 			default: { rate: 0.93, pitch: 1, volume: 1 },
 		};
 
-		return profiles[tone] || profiles.default;
+		const profile = profiles[tone] || profiles.default;
+		
+		if (this.isDucking) {
+			return { ...profile, volume: profile.volume * 0.25 };
+		}
+		
+		return profile;
 	}
 
 	speak(text, options = {}) {

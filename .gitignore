@@ -2,3 +2,5 @@
 .env
 flight_deck_dashboard.html
 .DS_Store
+test*.js
+*.log
