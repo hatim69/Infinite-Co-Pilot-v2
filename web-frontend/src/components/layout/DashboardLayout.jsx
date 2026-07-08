@@ -9,7 +9,16 @@ import FlightMetric from '../cards/FlightMetric';
 import SystemStatus from '../cards/SystemStatus';
 import { Settings, Droplet, Battery, Flame, SunDim, ShieldAlert, Zap, Crosshair, ArrowLeftRight, User, Ban, Clock } from 'lucide-react';
 
-const DashboardLayout = ({ connectionStatus, connectedIp, telemetry, onManualConnect, logs }) => {
+const DashboardLayout = ({ 
+  connectionStatus, 
+  connectedIp, 
+  telemetry, 
+  onManualConnect, 
+  discoveredDevices, 
+  onSelectDevice, 
+  onDisconnectDevice, 
+  logs 
+}) => {
   const isConnected = connectionStatus === 'FLIGHT LINK ACTIVE';
 
   return (
@@ -39,7 +48,11 @@ const DashboardLayout = ({ connectionStatus, connectedIp, telemetry, onManualCon
                 <SystemStatus label="Spoilers" icon={Droplet} value={telemetry.spoilers === 0 ? 'OFF' : telemetry.spoilers === 1 ? 'FLIGHT' : telemetry.spoilers === 2 ? 'ARMED' : '---'} />
                 <SystemStatus label="Brakes" icon={ShieldAlert} value={telemetry.brakes === 1 ? 'SET' : telemetry.brakes === 0 ? 'REL' : '---'} />
                 
-                <SystemStatus label="Battery" icon={Battery} value={telemetry.battery === 1 ? 'ON' : telemetry.battery === 0 ? 'OFF' : '---'} />
+                <SystemStatus 
+                  label="Battery" 
+                  icon={Battery} 
+                  value={telemetry.batteryVolts > 0 ? `${telemetry.batteryVolts.toFixed(1)}V` : (telemetry.batteryAmp > 0 ? `${telemetry.batteryAmp.toFixed(1)}A` : (telemetry.battery === 1 ? 'ON' : telemetry.battery === 0 ? 'OFF' : '---'))} 
+                />
                 <SystemStatus label="APU" icon={Zap} value={telemetry.apu === 0 ? 'OFF' : telemetry.apu === 1 ? 'STARTING' : telemetry.apu === 2 ? 'ON' : '---'} />
                 <SystemStatus label="Engines" icon={Flame} value={Object.values(telemetry.engines || {}).some(s => s === 2) ? `ENG ${Object.entries(telemetry.engines).filter(([_, s]) => s === 2).map(([n]) => n).join(', ')} ON` : Object.keys(telemetry.engines || {}).length > 0 ? 'OFF' : '---'} />
                 <SystemStatus label="Pushback" icon={ArrowLeftRight} value={telemetry.pushback === 1 ? 'ACTIVE' : telemetry.pushback === 0 ? 'OFF' : '---'} />
@@ -64,11 +77,14 @@ const DashboardLayout = ({ connectionStatus, connectedIp, telemetry, onManualCon
         {/* Sidebar Column */}
         <div className="xl:col-span-4 flex flex-col gap-6">
           {!isConnected && (
-            <div className="h-48">
+            <div className="flex flex-col gap-4">
               <SimulatorLink 
                 status={connectionStatus} 
                 ip={connectedIp} 
                 onManualConnect={onManualConnect} 
+                discoveredDevices={discoveredDevices}
+                onSelectDevice={onSelectDevice}
+                onDisconnectDevice={onDisconnectDevice}
               />
             </div>
           )}

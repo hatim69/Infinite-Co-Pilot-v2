@@ -4,7 +4,15 @@ import { useTelemetry } from './hooks/useTelemetry';
 import { speechManager } from './utils/speech';
 
 function App() {
-  const { connectionStatus, connectedIp, telemetry, manualConnect } = useTelemetry();
+  const { 
+    connectionStatus, 
+    connectedIp, 
+    telemetry, 
+    manualConnect,
+    discoveredDevices,
+    selectDevice,
+    disconnectDevice
+  } = useTelemetry();
   const [logs, setLogs] = useState([
     { time: new Date().toLocaleTimeString(), text: 'System initialized. Receiving Telemetry...' }
   ]);
@@ -23,6 +31,9 @@ function App() {
         connectedIp={connectedIp}
         telemetry={telemetry}
         onManualConnect={manualConnect}
+        discoveredDevices={discoveredDevices}
+        onSelectDevice={selectDevice}
+        onDisconnectDevice={disconnectDevice}
         logs={logs}
       />
     </main>

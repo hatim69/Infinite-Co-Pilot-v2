@@ -46,6 +46,7 @@ export const useTelemetry = () => {
 	);
 	const [connectedIp, setConnectedIp] = useState("");
 	const [socketInstance, setSocketInstance] = useState(null);
+	const [discoveredDevices, setDiscoveredDevices] = useState([]);
 
 	const [telemetry, setTelemetry] = useState({
 		name: "",
@@ -98,6 +99,10 @@ export const useTelemetry = () => {
 	useEffect(() => {
 		const socket = io(SOCKET_URL);
 		setSocketInstance(socket);
+
+		socket.on("discovered_devices", (devices) => {
+			setDiscoveredDevices(devices);
+		});
 
 		socket.on("connection_status", (data) => {
 			if (data.status === "connected") {
@@ -518,5 +523,25 @@ export const useTelemetry = () => {
 		}
 	};
 
-	return { connectionStatus, connectedIp, telemetry, manualConnect };
+	const selectDevice = (deviceId) => {
+		if (socketInstance) {
+			socketInstance.emit("select_device", { deviceId });
+		}
+	};
+
+	const disconnectDevice = () => {
+		if (socketInstance) {
+			socketInstance.emit("select_device", { deviceId: null });
+		}
+	};
+
+	return {
+		connectionStatus,
+		connectedIp,
+		telemetry,
+		manualConnect,
+		discoveredDevices,
+		selectDevice,
+		disconnectDevice
+	};
 };

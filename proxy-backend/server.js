@@ -5,6 +5,7 @@ const IFC2 = require("ifc2");
 const path = require("path");
 const dgram = require("dgram");
 const net = require("net");
+const os = require("os");
 
 const app = express();
 const server = http.createServer(app);
@@ -37,6 +38,67 @@ server.listen(3000, () => {
 let isConnected = false;
 let lastDataTime = 0;
 let currentDeviceIP = null;
+
+const discoveredDevices = new Map();
+let selectedDeviceId = null;
+
+// Clean up offline devices periodically (devices that haven't broadcasted in 10s)
+setInterval(() => {
+	const now = Date.now();
+	let changed = false;
+	for (const [id, dev] of discoveredDevices.entries()) {
+		if (now - dev.lastSeen > 10000) {
+			discoveredDevices.delete(id);
+			changed = true;
+			console.log(`[DISCOVERY] Device offline (removed): ${dev.deviceName} (${id})`);
+		}
+	}
+	if (changed) {
+		io.emit("discovered_devices", Array.from(discoveredDevices.values()));
+	}
+}, 2000);
+
+// Track failed connection attempts to avoid getting stuck trying to connect to unreachable IPs
+const failedIPs = new Map();
+const FAILURE_BLACKLIST_DURATION_MS = 20000; // 20 seconds blacklist
+
+function markIPAsFailed(ip) {
+	console.log(`[PROXY] Marking IP ${ip} as failed/unreachable.`);
+	failedIPs.set(ip, Date.now());
+}
+
+function getLocalIPv4s() {
+	const interfaces = os.networkInterfaces();
+	const ips = [];
+	for (const name of Object.keys(interfaces)) {
+		for (const netInterface of interfaces[name]) {
+			if (netInterface.family === 'IPv4' && !netInterface.internal) {
+				ips.push(netInterface.address);
+			}
+		}
+	}
+	return ips;
+}
+
+function getSubnetMatchScore(ip, localIPs) {
+	let maxMatch = 0;
+	const ipParts = ip.split('.');
+	for (const localIP of localIPs) {
+		const localParts = localIP.split('.');
+		let matchCount = 0;
+		for (let i = 0; i < 4; i++) {
+			if (ipParts[i] === localParts[i]) {
+				matchCount++;
+			} else {
+				break;
+			}
+		}
+		if (matchCount > maxMatch) {
+			maxMatch = matchCount;
+		}
+	}
+	return maxMatch;
+}
 
 function cleanupIFC2() {
 	console.log("[PROXY] Cleaning up IFC2 connection and listeners...");
@@ -83,36 +145,98 @@ function cleanupIFC2() {
 const discoverySocket = dgram.createSocket("udp4");
 discoverySocket.bind(15000, "0.0.0.0");
 
-discoverySocket.on("message", (msg) => {
+discoverySocket.on("message", (msg, rinfo) => {
 	try {
 		const data = JSON.parse(msg.toString());
-		if (!isConnected && data.addresses) {
-			// Priority sorting: Skip VPNs/Tailscale (100.x.x.x) and Link-Local (169.x.x.x)
-			const ipv4s = data.addresses
-				.filter((ip) => {
-					if (ip.includes(":")) return false; // Skip IPv6
-					if (ip.startsWith("100.")) return false; // Skip Tailscale/VPN
-					if (ip.startsWith("169.254.")) return false; // Skip Link-Local autoconfig
-					return true;
-				})
-				.sort((a, b) => {
-					const getScore = (ip) => {
-						if (
-							ip.startsWith("192.168.") ||
-							ip.startsWith("10.") ||
-							ip.match(/^172\.(1[6-9]|2[0-9]|3[0-1])\./)
-						)
-							return 1;
-						return 2;
-					};
-					return getScore(a) - getScore(b);
-				});
+		if (data.addresses && data.addresses.length > 0) {
+			const devId = (data.deviceId || data.deviceName || 'unknown-device').trim();
+			const devName = (data.deviceName || data.deviceId || 'Unknown Device').trim();
+			
+			const addresses = data.addresses.map(ip => ip.trim());
+			if (rinfo && rinfo.address && !addresses.includes(rinfo.address)) {
+				addresses.push(rinfo.address);
+			}
 
-			if (ipv4s.length > 0) {
-				console.log(
-					`[DISCOVERY] Found valid local device IP: ${ipv4s[0]}`,
-				);
-				connectToIF(ipv4s[0]);
+			const device = {
+				deviceId: devId,
+				deviceName: devName,
+				addresses: addresses,
+				lastSeen: Date.now(),
+				aircraft: data.aircraft || "",
+				livery: data.livery || ""
+			};
+			
+			const isNew = !discoveredDevices.has(devId);
+			discoveredDevices.set(devId, device);
+			
+			if (isNew) {
+				console.log(`[DISCOVERY] Discovered device: ${devName} (${devId})`);
+				io.emit("discovered_devices", Array.from(discoveredDevices.values()));
+			}
+			
+			// Auto-connection logic
+			if (!isConnected) {
+				// Case 1: The user has selected a device
+				if (selectedDeviceId) {
+					if (devId === selectedDeviceId) {
+						const localIPs = getLocalIPv4s();
+						const sortedIPs = [...device.addresses]
+							.filter(ip => {
+								if (ip.includes(":")) return false; // Skip IPv6
+								if (ip.startsWith("100.")) return false; // Skip Tailscale/VPN
+								if (ip.startsWith("169.254.")) return false; // Skip Link-Local autoconfig
+								return true;
+							})
+							.sort((a, b) => {
+								const aFailed = failedIPs.has(a) && (Date.now() - failedIPs.get(a) < FAILURE_BLACKLIST_DURATION_MS);
+								const bFailed = failedIPs.has(b) && (Date.now() - failedIPs.get(b) < FAILURE_BLACKLIST_DURATION_MS);
+								if (aFailed !== bFailed) return aFailed ? 1 : -1;
+								return getSubnetMatchScore(b, localIPs) - getSubnetMatchScore(a, localIPs);
+							});
+						
+						if (sortedIPs.length > 0) {
+							const bestIP = sortedIPs[0];
+							const failedTime = failedIPs.get(bestIP);
+							const isBestIPBlacklisted = failedTime && (Date.now() - failedTime < FAILURE_BLACKLIST_DURATION_MS);
+							
+							if (!isBestIPBlacklisted) {
+								console.log(`[DISCOVERY] Connecting to selected device ${devName} at ${bestIP}...`);
+								connectToIF(bestIP);
+							}
+						}
+					}
+				}
+				// Case 2: No device selected, but exactly ONE device is found on network (auto-select)
+				else if (discoveredDevices.size === 1) {
+					selectedDeviceId = devId;
+					console.log(`[DISCOVERY] Auto-selecting single discovered device: ${devName}`);
+					io.emit("discovered_devices", Array.from(discoveredDevices.values()));
+					
+					const localIPs = getLocalIPv4s();
+					const sortedIPs = [...device.addresses]
+						.filter(ip => {
+							if (ip.includes(":")) return false;
+							if (ip.startsWith("100.")) return false;
+							if (ip.startsWith("169.254.")) return false;
+							return true;
+						})
+						.sort((a, b) => {
+							const aFailed = failedIPs.has(a) && (Date.now() - failedIPs.get(a) < FAILURE_BLACKLIST_DURATION_MS);
+							const bFailed = failedIPs.has(b) && (Date.now() - failedIPs.get(b) < FAILURE_BLACKLIST_DURATION_MS);
+							if (aFailed !== bFailed) return aFailed ? 1 : -1;
+							return getSubnetMatchScore(b, localIPs) - getSubnetMatchScore(a, localIPs);
+						});
+
+					if (sortedIPs.length > 0) {
+						const bestIP = sortedIPs[0];
+						const failedTime = failedIPs.get(bestIP);
+						const isBestIPBlacklisted = failedTime && (Date.now() - failedTime < FAILURE_BLACKLIST_DURATION_MS);
+						
+						if (!isBestIPBlacklisted) {
+							connectToIF(bestIP);
+						}
+					}
+				}
 			}
 		}
 	} catch (e) {
@@ -127,14 +251,58 @@ io.on("connection", (socket) => {
 		ip: currentDeviceIP,
 	});
 
+	// Send current discovered devices list
+	socket.emit("discovered_devices", Array.from(discoveredDevices.values()));
+
+	socket.on("select_device", (data) => {
+		const devId = data ? data.deviceId : null;
+		console.log(`[USER] Selected device ID: ${devId}`);
+		
+		if (devId !== selectedDeviceId) {
+			selectedDeviceId = devId;
+			
+			// Disconnect current session to let it bind to the new selection
+			isConnected = false;
+			currentDeviceIP = null;
+			cleanupIFC2();
+			io.emit("connection_status", { status: "disconnected" });
+			
+			if (selectedDeviceId) {
+				const device = discoveredDevices.get(selectedDeviceId);
+				if (device && device.addresses.length > 0) {
+					const localIPs = getLocalIPv4s();
+					const sortedIPs = [...device.addresses]
+						.filter(ip => {
+							if (ip.includes(":")) return false;
+							if (ip.startsWith("100.")) return false;
+							if (ip.startsWith("169.254.")) return false;
+							return true;
+						})
+						.sort((a, b) => {
+							const aFailed = failedIPs.has(a) && (Date.now() - failedIPs.get(a) < FAILURE_BLACKLIST_DURATION_MS);
+							const bFailed = failedIPs.has(b) && (Date.now() - failedIPs.get(b) < FAILURE_BLACKLIST_DURATION_MS);
+							if (aFailed !== bFailed) return aFailed ? 1 : -1;
+							return getSubnetMatchScore(b, localIPs) - getSubnetMatchScore(a, localIPs);
+						});
+					
+					if (sortedIPs.length > 0) {
+						connectToIF(sortedIPs[0]);
+					}
+				}
+			}
+		}
+	});
+
 	socket.on("force_connect", (data) => {
 		if (data && data.ip) {
+			const manualIP = data.ip.trim();
 			console.log(
-				`[USER] Received manual connection request to IP: ${data.ip}`,
+				`[USER] Received manual connection request to IP: ${manualIP}`,
 			);
 			// Reset active state to force standard TCP handshake
 			isConnected = false;
-			connectToIF(data.ip);
+			selectedDeviceId = null; // Clear auto-selected device if user manually overrides
+			connectToIF(manualIP);
 		}
 	});
 });
@@ -249,7 +417,13 @@ IFC2.eventEmitter.on("IFC2msg", (msg) => {
 	if (msg) {
 		if (msg.type === "error") {
 			console.error(`[PROXY] IFC2 Connection Error (${msg.context}):`, msg.msg);
-			if (isConnected) {
+			
+			// Only treat manifest error as fatal connection failure
+			if (msg.context === "manifest" && isConnected) {
+				console.log("[PROXY] Manifest connection failed. Resetting connection...");
+				if (currentDeviceIP) {
+					markIPAsFailed(currentDeviceIP);
+				}
 				isConnected = false;
 				currentDeviceIP = null;
 				cleanupIFC2();
@@ -265,8 +439,11 @@ IFC2.eventEmitter.on("IFC2msg", (msg) => {
 setInterval(() => {
 	if (isConnected && Date.now() - lastDataTime > 8000) {
 		console.log(
-			"[PROXY] Connection dropped silently (no incoming data for 8s). Resetting...",
+			`[PROXY] Connection dropped silently (no incoming data for 8s) to ${currentDeviceIP || 'unknown'}. Resetting...`,
 		);
+		if (currentDeviceIP) {
+			markIPAsFailed(currentDeviceIP);
+		}
 		isConnected = false;
 		currentDeviceIP = null;
 		cleanupIFC2();

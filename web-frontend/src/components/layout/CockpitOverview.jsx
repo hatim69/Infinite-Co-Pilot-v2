@@ -1,5 +1,6 @@
 import React from 'react';
 import { Plane } from 'lucide-react';
+import LiveryLogo from './LiveryLogo';
 
 const CockpitOverview = ({ telemetry, isConnected }) => {
   if (!isConnected) {
@@ -35,12 +36,22 @@ const CockpitOverview = ({ telemetry, isConnected }) => {
         <div className="flex flex-col md:flex-row justify-between mb-8 gap-6 border-b border-slate-700/50 pb-6">
           <div>
             <div className="text-sm font-semibold text-slate-400 uppercase tracking-widest mb-1">Aircraft</div>
-            <div className="text-3xl font-bold text-slate-100">{telemetry.name || '---'}</div>
+            <div className="flex items-center gap-3">
+              <LiveryLogo livery={telemetry.livery} />
+              <div>
+                <div className="text-3xl font-bold text-slate-100">{telemetry.name || '---'}</div>
+                {telemetry.livery && telemetry.livery !== 'Generic' && (
+                  <div className="text-sm text-slate-400">{telemetry.livery}</div>
+                )}
+              </div>
+            </div>
           </div>
           <div>
             <div className="text-sm font-semibold text-slate-400 uppercase tracking-widest mb-1">Current Position</div>
             <div className="text-2xl font-bold text-slate-200">
-              {telemetry.airport && telemetry.airport !== '---' ? `Near ${telemetry.airport}` : 'Route Pending'}
+              {telemetry.airport && telemetry.airport !== '---' 
+                ? (telemetry.onGround ? `At ${telemetry.airport}` : `Near ${telemetry.airport}`) 
+                : 'Route Pending'}
             </div>
           </div>
           <div>
@@ -54,13 +65,13 @@ const CockpitOverview = ({ telemetry, isConnected }) => {
             <div className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-2">Altitude</div>
             <div className="text-3xl font-mono font-bold text-slate-100 flex items-baseline gap-2">
               <div>
-                {telemetry.agl > 0 ? Math.round(telemetry.agl).toLocaleString() : '0'} 
-                <span className="text-sm text-slate-500 ml-1">AGL</span>
+                {telemetry.msl > 0 ? Math.round(telemetry.msl).toLocaleString() : '0'} 
+                <span className="text-xs text-slate-500 ml-1">MSL</span>
               </div>
             </div>
             <div className="text-lg font-mono font-semibold text-slate-400 mt-1">
-              {telemetry.msl > 0 ? Math.round(telemetry.msl).toLocaleString() : '0'} 
-              <span className="text-xs text-slate-500 ml-1">MSL</span>
+                {telemetry.agl > 0 ? Math.round(telemetry.agl).toLocaleString() : '0'} 
+                <span className="text-sm text-slate-500 ml-1">AGL</span>
             </div>
           </div>
           <div>

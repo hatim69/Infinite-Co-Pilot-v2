@@ -1,4 +1,4 @@
 **/node_modules/
 .env
-.DS_Store
 flight_deck_dashboard.html
+.DS_Store
