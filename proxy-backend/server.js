@@ -110,6 +110,7 @@ function cleanupIFC2() {
 		IFC2.isPollWaiting = false;
 		IFC2.q = [];
 		IFC2.pollQ = [];
+		IFC2.pollCurrent = 0;
 		IFC2.waitList = [];
 		IFC2.ifData = {};
 		IFC2.pollBuffer = null;
@@ -376,6 +377,10 @@ function connectToIF(ip) {
 					"aircraft/0/systems/engines/1/state",
 					"aircraft/0/systems/engines/2/state",
 					"aircraft/0/systems/engines/3/state",
+					"aircraft/0/systems/engines/0/n1",
+					"aircraft/0/systems/engines/1/n1",
+					"aircraft/0/systems/engines/2/n1",
+					"aircraft/0/systems/engines/3/n1",
 				];
 
 				polls.forEach((p) => {

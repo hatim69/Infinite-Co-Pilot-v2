@@ -3,11 +3,11 @@ import { Mic, CheckSquare, ShieldCheck, Zap } from 'lucide-react';
 import { speechManager } from '../../utils/speech';
 
 const CrewAssistant = ({ telemetry, isConnected }) => {
-  const [audioUnlocked, setAudioUnlocked] = useState(speechManager.audioUnlocked);
+  const [voiceEnabled, setVoiceEnabled] = useState(speechManager.voiceEnabled);
 
-  const handleAudioUnlock = () => {
-    speechManager.unlockAudio();
-    setAudioUnlocked(true);
+  const toggleVoice = () => {
+    const isNowEnabled = speechManager.toggleVoice();
+    setVoiceEnabled(isNowEnabled);
   };
 
   // Determine assistant context based on phase
@@ -50,19 +50,22 @@ const CrewAssistant = ({ telemetry, isConnected }) => {
             <h2 className="text-sm font-semibold text-slate-200 uppercase tracking-widest">FlightDeck Assistant</h2>
           </div>
           
-          {!audioUnlocked ? (
+          {!voiceEnabled ? (
             <button 
-              onClick={handleAudioUnlock}
+              onClick={toggleVoice}
               className="bg-amber-600/20 hover:bg-amber-600/30 text-amber-400 border border-amber-600/50 font-semibold px-3 py-1.5 rounded text-xs transition active:scale-95 flex items-center gap-1.5"
             >
               <Mic className="w-3.5 h-3.5" />
               Enable Voice
             </button>
           ) : (
-            <div className="text-teal-400 text-xs font-semibold flex items-center gap-1.5 bg-teal-500/10 px-3 py-1.5 rounded border border-teal-500/20">
+            <button 
+              onClick={toggleVoice}
+              className="text-teal-400 hover:bg-teal-500/20 text-xs font-semibold flex items-center gap-1.5 bg-teal-500/10 px-3 py-1.5 rounded border border-teal-500/20 transition active:scale-95"
+            >
               <Mic className="w-3.5 h-3.5" />
               Voice Active
-            </div>
+            </button>
           )}
         </div>
 

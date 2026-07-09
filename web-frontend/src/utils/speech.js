@@ -10,7 +10,28 @@ class SpeechManager {
 		this.cachedVoice = null;
 		this.voicePromise = null;
 		this.isDucking = false;
-		this.voicePreference = localStorage.getItem("voicePreference") || "default";
+		this.voicePreference = localStorage.getItem("voicePreference") || "female";
+		this.voiceEnabled = true;
+
+		// Unlock audio context on first user interaction anywhere on the page
+		const unlockFn = () => {
+			if (this.voiceEnabled) {
+				this.unlockAudio();
+			}
+			document.removeEventListener('click', unlockFn);
+		};
+		document.addEventListener('click', unlockFn);
+	}
+
+	toggleVoice() {
+		this.voiceEnabled = !this.voiceEnabled;
+		if (this.voiceEnabled) {
+			this.unlockAudio();
+		} else {
+			this.stopBoardingMusic();
+			window.speechSynthesis.cancel();
+		}
+		return this.voiceEnabled;
 	}
 
 	setDucking(active) {
@@ -147,7 +168,7 @@ class SpeechManager {
 			this.addLog(spokenText);
 		}
 
-		if (!this.audioUnlocked) return;
+		if (!this.voiceEnabled || !this.audioUnlocked) return;
 
 		setTimeout(
 			() => {
@@ -188,6 +209,22 @@ class SpeechManager {
 		setTimeout(() => {
 			this.sirenPlaying = false;
 		}, 500);
+	}
+
+	playBoardingMusic() {
+		if (this.boardingMusic) return; // Already playing
+		this.boardingMusic = new Audio("/music/indigo.mp3");
+		this.boardingMusic.loop = true;
+		this.boardingMusic.volume = 0.35; // Peaceful background volume
+		this.boardingMusic.play().catch(e => console.error("Boarding music play failed:", e));
+	}
+
+	stopBoardingMusic() {
+		if (this.boardingMusic) {
+			this.boardingMusic.pause();
+			this.boardingMusic.currentTime = 0;
+			this.boardingMusic = null;
+		}
 	}
 }
 

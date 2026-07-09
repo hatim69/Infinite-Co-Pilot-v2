@@ -4,7 +4,7 @@ import { speechManager } from '../../utils/speech';
 
 const Header = ({ telemetry, isConnected }) => {
   const isVoiceEnabled = speechManager.audioUnlocked;
-  const [voicePref, setVoicePref] = useState(speechManager.voicePreference || 'default');
+  const [voicePref, setVoicePref] = useState(speechManager.voicePreference || 'female');
   
   // Basic phase inference
   let phase = "Preflight";
@@ -18,7 +18,7 @@ const Header = ({ telemetry, isConnected }) => {
   else if (telemetry.onGround && telemetry.gs > 5 && telemetry.gs <= 30) phase = "Taxi";
 
   const toggleVoicePref = () => {
-    const nextPref = voicePref === 'default' ? 'female' : voicePref === 'female' ? 'male' : 'default';
+    const nextPref = voicePref === 'female' ? 'male' : 'female';
     speechManager.setVoicePreference(nextPref);
     setVoicePref(nextPref);
     if (speechManager.audioUnlocked) {
@@ -57,7 +57,7 @@ const Header = ({ telemetry, isConnected }) => {
           </div>
           <button 
             onClick={toggleVoicePref}
-            title="Toggle Voice Gender (Default / Female / Male)"
+            title="Toggle Voice Gender (Female / Male)"
             className={`flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider transition hover:text-teal-300 active:scale-95 ${isVoiceEnabled ? 'text-teal-400' : 'text-slate-500'}`}>
             <Mic className="w-3.5 h-3.5" />
             Voice: {voicePref}

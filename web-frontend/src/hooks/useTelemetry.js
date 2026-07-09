@@ -51,12 +51,12 @@ export const useTelemetry = () => {
 	const [telemetry, setTelemetry] = useState({
 		name: "",
 		livery: "",
-		weight: 0,
-		ias: 0,
-		gs: 0,
-		vs: 0,
-		msl: 0,
-		agl: 0,
+		weight: null,
+		ias: null,
+		gs: null,
+		vs: null,
+		msl: null,
+		agl: null,
 		throttle: 0,
 		onGround: true,
 		gear: -1,
@@ -83,7 +83,7 @@ export const useTelemetry = () => {
 	const stateRef = useRef(telemetry);
 	const flagsRef = useRef({
 		eightyKnots: false,
-		vSpeed: false,
+		vSpeedBriefed: false,
 		positiveRate: false,
 		welcome: false,
 		alt5k: false,
@@ -91,6 +91,7 @@ export const useTelemetry = () => {
 		alt15k: false,
 		alt24k: false,
 		boardingAnnouncementPlayed: false,
+		welcomeMessagePlayed: false,
 	});
 
 	useEffect(() => {
@@ -109,6 +110,23 @@ export const useTelemetry = () => {
 			if (data.status === "connected") {
 				setConnectionStatus("FLIGHT LINK ACTIVE");
 				setConnectedIp(data.ip);
+				
+				// Reset all flags for the new session
+				const flags = flagsRef.current;
+				flags.eightyKnots = false;
+				flags.vSpeedBriefed = false;
+				flags.positiveRate = false;
+				flags.welcome = false;
+				flags.alt5k = false;
+				flags.alt10k = false;
+				flags.alt15k = false;
+				flags.alt24k = false;
+				flags.boardingAnnouncementPlayed = false;
+				flags.welcomeMessagePlayed = false;
+				
+				// Stop any playing music
+				speechManager.stopBoardingMusic();
+				
 			} else if (data.status === "connecting") {
 				setConnectionStatus("CONNECTING...");
 				setConnectedIp(data.ip);
@@ -122,8 +140,9 @@ export const useTelemetry = () => {
 			const { command, data } = p;
 			const state = stateRef.current;
 			const flags = flagsRef.current;
-			const speak = (msg, tone = "callout") =>
+			const speak = (msg, tone = "callout", bypassMute = false) => {
 				speechManager.speak(msg, { tone });
+			};
 
 			setTelemetry((prev) => {
 				const next = { ...prev };
@@ -149,41 +168,23 @@ export const useTelemetry = () => {
 					const previousAirspeedKts = state.ias;
 					const kts = data * 1.94384;
 					updateNext("ias", kts);
-					const airspeedCrossing = crossedThreshold(
-						previousAirspeedKts,
-						kts,
-						80,
-						AIRSPEED_CALLOUT_BUFFER_KTS,
-					);
-
-					if (
-						state.onGround &&
-						airspeedCrossing.ascending &&
-						!flags.eightyKnots
-					) {
-						speak("80 knots", "callout");
-						flags.eightyKnots = true;
-					}
-					if (
-						state.onGround &&
-						crossedThreshold(
+					
+					if (previousAirspeedKts !== null) {
+						const airspeedCrossing = crossedThreshold(
 							previousAirspeedKts,
 							kts,
-							40,
+							80,
 							AIRSPEED_CALLOUT_BUFFER_KTS,
-						).ascending &&
-						!flags.vSpeed &&
-						state.weight > 0
-					) {
-						const speeds = calculateVSpeeds(
-							state.name,
-							state.weight,
 						);
-						flags.vSpeed = true;
-						speak(
-							`V1 ${speeds.v1}, rotate, V2 ${speeds.v2}`,
-							"briefing",
-						);
+
+						if (
+							state.onGround &&
+							airspeedCrossing.ascending &&
+							!flags.eightyKnots
+						) {
+							speak("80 knots", "callout");
+							flags.eightyKnots = true;
+						}
 					}
 				}
 
@@ -217,61 +218,67 @@ export const useTelemetry = () => {
 				if (command === "aircraft/0/altitude_msl") {
 					const previousAltitudeFt = state.msl;
 					updateNext("msl", data);
-					const altitudeCrossing = (thresholdFt) =>
-						crossedThreshold(
-							previousAltitudeFt,
-							data,
-							thresholdFt,
-							ALTITUDE_CALLOUT_BUFFER_FT,
-						);
+					
+					if (previousAltitudeFt !== null) {
+						const altitudeCrossing = (thresholdFt) =>
+							crossedThreshold(
+								previousAltitudeFt,
+								data,
+								thresholdFt,
+								ALTITUDE_CALLOUT_BUFFER_FT,
+							);
 
-					if (altitudeCrossing(5000).ascending && !flags.alt5k) {
-						speak("Passing 5,000", "notice");
-						flags.alt5k = true;
-					}
-					if (altitudeCrossing(5000).descending && flags.alt5k) {
-						speak("Passing 5,000", "notice");
-						flags.alt5k = false;
-					}
+						if (altitudeCrossing(5000).ascending && !flags.alt5k) {
+							speak("Passing 5,000", "notice");
+							flags.alt5k = true;
+						}
+						if (altitudeCrossing(5000).descending && flags.alt5k) {
+							speak("Passing 5,000", "notice");
+							flags.alt5k = false;
+						}
 
-					if (altitudeCrossing(10000).ascending && !flags.alt10k) {
-						speak("Passing 10,000. Landing lights off.", "caution");
-						flags.alt10k = true;
-					}
-					if (altitudeCrossing(10000).descending && flags.alt10k) {
-						speak("Passing 10,000.", "notice");
-						flags.alt10k = false;
-					}
+						if (altitudeCrossing(10000).ascending && !flags.alt10k) {
+							speak("Passing 10,000. Landing lights off.", "caution");
+							flags.alt10k = true;
+						}
+						if (altitudeCrossing(10000).descending && flags.alt10k) {
+							speak("Passing 10,000.", "notice");
+							flags.alt10k = false;
+						}
 
-					if (altitudeCrossing(15000).ascending && !flags.alt15k) {
-						speak("Passing 15,000.", "notice");
-						flags.alt15k = true;
-					}
-					if (altitudeCrossing(15000).descending && flags.alt15k) {
-						speak("Passing 15,000.", "notice");
-						flags.alt15k = false;
-					}
+						if (altitudeCrossing(15000).ascending && !flags.alt15k) {
+							speak("Passing 15,000.", "notice");
+							flags.alt15k = true;
+						}
+						if (altitudeCrossing(15000).descending && flags.alt15k) {
+							speak("Passing 15,000.", "notice");
+							flags.alt15k = false;
+						}
 
-					if (altitudeCrossing(24000).ascending && !flags.alt24k) {
-						speak("Passing 24,000.", "notice");
-						flags.alt24k = true;
-					}
-					if (altitudeCrossing(24000).descending && flags.alt24k) {
-						speak("Passing 24,000.", "notice");
-						flags.alt24k = false;
+						if (altitudeCrossing(24000).ascending && !flags.alt24k) {
+							speak("Passing 24,000.", "notice");
+							flags.alt24k = true;
+						}
+						if (altitudeCrossing(24000).descending && flags.alt24k) {
+							speak("Passing 24,000.", "notice");
+							flags.alt24k = false;
+						}
 					}
 				}
 
 				if (command === "aircraft/0/altitude_agl") {
+					const previousAgl = state.agl;
 					const agl = data * 3.28084;
 					updateNext("agl", agl);
 					
-					// Reimplement positive rate for V2 flyaway limit (from friend's code)
-					const speeds = calculateVSpeeds(state.name, state.weight);
-					const properFlyawaySpeed = speeds.v2 > 60 ? speeds.v2 : 130;
-					if (!state.onGround && state.vs > 300 && agl >= 300 && state.ias >= properFlyawaySpeed && !flags.positiveRate) {
-						speak("Positive rate. Gear up.", "callout");
-						flags.positiveRate = true;
+					if (previousAgl !== null) {
+						// Reimplement positive rate for V2 flyaway limit (from friend's code)
+						const speeds = calculateVSpeeds(state.name, state.weight);
+						const properFlyawaySpeed = speeds.v2 > 60 ? speeds.v2 : 130;
+						if (!state.onGround && state.vs > 300 && agl >= 300 && state.ias >= properFlyawaySpeed && !flags.positiveRate) {
+							speak("Positive rate. Gear up.", "callout");
+							flags.positiveRate = true;
+						}
 					}
 				}
 
@@ -320,26 +327,24 @@ export const useTelemetry = () => {
 					updateNext("apu", data);
 				}
 
-				const engineMap = {
-					"aircraft/0/systems/engines/0/state": 1,
-					"aircraft/0/systems/engines/1/state": 2,
-					"aircraft/0/systems/engines/2/state": 3,
-					"aircraft/0/systems/engines/3/state": 4,
-				};
-
-				if (engineMap[command]) {
-					const engNum = engineMap[command];
-					const oldState = state.engines[engNum];
-					if (oldState !== undefined && oldState !== data) {
-						if (data === 1)
+				const n1Match = command.match(/^aircraft\/0\/systems\/engines\/(\d+)\/n1$/);
+				if (n1Match) {
+					const engNum = parseInt(n1Match[1], 10) + 1;
+					const currentN1 = data;
+					const oldN1 = state.engines[engNum];
+					
+					if (oldN1 !== undefined) {
+						if (oldN1 === 0 && currentN1 > 0) {
 							speak(`Engine ${engNum} starting.`, "briefing");
-						else if (data === 2)
-							speak(`Engine ${engNum} started.`, "notice");
-						else if (data === 0)
+						} else if (oldN1 >= 20 && currentN1 < 20 && currentN1 > 0) {
+							speak(`Engine ${engNum} shutting down.`, "notice");
+						} else if (oldN1 > 0 && currentN1 === 0) {
 							speak(`Engine ${engNum} shutdown.`, "notice");
+						}
 					}
-					if (next.engines[engNum] !== data) {
-						next.engines = { ...next.engines, [engNum]: data };
+
+					if (next.engines[engNum] !== currentN1) {
+						next.engines = { ...next.engines, [engNum]: currentN1 };
 						updated = true;
 					}
 				}
@@ -389,6 +394,15 @@ export const useTelemetry = () => {
 						state[info.key] !== stateValue
 					) {
 						speak(`${info.name} ${isOn ? "on" : "off"}.`, "notice");
+						
+						if (info.key === "strobe" && isOn && state.onGround && !flags.vSpeedBriefed && state.weight > 0) {
+							flags.vSpeedBriefed = true;
+							speak("Cabin crew prepare for take off.", "notice");
+							setTimeout(() => {
+								const speeds = calculateVSpeeds(state.name, state.weight);
+								speechManager.speak(`V1 ${speeds.v1}, rotate, V2 ${speeds.v2}`, { tone: "briefing" });
+							}, 2500);
+						}
 					}
 					updateNext(info.key, stateValue);
 				}
@@ -402,6 +416,7 @@ export const useTelemetry = () => {
 						// Play boarding announcement when seatbelts are first turned on, on the ground
 						if (isOn && state.onGround && !flags.boardingAnnouncementPlayed) {
 							flags.boardingAnnouncementPlayed = true;
+							speechManager.stopBoardingMusic();
 							chime.onended = () => {
 								setTimeout(() => {
 									const getAnnouncementFile = (livery) => {
@@ -497,7 +512,7 @@ export const useTelemetry = () => {
 				}
 
 				if (command === "aircraft/0/systems/flaps/state") {
-					if (data !== state.flaps && state.name !== "") {
+					if (data !== state.flaps && state.name !== "" && state.flaps !== -1) {
 						const isBoeing = state.name.toUpperCase().includes("7");
 						let spokenFlap = data;
 						if (isBoeing) {
@@ -526,7 +541,20 @@ export const useTelemetry = () => {
 						if (data !== 0)
 							speak(`Flaps ${spokenFlap}.`, "callout");
 						else speak("Flaps up.", "callout");
-						updateNext("flaps", data);
+					}
+					updateNext("flaps", data);
+				}
+
+				if (!flags.welcomeMessagePlayed && state.name !== "" && state.onGround !== undefined && state.time !== "---") {
+					flags.welcomeMessagePlayed = true;
+					if (state.onGround) {
+						speak("Welcome to the flight, Captain.", "briefing");
+						const anyEngineRunning = Object.values(state.engines || {}).some((n1) => n1 > 0);
+						if (!anyEngineRunning && state.beacon !== 1) {
+							speechManager.playBoardingMusic();
+						}
+					} else {
+						speak("Welcome back to the flight, Captain.", "briefing");
 					}
 				}
 
@@ -542,7 +570,7 @@ export const useTelemetry = () => {
 	// Effect for siren logic
 	useEffect(() => {
 		const anyEngineRunning = Object.values(telemetry.engines || {}).some(
-			(s) => s === 2,
+			(n1) => n1 > 20,
 		);
 		if (
 			anyEngineRunning &&
