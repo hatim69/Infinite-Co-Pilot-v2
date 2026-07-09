@@ -10,6 +10,7 @@ class SpeechManager {
 		this.cachedVoice = null;
 		this.voicePromise = null;
 		this.isDucking = false;
+		this.voicePreference = localStorage.getItem("voicePreference") || "default";
 	}
 
 	setDucking(active) {
@@ -18,6 +19,14 @@ class SpeechManager {
 
 	setLogger(loggerFn) {
 		this.addLog = loggerFn;
+	}
+
+	setVoicePreference(preference) {
+		this.voicePreference = preference;
+		localStorage.setItem("voicePreference", preference);
+		this.cachedVoice = null;
+		this.voicePromise = null;
+		if (this.audioUnlocked) this.pickVoice();
 	}
 
 	unlockAudio() {
@@ -44,14 +53,28 @@ class SpeechManager {
 					return;
 				}
 
-				const preferredVoice =
-					voices.find((voice) =>
-						/(Google|Microsoft|Samantha|Alex|Daniel|Serena|Kathy|Nicky|Ting-Ting|Moira|Ava)/i.test(
-							voice.name,
-						),
-					) ||
-					voices.find((voice) => /en-/i.test(voice.lang)) ||
-					voices[0];
+				const isEng = (v) => v.lang.startsWith('en');
+				const engVoices = voices.filter(isEng);
+
+				let preferredVoice = null;
+				if (this.voicePreference === "female") {
+					preferredVoice = 
+						engVoices.find((v) => /(Female|Samantha|Serena|Victoria|Karen|Moira|Ava|Kathy|Zira|Hazel|Catherine|Susan|Linda)/i.test(v.name)) ||
+						engVoices.find((v) => /(Google US English)/i.test(v.name)) ||
+						engVoices[0];
+				} else if (this.voicePreference === "male") {
+					preferredVoice = 
+						engVoices.find((v) => /(Male|Alex|Daniel|Arthur|Fred|Oliver|Tom|David|Mark|George|Ravi)/i.test(v.name)) ||
+						engVoices.find((v) => !/(Female|Samantha|Victoria|Karen|Moira|Ava|Kathy|Zira|Hazel|Catherine|Susan|Linda|Google US English)/i.test(v.name)) ||
+						engVoices[0];
+				}
+
+				if (!preferredVoice) {
+					preferredVoice =
+						engVoices.find((v) => /(Google|Microsoft|Apple|Samantha|Alex)/i.test(v.name)) ||
+						engVoices[0] ||
+						voices[0];
+				}
 
 				this.cachedVoice = preferredVoice || null;
 				resolve(this.cachedVoice);

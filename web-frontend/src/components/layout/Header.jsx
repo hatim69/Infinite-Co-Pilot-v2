@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Activity, Mic, Wifi } from 'lucide-react';
 import { speechManager } from '../../utils/speech';
 
 const Header = ({ telemetry, isConnected }) => {
   const isVoiceEnabled = speechManager.audioUnlocked;
+  const [voicePref, setVoicePref] = useState(speechManager.voicePreference || 'default');
   
   // Basic phase inference
   let phase = "Preflight";
@@ -15,6 +16,15 @@ const Header = ({ telemetry, isConnected }) => {
   else if (!telemetry.onGround && telemetry.gear === 1 && telemetry.flaps > 0) phase = "Approach";
   else if (telemetry.onGround && telemetry.gs > 30 && telemetry.throttle < 0.1) phase = "Rollout";
   else if (telemetry.onGround && telemetry.gs > 5 && telemetry.gs <= 30) phase = "Taxi";
+
+  const toggleVoicePref = () => {
+    const nextPref = voicePref === 'default' ? 'female' : voicePref === 'female' ? 'male' : 'default';
+    speechManager.setVoicePreference(nextPref);
+    setVoicePref(nextPref);
+    if (speechManager.audioUnlocked) {
+      speechManager.speak(`Voice changed to ${nextPref}.`, { tone: "notice" });
+    }
+  };
 
   return (
     <header className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 mb-6 pb-6 border-b border-slate-700/50">
@@ -45,10 +55,13 @@ const Header = ({ telemetry, isConnected }) => {
             <Wifi className="w-3.5 h-3.5" />
             Link
           </div>
-          <div className={`flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider ${isVoiceEnabled ? 'text-teal-400' : 'text-slate-500'}`}>
+          <button 
+            onClick={toggleVoicePref}
+            title="Toggle Voice Gender (Default / Female / Male)"
+            className={`flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider transition hover:text-teal-300 active:scale-95 ${isVoiceEnabled ? 'text-teal-400' : 'text-slate-500'}`}>
             <Mic className="w-3.5 h-3.5" />
-            Voice
-          </div>
+            Voice: {voicePref}
+          </button>
           <div className={`flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider ${telemetry.name ? 'text-teal-400' : 'text-slate-500'}`}>
             <Activity className="w-3.5 h-3.5" />
             Live

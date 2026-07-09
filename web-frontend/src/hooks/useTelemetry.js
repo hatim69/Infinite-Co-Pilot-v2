@@ -406,13 +406,18 @@ export const useTelemetry = () => {
 								setTimeout(() => {
 									const getAnnouncementFile = (livery) => {
 										const l = (livery || '').toLowerCase();
+										if (l.includes('air canada')) return 'air-canada.mp3';
 										if (l.includes('air france')) return 'air-france.mp3';
 										if (l.includes('air india')) return 'air-india.mp3';
 										if (l.includes('british airways')) return 'british-airways.mp3';
 										if (l.includes('delta')) return 'delta.mp3';
 										if (l.includes('emirates')) return 'emirates.mp3';
+										if (l.includes('indigo')) return 'indigo.mp3';
+										if (l.includes('lufthansa')) return 'lufthansa.mp3';
 										if (l.includes('qatar')) return 'qatar.mp3';
-										return 'indigo.mp3'; // Default fallback
+										if (l.includes('singapore')) return 'singapore-airlines.mp3';
+										if (l.includes('turkish')) return 'turkish-airlines.mp3';
+										return 'fallback.mp3'; // Default fallback
 									};
 									const file = getAnnouncementFile(state.livery);
 									const audio = new Audio(`/announcements/${file}`);

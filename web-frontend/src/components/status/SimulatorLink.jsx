@@ -76,7 +76,16 @@ const SimulatorLink = ({
                         <div className="text-left">
                           <div className="text-xs font-semibold text-slate-200">{device.deviceName || 'Unknown Device'}</div>
                           <div className="text-[10px] text-slate-500 font-mono">
-                            {device.addresses && device.addresses.join(', ')}
+                            {device.addresses && device.addresses.length > 0 && (
+                              <>
+                                {device.addresses.find(ip => ip.includes('.') && ip !== '127.0.0.1') || device.addresses[0]}
+                                {device.addresses.length > 1 && (
+                                  <span className="opacity-60 ml-1">
+                                    (+{device.addresses.length - 1} more)
+                                  </span>
+                                )}
+                              </>
+                            )}
                           </div>
                         </div>
                       </div>
