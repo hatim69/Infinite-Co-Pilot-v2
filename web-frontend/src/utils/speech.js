@@ -67,10 +67,10 @@ class SpeechManager {
 		if (this.voicePromise) return this.voicePromise;
 
 		this.voicePromise = new Promise((resolve) => {
+			let isResolved = false;
 			const selectVoice = () => {
 				const voices = window.speechSynthesis.getVoices();
 				if (!voices || voices.length === 0) {
-					resolve(null);
 					return;
 				}
 
@@ -98,15 +98,27 @@ class SpeechManager {
 				}
 
 				this.cachedVoice = preferredVoice || null;
-				resolve(this.cachedVoice);
+				if (!isResolved) {
+					isResolved = true;
+					resolve(this.cachedVoice);
+				}
 			};
 
 			selectVoice();
-			window.speechSynthesis.onvoiceschanged = () => {
-				if (!this.cachedVoice) {
-					selectVoice();
-				}
-			};
+			if (!isResolved) {
+				window.speechSynthesis.onvoiceschanged = () => {
+					if (!this.cachedVoice) {
+						selectVoice();
+					}
+				};
+				// Fallback to resolve to null if onvoiceschanged doesn't fire
+				setTimeout(() => {
+					if (!isResolved) {
+						isResolved = true;
+						resolve(null);
+					}
+				}, 1500);
+			}
 		});
 
 		return this.voicePromise;
@@ -149,7 +161,7 @@ class SpeechManager {
 		return profile;
 	}
 
-	speak(text, options = {}) {
+	async speak(text, options = {}) {
 		const tone = options.tone || "default";
 		const now = Date.now();
 		const spokenText = this.formatText(text, tone);
@@ -168,7 +180,9 @@ class SpeechManager {
 			this.addLog(spokenText);
 		}
 
-		if (!this.voiceEnabled || !this.audioUnlocked) return;
+		if (!this.voiceEnabled) return;
+
+		await this.pickVoice();
 
 		setTimeout(
 			() => {
@@ -211,9 +225,19 @@ class SpeechManager {
 		}, 500);
 	}
 
-	playBoardingMusic() {
+	playBoardingMusic(livery) {
 		if (this.boardingMusic) return; // Already playing
-		this.boardingMusic = new Audio("/music/indigo.mp3");
+		const getMusicFile = (liv) => {
+			const l = (liv || '').toLowerCase();
+			if (l.includes('american')) return 'american-airlines.mp3';
+			if (l.includes('cathay')) return 'cathay-pacific.mp3';
+			if (l.includes('emirates')) return 'emirates.mp3';
+			if (l.includes('lufthansa')) return 'lufthansa.mp3';
+			if (l.includes('turkish')) return 'turkish-airlines.mp3';
+			return 'indigo.mp3'; // Default fallback
+		};
+		const file = getMusicFile(livery);
+		this.boardingMusic = new Audio(`/music/${file}`);
 		this.boardingMusic.loop = true;
 		this.boardingMusic.volume = 0.35; // Peaceful background volume
 		this.boardingMusic.play().catch(e => console.error("Boarding music play failed:", e));

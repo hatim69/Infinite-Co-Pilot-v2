@@ -3,6 +3,7 @@ import ConnectionStatus from '../status/ConnectionStatus';
 import SpeechLog from './SpeechLog';
 import TelemetryCard from '../cards/TelemetryCard';
 import { Plane, Scale, Gauge, Wind, Activity, ArrowUpFromLine, CheckCircle, Zap, ShieldAlert, Power, Sun, MapPin, Clock, Lightbulb } from 'lucide-react';
+import { getFlapString } from '../../utils/calculatePerformance';
 
 const Layout = ({ connectionStatus, connectedIp, telemetry, onManualConnect, logs }) => {
   return (
@@ -34,7 +35,7 @@ const Layout = ({ connectionStatus, connectedIp, telemetry, onManualConnect, log
               <h2 id="section-systems" className="text-sm font-semibold text-slate-300 uppercase tracking-widest mb-4 border-b border-slate-700/50 pb-2">Core Systems</h2>
               <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
                 <TelemetryCard label="Gear" icon={CheckCircle} value={telemetry.gear === 1 ? 'DOWN' : (telemetry.gear === 2 || telemetry.gear === 5 || telemetry.gear === 0) ? 'UP' : telemetry.gear !== -1 ? 'MOVING' : 'Waiting for Data'} />
-                <TelemetryCard label="Flaps" icon={ShieldAlert} value={telemetry.flaps !== -1 ? telemetry.flaps : 'Waiting for Data'} />
+                <TelemetryCard label="Flaps" icon={ShieldAlert} value={telemetry.flaps !== -1 ? getFlapString(telemetry.name, telemetry.flaps) : 'Waiting for Data'} />
                 <TelemetryCard label="Spoilers" icon={ShieldAlert} value={telemetry.spoilers === 0 ? 'OFF' : telemetry.spoilers === 1 ? 'FLIGHT' : telemetry.spoilers === 2 ? 'ARMED' : 'Waiting for Data'} />
                 <TelemetryCard label="Brakes" icon={CheckCircle} value={telemetry.brakes === 1 ? 'SET' : telemetry.brakes === 0 ? 'REL' : 'Waiting for Data'} />
                 <TelemetryCard label="Autopilot" icon={Activity} value={telemetry.autopilot === 1 ? 'ON' : telemetry.autopilot === 0 ? 'OFF' : 'Waiting for Data'} />

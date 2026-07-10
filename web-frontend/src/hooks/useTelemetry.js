@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { io } from "socket.io-client";
 import { speechManager } from "../utils/speech";
-import { calculateVSpeeds, formatTime } from "../utils/flightMath";
+import { calculatePerformance, getFlapString } from "../utils/calculatePerformance";
+import { formatTime } from "../utils/flightMath";
 
 const SOCKET_URL =
 	import.meta.env.VITE_WEBSOCKET_URL || "http://localhost:3000";
@@ -64,11 +65,17 @@ export const useTelemetry = () => {
 		brakes: -1,
 		spoilers: -1,
 		autopilot: -1,
+		vnav: -1,
 		battery: -1,
 		batteryAmp: 0,
 		batteryVolts: 0,
 		apu: -1,
 		pushback: -1,
+		beltLoader: -1,
+		catering: -1,
+		gpu: -1,
+		palletLoader: -1,
+		stairs: -1,
 		seatbelt: -1,
 		smoking: -1,
 		beacon: -1,
@@ -78,6 +85,7 @@ export const useTelemetry = () => {
 		engines: {},
 		time: "---",
 		airport: "---",
+		performance: null,
 	});
 
 	const stateRef = useRef(telemetry);
@@ -92,6 +100,10 @@ export const useTelemetry = () => {
 		alt24k: false,
 		boardingAnnouncementPlayed: false,
 		welcomeMessagePlayed: false,
+		v1Announced: false,
+		vrAnnounced: false,
+		v2Announced: false,
+		connectedAt: 0,
 	});
 
 	useEffect(() => {
@@ -123,6 +135,10 @@ export const useTelemetry = () => {
 				flags.alt24k = false;
 				flags.boardingAnnouncementPlayed = false;
 				flags.welcomeMessagePlayed = false;
+				flags.v1Announced = false;
+				flags.vrAnnounced = false;
+				flags.v2Announced = false;
+				flags.connectedAt = Date.now();
 				
 				// Stop any playing music
 				speechManager.stopBoardingMusic();
@@ -130,9 +146,13 @@ export const useTelemetry = () => {
 			} else if (data.status === "connecting") {
 				setConnectionStatus("CONNECTING...");
 				setConnectedIp(data.ip);
+				speechManager.stopBoardingMusic();
+				window.speechSynthesis.cancel();
 			} else {
 				setConnectionStatus("AWAITING SIMULATOR LINK...");
 				setConnectedIp("");
+				speechManager.stopBoardingMusic();
+				window.speechSynthesis.cancel();
 			}
 		});
 
@@ -141,6 +161,7 @@ export const useTelemetry = () => {
 			const state = stateRef.current;
 			const flags = flagsRef.current;
 			const speak = (msg, tone = "callout", bypassMute = false) => {
+				if (!bypassMute && (!flags.connectedAt || Date.now() - flags.connectedAt < 2500)) return;
 				speechManager.speak(msg, { tone });
 			};
 
@@ -184,6 +205,22 @@ export const useTelemetry = () => {
 						) {
 							speak("80 knots", "callout");
 							flags.eightyKnots = true;
+						}
+						
+						// V-Speed Callouts
+						if (state.onGround && state.performance) {
+							if (kts >= state.performance.v1 && !flags.v1Announced) {
+								speak("V1", "callout");
+								flags.v1Announced = true;
+							}
+							if (kts >= state.performance.vr && !flags.vrAnnounced) {
+								speak("Rotate", "callout");
+								flags.vrAnnounced = true;
+							}
+							if (kts >= state.performance.v2 && !flags.v2Announced) {
+								speak("V2", "callout");
+								flags.v2Announced = true;
+							}
 						}
 					}
 				}
@@ -273,7 +310,7 @@ export const useTelemetry = () => {
 					
 					if (previousAgl !== null) {
 						// Reimplement positive rate for V2 flyaway limit (from friend's code)
-						const speeds = calculateVSpeeds(state.name, state.weight);
+						const speeds = calculatePerformance(state.name, state.weight);
 						const properFlyawaySpeed = speeds.v2 > 60 ? speeds.v2 : 130;
 						if (!state.onGround && state.vs > 300 && agl >= 300 && state.ias >= properFlyawaySpeed && !flags.positiveRate) {
 							speak("Positive rate. Gear up.", "callout");
@@ -298,9 +335,6 @@ export const useTelemetry = () => {
 					const amp = data || 0;
 					const volts = state.batteryVolts || 0;
 					const isOn = amp > 0 || volts > 12;
-					
-					if (state.battery === 0 && isOn) speak("Battery on.", "notice");
-					else if (state.battery === 1 && !isOn) speak("Battery off.", "notice");
 					updateNext("battery", isOn ? 1 : 0);
 				}
 
@@ -312,9 +346,6 @@ export const useTelemetry = () => {
 					const amp = state.batteryAmp || 0;
 					const volts = data || 0;
 					const isOn = amp > 0 || volts > 12;
-					
-					if (state.battery === 0 && isOn) speak("Battery on.", "notice");
-					else if (state.battery === 1 && !isOn) speak("Battery off.", "notice");
 					updateNext("battery", isOn ? 1 : 0);
 				}
 
@@ -330,21 +361,42 @@ export const useTelemetry = () => {
 				const n1Match = command.match(/^aircraft\/0\/systems\/engines\/(\d+)\/n1$/);
 				if (n1Match) {
 					const engNum = parseInt(n1Match[1], 10) + 1;
-					const currentN1 = data;
-					const oldN1 = state.engines[engNum];
+					// Normalize IF raw N1 float (e.g. 0.200) to a standard 0-100 percentage
+					const currentN1 = data * 100;
 					
-					if (oldN1 !== undefined) {
-						if (oldN1 === 0 && currentN1 > 0) {
+					let currentState = state.engines[engNum] !== undefined ? state.engines[engNum] : 0;
+					let nextState = currentState;
+
+					if (currentState === 0) {
+						if (currentN1 >= 1.0) {
 							speak(`Engine ${engNum} starting.`, "briefing");
-						} else if (oldN1 >= 20 && currentN1 < 20 && currentN1 > 0) {
-							speak(`Engine ${engNum} shutting down.`, "notice");
-						} else if (oldN1 > 0 && currentN1 === 0) {
+							nextState = 1;
+						}
+					} else if (currentState === 1) {
+						if (currentN1 >= 18.0) {
+							speak(`Engine ${engNum} started.`, "notice");
+							nextState = 2;
+						} else if (currentN1 < 0.5) {
 							speak(`Engine ${engNum} shutdown.`, "notice");
+							nextState = 0;
+						}
+					} else if (currentState === 2) {
+						if (currentN1 < 5.0) {
+							speak(`Engine ${engNum} shutting down.`, "notice");
+							nextState = 3;
+						}
+					} else if (currentState === 3) {
+						if (currentN1 < 0.5) {
+							speak(`Engine ${engNum} shutdown.`, "notice");
+							nextState = 0;
+						} else if (currentN1 >= 15.0) {
+							speak(`Engine ${engNum} started.`, "notice");
+							nextState = 2;
 						}
 					}
 
-					if (next.engines[engNum] !== currentN1) {
-						next.engines = { ...next.engines, [engNum]: currentN1 };
+					if (next.engines[engNum] !== nextState) {
+						next.engines = { ...next.engines, [engNum]: nextState };
 						updated = true;
 					}
 				}
@@ -365,6 +417,45 @@ export const useTelemetry = () => {
 					else if (state.autopilot === 1 && !isAuto)
 						speak("Autopilot off.", "notice");
 					updateNext("autopilot", isAuto ? 1 : 0);
+				}
+
+				if (command === "aircraft/0/systems/autopilot/vnav/on") {
+					const isVnav = data === 1 || data === true;
+					if (state.vnav === 0 && isVnav)
+						speak("VNAV on.", "notice");
+					else if (state.vnav === 1 && !isVnav)
+						speak("VNAV off.", "notice");
+					updateNext("vnav", isVnav ? 1 : 0);
+				}
+
+				if (command.startsWith("aircraft/0/ground_services/") && !command.includes("pushback")) {
+					const isServiceOn = data === 1 || data === true;
+					
+					if (command.includes("belt_loader")) {
+						if (state.beltLoader === 0 && isServiceOn) speak("Belt loader connected.", "notice");
+						else if (state.beltLoader === 1 && !isServiceOn) speak("Belt loader disconnected.", "notice");
+						updateNext("beltLoader", isServiceOn ? 1 : 0);
+					}
+					else if (command.includes("catering")) {
+						if (state.catering === 0 && isServiceOn) speak("Catering truck connected.", "notice");
+						else if (state.catering === 1 && !isServiceOn) speak("Catering truck disconnected.", "notice");
+						updateNext("catering", isServiceOn ? 1 : 0);
+					}
+					else if (command.includes("gpu")) {
+						if (state.gpu === 0 && isServiceOn) speak("GPU connected.", "notice");
+						else if (state.gpu === 1 && !isServiceOn) speak("GPU disconnected.", "notice");
+						updateNext("gpu", isServiceOn ? 1 : 0);
+					}
+					else if (command.includes("pallet_loader")) {
+						if (state.palletLoader === 0 && isServiceOn) speak("Pallet loader connected.", "notice");
+						else if (state.palletLoader === 1 && !isServiceOn) speak("Pallet loader disconnected.", "notice");
+						updateNext("palletLoader", isServiceOn ? 1 : 0);
+					}
+					else if (command.includes("stairs")) {
+						if (state.stairs === 0 && isServiceOn) speak("Stairs connected.", "notice");
+						else if (state.stairs === 1 && !isServiceOn) speak("Stairs disconnected.", "notice");
+						updateNext("stairs", isServiceOn ? 1 : 0);
+					}
 				}
 
 				const lightMap = {
@@ -398,10 +489,6 @@ export const useTelemetry = () => {
 						if (info.key === "strobe" && isOn && state.onGround && !flags.vSpeedBriefed && state.weight > 0) {
 							flags.vSpeedBriefed = true;
 							speak("Cabin crew prepare for take off.", "notice");
-							setTimeout(() => {
-								const speeds = calculateVSpeeds(state.name, state.weight);
-								speechManager.speak(`V1 ${speeds.v1}, rotate, V2 ${speeds.v2}`, { tone: "briefing" });
-							}, 2500);
 						}
 					}
 					updateNext(info.key, stateValue);
@@ -513,52 +600,28 @@ export const useTelemetry = () => {
 
 				if (command === "aircraft/0/systems/flaps/state") {
 					if (data !== state.flaps && state.name !== "" && state.flaps !== -1) {
-						const isBoeing = state.name.toUpperCase().includes("7");
-						let spokenFlap = data;
-						if (isBoeing) {
-							const bMap = {
-								0: "up",
-								1: "1",
-								2: "5",
-								3: "15",
-								4: "20",
-								5: "25",
-								6: "30",
-							};
-							spokenFlap =
-								bMap[data] !== undefined ? bMap[data] : data;
-						} else {
-							const aMap = {
-								0: "up",
-								1: "1",
-								2: "2",
-								3: "3",
-								4: "full",
-							};
-							spokenFlap =
-								aMap[data] !== undefined ? aMap[data] : data;
-						}
-						if (data !== 0)
-							speak(`Flaps ${spokenFlap}.`, "callout");
-						else speak("Flaps up.", "callout");
+						const callout = getFlapString(state.name, data);
+						speak(`Flaps ${callout}.`, "callout");
 					}
 					updateNext("flaps", data);
 				}
 
-				if (!flags.welcomeMessagePlayed && state.name !== "" && state.onGround !== undefined && state.time !== "---") {
+				if (!flags.welcomeMessagePlayed && state.name !== "" && state.weight > 0 && state.onGround !== undefined && state.time !== "---") {
 					flags.welcomeMessagePlayed = true;
 					if (state.onGround) {
-						speak("Welcome to the flight, Captain.", "briefing");
-						const anyEngineRunning = Object.values(state.engines || {}).some((n1) => n1 > 0);
-						if (!anyEngineRunning && state.beacon !== 1) {
-							speechManager.playBoardingMusic();
-						}
+						speechManager.speak("Welcome to the flight Captain.", { tone: "briefing" });
 					} else {
-						speak("Welcome back to the flight, Captain.", "briefing");
+						speechManager.speak("Welcome back to the flight Captain.", { tone: "briefing" });
 					}
 				}
 
-				return updated ? next : prev;
+				if (updated) {
+					if (next.name && next.weight) {
+						next.performance = calculatePerformance(next.name, next.weight);
+					}
+					return next;
+				}
+				return prev;
 			});
 		});
 
@@ -567,10 +630,42 @@ export const useTelemetry = () => {
 		};
 	}, []);
 
+	// Effect for boarding music logic
+	useEffect(() => {
+		// Only evaluate after initial data is somewhat populated
+		if (telemetry.name && telemetry.battery !== -1) {
+			const anyEngineRunning = Object.values(telemetry.engines || {}).some(s => s > 0);
+			const hasPower = telemetry.battery === 1 || telemetry.apu === 2 || telemetry.gpu === 1;
+			
+			// If beacon is on, or any engine is running, we are definitely NOT boarding.
+			// Also stop when boarding announcement has played (which happens when seatbelts turn on).
+			const isBoardingPhase = telemetry.onGround 
+				&& !anyEngineRunning 
+				&& telemetry.beacon === 0 
+				&& hasPower 
+				&& !flagsRef.current.boardingAnnouncementPlayed;
+			
+			if (isBoardingPhase) {
+				speechManager.playBoardingMusic(telemetry.livery);
+			} else {
+				speechManager.stopBoardingMusic();
+			}
+		}
+	}, [
+		telemetry.onGround, 
+		telemetry.engines, 
+		telemetry.beacon, 
+		telemetry.battery, 
+		telemetry.apu, 
+		telemetry.gpu, 
+		telemetry.name,
+		telemetry.livery
+	]);
+
 	// Effect for siren logic
 	useEffect(() => {
 		const anyEngineRunning = Object.values(telemetry.engines || {}).some(
-			(n1) => n1 > 20,
+			(engineState) => engineState === 2,
 		);
 		if (
 			anyEngineRunning &&

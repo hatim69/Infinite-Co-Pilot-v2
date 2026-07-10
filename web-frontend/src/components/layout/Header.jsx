@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Activity, Mic, Wifi } from 'lucide-react';
+import { Activity, Mic, Wifi, Navigation } from 'lucide-react';
 import { speechManager } from '../../utils/speech';
 
 const Header = ({ telemetry, isConnected }) => {
@@ -27,45 +27,31 @@ const Header = ({ telemetry, isConnected }) => {
   };
 
   return (
-    <header className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 mb-6 pb-6 border-b border-slate-700/50">
-      <div className="flex items-center gap-4">
-        <img src="/favicon.jpeg" alt="FlightDeck Logo" className="w-12 h-12 rounded shadow-lg border border-slate-700/50" />
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight text-slate-100 flex items-center gap-2">
-            FlightDeck
-          </h1>
-          <p className="text-sm text-teal-400 italic mt-0.5 font-medium tracking-wide">
-            Your intelligent second seat
-          </p>
+    <header className="flex flex-row justify-between items-center mb-6 pb-6 border-b border-slate-700/50">
+      <div className="flex items-center gap-3">
+        <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-teal-500/10 border border-teal-500/20 text-teal-400">
+          <Navigation className="w-4 h-4 transform rotate-45" />
         </div>
+        <h1 className="text-lg font-bold tracking-widest text-slate-100 uppercase">
+          FlightDeck
+        </h1>
       </div>
-      
-      <div className="flex flex-col items-start md:items-end gap-3 w-full md:w-auto mt-4 md:mt-0">
-        <div className="text-left md:text-right">
-          <div className="text-xl font-bold text-slate-200 font-mono">
-            {isConnected ? (telemetry.name || 'Aircraft Active') : 'Standing By'}
-          </div>
-          <div className="text-sm text-slate-400 uppercase tracking-widest mt-1">
-            {isConnected ? phase : 'Awaiting Connection'}
-          </div>
+
+      <div className="flex items-center gap-4">
+        <div className={`flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider ${isConnected ? 'text-teal-400' : 'text-slate-500'}`}>
+          <Wifi className="w-3.5 h-3.5" />
+          Link
         </div>
-        
-        <div className="flex items-center gap-4 mt-2">
-          <div className={`flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider ${isConnected ? 'text-teal-400' : 'text-slate-500'}`}>
-            <Wifi className="w-3.5 h-3.5" />
-            Link
-          </div>
-          <button 
-            onClick={toggleVoicePref}
-            title="Toggle Voice Gender (Female / Male)"
-            className={`flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider transition hover:text-teal-300 active:scale-95 ${isVoiceEnabled ? 'text-teal-400' : 'text-slate-500'}`}>
-            <Mic className="w-3.5 h-3.5" />
-            Voice: {voicePref}
-          </button>
-          <div className={`flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider ${telemetry.name ? 'text-teal-400' : 'text-slate-500'}`}>
-            <Activity className="w-3.5 h-3.5" />
-            Live
-          </div>
+        <button 
+          onClick={toggleVoicePref}
+          title="Toggle Voice Gender (Female / Male)"
+          className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-300 transition hover:text-white active:scale-95">
+          <Mic className="w-3.5 h-3.5" />
+          {voicePref}
+        </button>
+        <div className={`flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider ${telemetry.name ? 'text-teal-400' : 'text-slate-500'}`}>
+          <Activity className="w-3.5 h-3.5" />
+          Live
         </div>
       </div>
     </header>
