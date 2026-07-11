@@ -5,7 +5,8 @@ import { calculatePerformance, getFlapString } from "../utils/calculatePerforman
 import { formatTime } from "../utils/flightMath";
 
 const SOCKET_URL =
-	import.meta.env.VITE_WEBSOCKET_URL || "http://localhost:3000";
+	// import.meta.env.VITE_WEBSOCKET_URL || "http://localhost:3000";
+	import.meta.env.VITE_WEBSOCKET_URL;
 
 const airportCities = {
 	KJFK: "New York",
