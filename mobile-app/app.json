@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "name": "Infinite Co-Pilot",
+    "slug": "infinite-co-pilot",
+    "scheme": "infinitecopilot",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.infinitecopilot.app",
+      "infoPlist": {
+        "UIBackgroundModes": ["audio"],
+        "NSLocalNetworkUsageDescription": "Infinite Co-Pilot connects to Infinite Flight on your local network to provide real-time telemetry and crew announcements.",
+        "NSBonjourServices": ["_ifconnect._tcp"]
+      }
+    },
+    "android": {
+      "package": "com.infinitecopilot.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#07111F",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "permissions": [
+        "INTERNET",
+        "ACCESS_NETWORK_STATE",
+        "ACCESS_WIFI_STATE",
+        "CHANGE_WIFI_MULTICAST_STATE"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-audio",
+        {
+          "microphonePermission": false
+        }
+      ]
+    ]
+  }
+}
