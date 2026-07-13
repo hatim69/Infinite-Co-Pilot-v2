@@ -25,7 +25,11 @@ class SpeechManager {
     this.voiceEnabled = true;
     this.boardingMusic = null;
     this.sirenPlayer = null;
+    this.chimePlayer = null;
+    this.boardingAnnouncePlayer = null;
+    this.silentPlayer = null;
     this._audioConfigured = false;
+    this.isProcessingQueue = false;
     this.init();
   }
 
@@ -39,6 +43,26 @@ class SpeechManager {
     // Configure audio session for background playback
     // This allows TTS and audio to continue when the user switches to the game.
     await this._configureAudioSession();
+
+    // Fetch available system voices
+    try {
+      this.availableVoices = await Speech.getAvailableVoicesAsync();
+    } catch (e) {}
+
+    // Preload chime for instant zero-latency playback
+    try {
+      this.chimePlayer = createAudioPlayer(require("../../assets/chime.mp3"));
+    } catch (e) {}
+
+    // Initialize silent looping audio to keep iOS alive indefinitely
+    try {
+      // Using a genuine silent .wav file instead of a 0-volume mp3
+      // This prevents the MediaToolbox/AVAudioBuffer spam and stuttering issues on iOS
+      this.silentPlayer = createAudioPlayer(require("../../assets/silent.wav"));
+      this.silentPlayer.volume = 1; // Real silence doesn't need to be 0 volume
+      this.silentPlayer.loop = true;
+      this.silentPlayer.play();
+    } catch (e) {}
   }
 
   async _configureAudioSession() {
@@ -132,16 +156,66 @@ class SpeechManager {
     if (!this.voiceEnabled) return;
 
     const profile = this.getVoiceProfile(tone);
-    Speech.speak(spokenText, {
-      rate: profile.rate,
-      pitch: profile.pitch,
-    });
+    
+    this.speechQueue.push({ spokenText, options, profile });
+    this.processQueue();
+  }
+
+  async processQueue() {
+    if (this.isProcessingQueue) return;
+    this.isProcessingQueue = true;
+
+    while (this.speechQueue.length > 0) {
+      const { spokenText, options, profile } = this.speechQueue.shift();
+
+      if (options.withChime) {
+        try {
+          if (this.chimePlayer) {
+            try { this.chimePlayer.release(); } catch (e) {}
+          }
+          this.chimePlayer = createAudioPlayer(require("../../assets/chime.mp3"));
+          this.chimePlayer.play();
+        } catch (e) {}
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+      }
+
+      await new Promise((resolve) => {
+        let finalPitch = profile.pitch;
+        let voiceId = undefined;
+
+        if (this.voicePreference === "male") {
+          finalPitch = finalPitch * 0.9;
+          if (this.availableVoices) {
+            const maleVoice = this.availableVoices.find(
+              (v) =>
+                v.language.startsWith("en") &&
+                (v.name.includes("Daniel") || v.name.includes("Arthur") || v.name.includes("Aaron") || v.name.includes("Fred") || v.name.includes("Alex"))
+            );
+            if (maleVoice) voiceId = maleVoice.identifier;
+          }
+        }
+
+        Speech.speak(spokenText, {
+          voice: voiceId,
+          rate: profile.rate,
+          pitch: finalPitch,
+          onDone: resolve,
+          onStopped: resolve,
+          onError: resolve,
+        });
+      });
+    }
+
+    this.isProcessingQueue = false;
   }
 
   playChime() {
     try {
-      const player = createAudioPlayer(require("../../assets/chime.mp3"));
-      player.play();
+      if (this.chimePlayer) {
+        try { this.chimePlayer.release(); } catch (e) {}
+      }
+      this.chimePlayer = createAudioPlayer(require("../../assets/chime.mp3"));
+      this.chimePlayer.play();
     } catch (e) {
       console.log("[Speech] Chime play failed:", e);
     }
@@ -167,9 +241,12 @@ class SpeechManager {
     };
 
     try {
-      const audio = createAudioPlayer(getFile(livery));
+      if (this.boardingAnnouncePlayer) {
+        try { this.boardingAnnouncePlayer.release(); } catch (e) {}
+      }
+      this.boardingAnnouncePlayer = createAudioPlayer(getFile(livery));
       this.setDucking(true);
-      audio.play();
+      this.boardingAnnouncePlayer.play();
       setTimeout(() => {
         this.setDucking(false);
         this.playChime();
@@ -200,13 +277,21 @@ class SpeechManager {
       if (lower.includes("indigo")) return require("../../assets/music/indigo.mp3");
       if (lower.includes("lufthansa")) return require("../../assets/music/lufthansa.mp3");
       if (lower.includes("turkish")) return require("../../assets/music/turkish-airlines.mp3");
-      return null;
+      return require("../../assets/music/lufthansa.mp3"); // Fallback
     };
 
     try {
       const file = getFile(livery);
-      if (!file) return;
+      if (!file) {
+        console.log("[Speech] No boarding music for livery:", livery);
+        return;
+      }
+      if (this.boardingMusic) {
+        try { this.boardingMusic.release(); } catch (e) {}
+      }
       this.boardingMusic = createAudioPlayer(file);
+      this.boardingMusic.loop = true; // expo-audio uses 'loop' instead of 'isLooping'
+      this.boardingMusic.volume = 0.35;
       this.boardingMusic.play();
     } catch (e) {
       console.log("[Speech] Boarding music failed:", e);
@@ -220,6 +305,25 @@ class SpeechManager {
         this.boardingMusic.release();
       } catch (e) {}
       this.boardingMusic = null;
+    }
+  }
+
+  stopAll() {
+    this.speechQueue = [];
+    this.isProcessingQueue = false;
+    Speech.stop();
+    this.stopBoardingMusic();
+    if (this.chimePlayer) {
+      try { this.chimePlayer.pause(); this.chimePlayer.release(); } catch (e) {}
+      this.chimePlayer = null;
+    }
+    if (this.boardingAnnouncePlayer) {
+      try { this.boardingAnnouncePlayer.pause(); this.boardingAnnouncePlayer.release(); } catch (e) {}
+      this.boardingAnnouncePlayer = null;
+    }
+    if (this.sirenPlayer) {
+      try { this.sirenPlayer.pause(); this.sirenPlayer.release(); } catch (e) {}
+      this.sirenPlayer = null;
     }
   }
 }

@@ -162,17 +162,27 @@ class IFConnectClient {
       }
     };
 
-    mSocket = TcpSocket.createConnection(
-      { port: this._port, host: this._host },
-      () => {
-        console.log('[IFConnect] Manifest socket connected, requesting manifest...');
-        // Send manifest request: command -1, GET flag 0
-        const buf = Buffer.alloc(5);
-        buf.writeInt32LE(-1, 0);
-        buf.writeInt8(0, 4);
-        mSocket.write(buf);
+    try {
+      mSocket = TcpSocket.createConnection(
+        { port: this._port, host: this._host },
+        () => {
+          console.log('[IFConnect] Manifest socket connected, requesting manifest...');
+          // Send manifest request: command -1, GET flag 0
+          const buf = Buffer.alloc(5);
+          buf.writeInt32LE(-1, 0);
+          buf.writeInt8(0, 4);
+          mSocket.write(buf);
+        }
+      );
+    } catch (e) {
+      console.log('[IFConnect] TCP Manifest socket creation error (unsupported environment):', e);
+      if (!done) {
+        done = true;
+        cleanup();
+        this._emit('error', { message: 'TCP socket not supported in this environment' });
       }
-    );
+      return;
+    }
 
     mSocket.on('data', (rawData) => {
       if (done) return;
@@ -245,31 +255,40 @@ class IFConnectClient {
   _openPollSocket() {
     console.log('[IFConnect] Opening poll socket...');
 
-    const socket = TcpSocket.createConnection(
-      { port: this._port, host: this._host },
-      () => {
-        console.log('[IFConnect] Poll socket connected. Starting telemetry stream.');
-        this._pollSocket = socket;
-        this._isConnected = true;
-        this._receiveBuffer = null;
-        this._isPollWaiting = false;
-        this._lastDataTime = Date.now();
+    let socket;
+    try {
+      socket = TcpSocket.createConnection(
+        { port: this._port, host: this._host },
+        () => {
+          console.log('[IFConnect] Poll socket connected. Starting telemetry stream.');
+          this._pollSocket = socket;
+          this._isConnected = true;
+          this._receiveBuffer = null;
+          this._isPollWaiting = false;
+          this._lastDataTime = Date.now();
 
-        // Fire success callback
-        if (this._successCallback) {
-          try {
-            this._successCallback();
-          } catch (e) {}
-          this._successCallback = null;
+          // Fire success callback
+          if (this._successCallback) {
+            try {
+              this._successCallback();
+            } catch (e) {}
+            this._successCallback = null;
+          } else {
+            this._emit('connect');
+          }
+
+          // Start polling
+          this._sendNextPoll();
+
+          // Start watchdog to detect silent drops
+          this._startWatchdog();
         }
-
-        // Start polling
-        this._sendNextPoll();
-
-        // Start watchdog to detect silent drops
-        this._startWatchdog();
-      }
-    );
+      );
+    } catch (e) {
+      console.log('[IFConnect] TCP Poll socket creation error (unsupported environment):', e);
+      this._emit('error', { message: 'TCP socket not supported in this environment' });
+      return;
+    }
 
     socket.on('data', (rawData) => {
       this._lastDataTime = Date.now();
@@ -412,6 +431,7 @@ class IFConnectClient {
     this._reconnectTimer = setTimeout(() => {
       if (!this._isConnected) return;
       console.log('[IFConnect] Attempting reconnect...');
+      this._emit('disconnect', { message: 'Connection lost, reconnecting...' });
       this._receiveBuffer = null;
       this._isPollWaiting = false;
 

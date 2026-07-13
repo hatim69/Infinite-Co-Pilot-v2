@@ -147,6 +147,7 @@ export const useTelemetry = () => {
     eightyKnots: false,
     vSpeedBriefed: false,
     positiveRate: false,
+    hasFlown: false,
     welcome: false,
     alt5k: false,
     alt10k: false,
@@ -167,56 +168,56 @@ export const useTelemetry = () => {
 
   useEffect(() => {
     // ─── 1. UDP Auto-Discovery ──────────────────────────────────────────────
-    const discoverySocket = dgram.createSocket({ type: "udp4", reusePort: true });
-
+    let discoverySocket;
     try {
+      discoverySocket = dgram.createSocket({ type: "udp4", reusePort: true });
       discoverySocket.bind(15000, "0.0.0.0");
-    } catch (e) {
-      console.log("[Discovery] UDP bind error (likely hot-reload):", e);
-    }
 
-    discoverySocket.on("message", (msg) => {
-      try {
-        const data = JSON.parse(msg.toString());
-        if (!data.addresses || data.addresses.length === 0) return;
+      discoverySocket.on("message", (msg) => {
+        try {
+          const data = JSON.parse(msg.toString());
+          if (!data.addresses || data.addresses.length === 0) return;
 
-        const devId = (data.deviceId || data.deviceName || "unknown-device").trim();
-        const devName = (data.deviceName || data.deviceId || "Unknown Device").trim();
-        const addrs = data.Addresses || data.addresses || [];
+          const devId = (data.deviceId || data.deviceName || "unknown-device").trim();
+          const devName = (data.deviceName || data.deviceId || "Unknown Device").trim();
+          const addrs = data.Addresses || data.addresses || [];
 
-        // Prefer private-network IPs
-        let ip = addrs[0]?.trim() || "";
-        for (const a of addrs) {
-          const trimmed = a.trim();
-          if (
-            trimmed.startsWith("192.168.") ||
-            trimmed.startsWith("10.") ||
-            trimmed.startsWith("172.")
-          ) {
-            ip = trimmed;
-            break;
+          // Prefer private-network IPs
+          let ip = addrs[0]?.trim() || "";
+          for (const a of addrs) {
+            const trimmed = a.trim();
+            if (
+              trimmed.startsWith("192.168.") ||
+              trimmed.startsWith("10.") ||
+              trimmed.startsWith("172.")
+            ) {
+              ip = trimmed;
+              break;
+            }
           }
+          if (!ip) return;
+
+          setDiscoveredDevices((prev) => {
+            const exists = prev.find((d) => d.deviceId === devId);
+            if (!exists) return [...prev, { deviceId: devId, deviceName: devName, ip }];
+            return prev;
+          });
+
+          // Auto-connect on first discovered device
+          if (!isConnectedRef.current && connectToIFRef.current) {
+            connectToIFRef.current(ip);
+          }
+        } catch (e) {
+          // Silently ignore malformed UDP packets
         }
-        if (!ip) return;
+      });
 
-        setDiscoveredDevices((prev) => {
-          const exists = prev.find((d) => d.deviceId === devId);
-          if (!exists) return [...prev, { deviceId: devId, deviceName: devName, ip }];
-          return prev;
-        });
-
-        // Auto-connect on first discovered device
-        if (!isConnectedRef.current && connectToIFRef.current) {
-          connectToIFRef.current(ip);
-        }
-      } catch (e) {
-        // Silently ignore malformed UDP packets
-      }
-    });
-
-    discoverySocket.on("error", (e) => {
-      console.log("[Discovery] UDP socket error:", e);
-    });
+      discoverySocket.on("error", (e) => {
+        console.log("[Discovery] UDP socket error:", e);
+      });
+    } catch (e) {
+      console.log("[Discovery] UDP socket creation/bind error (likely unsupported environment or hot-reload):", e);
+    }
 
     // ─── 2. IF Connect client data handler ────────────────────────────────
 
@@ -225,9 +226,10 @@ export const useTelemetry = () => {
       const flags = flagsRef.current;
 
       // Gate announcements — suppress first 2.5 seconds after connect
-      const speak = (msg, tone = "callout") => {
+      const speak = (msg, options = {}) => {
         if (!flags.connectedAt || Date.now() - flags.connectedAt < 2500) return;
-        speechManager.speak(msg, { tone });
+        const opts = typeof options === 'string' ? { tone: options } : { tone: "callout", ...options };
+        speechManager.speak(msg, opts);
       };
 
       setTelemetry((prev) => {
@@ -245,7 +247,10 @@ export const useTelemetry = () => {
         if (command === "aircraft/0/name") updateNext("name", data);
         if (command === "aircraft/0/livery") updateNext("livery", data);
         if (command === "aircraft/0/systems/load/total_weight") updateNext("weight", data);
-        if (command === "aircraft/0/is_on_ground") updateNext("onGround", data);
+        if (command === "aircraft/0/is_on_ground") {
+          updateNext("onGround", data);
+          if (data === false) flags.hasFlown = true;
+        }
         if (command === "aircraft/0/systems/engines/0/throttle_lever") updateNext("throttle", data);
 
         // ── Airspeed ─────────────────────────────────────────────────────
@@ -283,7 +288,7 @@ export const useTelemetry = () => {
           const gs = data * 1.94384;
           updateNext("gs", gs);
 
-          if (state.onGround && gs < 30 && !flags.welcome) {
+          if (state.onGround && flags.hasFlown && gs < 30 && !flags.welcome) {
             const cityName = airportCities[state.airport] || state.airport || "your destination";
             speak(
               `Ladies and gentlemen, welcome to ${cityName}. The local time is ${state.time}. ` +
@@ -396,32 +401,39 @@ export const useTelemetry = () => {
         if (n1Match) {
           const engNum = parseInt(n1Match[1], 10) + 1;
           const n1 = data * 100;
-          let cur = state.engines[engNum] !== undefined ? state.engines[engNum] : 0;
+          let cur = state.engines[engNum];
           let nxt = cur;
 
-          if (cur === 0 && n1 >= 1.0) {
-            speak(`Engine ${engNum} starting.`, "briefing");
-            nxt = 1;
-          } else if (cur === 1) {
-            if (n1 >= 18.0) {
-              speak(`Engine ${engNum} started.`, "notice");
-              nxt = 2;
-            } else if (n1 < 0.5) {
-              speak(`Engine ${engNum} shutdown.`, "notice");
-              nxt = 0;
-            }
-          } else if (cur === 2) {
-            if (n1 < 5.0) {
-              speak(`Engine ${engNum} shutting down.`, "notice");
-              nxt = 3;
-            }
-          } else if (cur === 3) {
-            if (n1 < 0.5) {
-              speak(`Engine ${engNum} shutdown.`, "notice");
-              nxt = 0;
-            } else if (n1 >= 15.0) {
-              speak(`Engine ${engNum} started.`, "notice");
-              nxt = 2;
+          if (cur === undefined) {
+            // Initialize without speech
+            if (n1 >= 15.0) nxt = 2;
+            else if (n1 >= 1.0) nxt = 1;
+            else nxt = 0;
+          } else {
+            if (cur === 0 && n1 >= 1.0) {
+              speak(`Engine ${engNum} starting.`, "briefing");
+              nxt = 1;
+            } else if (cur === 1) {
+              if (n1 >= 18.0) {
+                speak(`Engine ${engNum} started.`, "notice");
+                nxt = 2;
+              } else if (n1 < 0.5) {
+                speak(`Engine ${engNum} shutdown.`, "notice");
+                nxt = 0;
+              }
+            } else if (cur === 2) {
+              if (n1 < 5.0) {
+                speak(`Engine ${engNum} shutting down.`, "notice");
+                nxt = 3;
+              }
+            } else if (cur === 3) {
+              if (n1 < 0.5) {
+                speak(`Engine ${engNum} shutdown.`, "notice");
+                nxt = 0;
+              } else if (n1 >= 15.0) {
+                speak(`Engine ${engNum} started.`, "notice");
+                nxt = 2;
+              }
             }
           }
 
@@ -519,9 +531,8 @@ export const useTelemetry = () => {
               flags.boardingAnnouncementPlayed = true;
               speechManager.playBoardingAnnouncement(state.livery);
             } else {
-              speechManager.playChime();
+              speak(`Seatbelt signs ${on ? "on" : "off"}.`, { tone: "notice", withChime: true });
             }
-            speak(`Seatbelt signs ${on ? "on" : "off"}.`, "notice");
           }
           updateNext("seatbelt", val);
         }
@@ -530,8 +541,7 @@ export const useTelemetry = () => {
           const on = data === 1 || data === true;
           const val = on ? 1 : 0;
           if (state.smoking !== -1 && val !== state.smoking) {
-            speechManager.playChime();
-            speak(`No smoking signs ${on ? "on" : "off"}.`, "notice");
+            speak(`No smoking signs ${on ? "on" : "off"}.`, { tone: "notice", withChime: true });
           }
           updateNext("smoking", val);
         }
@@ -644,17 +654,31 @@ export const useTelemetry = () => {
       setConnectionStatus("AWAITING SIMULATOR LINK...");
       setConnectedIp("");
       isConnectedRef.current = false;
+      speechManager.stopAll();
+    };
+
+    const disconnectHandler = () => {
+      setConnectionStatus("CONNECTING...");
+    };
+
+    const reconnectHandler = () => {
+      setConnectionStatus("FLIGHT LINK ACTIVE");
+      flagsRef.current.connectedAt = Date.now();
     };
 
     ifConnect.on("error", errorHandler);
+    ifConnect.on("disconnect", disconnectHandler);
+    ifConnect.on("connect", reconnectHandler);
 
     // ─── 5. Cleanup ───────────────────────────────────────────────────────
     return () => {
       try {
-        discoverySocket.close();
+        if (discoverySocket) discoverySocket.close();
       } catch (e) {}
       ifConnect.off("data", dataHandler);
       ifConnect.off("error", errorHandler);
+      ifConnect.off("disconnect", disconnectHandler);
+      ifConnect.off("connect", reconnectHandler);
       ifConnect.close(() => {});
     };
   }, []);

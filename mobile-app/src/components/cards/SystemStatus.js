@@ -28,7 +28,7 @@ const SystemStatus = ({ label, value, icon: Icon, highlight }) => {
         ]}
         numberOfLines={1}
       >
-        {value !== undefined && value !== null && value !== '' ? value : '---'}
+        {value !== undefined && value !== null && value !== '' ? value : '...'}
       </Text>
     </View>
   );

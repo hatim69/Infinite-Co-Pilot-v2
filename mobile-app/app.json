@@ -11,9 +11,16 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.infinitecopilot.app",
       "infoPlist": {
-        "UIBackgroundModes": ["audio"],
+        "UIBackgroundModes": [
+          "audio"
+        ],
         "NSLocalNetworkUsageDescription": "Infinite Co-Pilot connects to Infinite Flight on your local network to provide real-time telemetry and crew announcements.",
-        "NSBonjourServices": ["_ifconnect._tcp"]
+        "NSBonjourServices": [
+          "_ifconnect._tcp"
+        ],
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true
+        }
       }
     },
     "android": {
@@ -28,7 +35,11 @@
         "INTERNET",
         "ACCESS_NETWORK_STATE",
         "ACCESS_WIFI_STATE",
-        "CHANGE_WIFI_MULTICAST_STATE"
+        "CHANGE_WIFI_MULTICAST_STATE",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
       ]
     },
     "web": {
@@ -41,6 +52,11 @@
           "microphonePermission": false
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "2f95494b-64ef-4280-815a-1ff74baa5744"
+      }
+    }
   }
 }

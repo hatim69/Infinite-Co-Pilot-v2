@@ -7,10 +7,10 @@ import { View, Text, StyleSheet, Platform } from 'react-native';
  */
 const FlightStrip = ({ telemetry }) => {
   const fmt = (val, decimals = 0) =>
-    val !== null && val !== undefined ? Math.round(val).toFixed(decimals) : '---';
+    val !== null && val !== undefined ? Math.round(val).toFixed(decimals) : '...';
 
   const vsValue = telemetry.vs !== null && telemetry.vs !== undefined ? Math.round(telemetry.vs) : null;
-  const vsStr = vsValue !== null ? (vsValue >= 0 ? `+${vsValue}` : `${vsValue}`) : '---';
+  const vsStr = vsValue !== null ? (vsValue >= 0 ? `+${vsValue}` : `${vsValue}`) : '...';
   const vsColor = vsValue === null ? '#94A3B8' : vsValue > 200 ? '#34D399' : vsValue < -200 ? '#F87171' : '#94A3B8';
 
   return (

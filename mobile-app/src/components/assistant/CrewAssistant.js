@@ -1,15 +1,8 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { Mic, CheckSquare, ShieldCheck, Zap } from 'lucide-react-native';
-import { speechManager } from '../../utils/speech';
+import { CheckSquare, ShieldCheck, Zap } from 'lucide-react-native';
 
 const CrewAssistant = ({ telemetry, isConnected }) => {
-  const [voiceEnabled, setVoiceEnabled] = useState(speechManager.voiceEnabled);
-
-  const toggleVoice = () => {
-    const isNowEnabled = speechManager.toggleVoice();
-    setVoiceEnabled(isNowEnabled);
-  };
 
   let phaseTitle = "Standing By";
   let checklist = [];
@@ -49,18 +42,6 @@ const CrewAssistant = ({ telemetry, isConnected }) => {
             </View>
             <Text style={styles.headerTitle}>FLIGHTDECK ASSISTANT</Text>
           </View>
-
-          {!voiceEnabled ? (
-            <TouchableOpacity onPress={toggleVoice} style={styles.voiceBtnDisabled}>
-              <Mic size={14} color="#FBBF24" />
-              <Text style={styles.voiceBtnTextDisabled}>Enable Voice</Text>
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity onPress={toggleVoice} style={styles.voiceBtnEnabled}>
-              <Mic size={14} color="#2DD4BF" />
-              <Text style={styles.voiceBtnTextEnabled}>Voice Active</Text>
-            </TouchableOpacity>
-          )}
         </View>
 
         <View style={styles.content}>
@@ -129,40 +110,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#E2E8F0',
     letterSpacing: 1.5,
-  },
-  voiceBtnDisabled: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(217, 119, 6, 0.2)',
-    borderColor: 'rgba(217, 119, 6, 0.5)',
-    borderWidth: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 6,
-    gap: 4,
-  },
-  voiceBtnTextDisabled: {
-    color: '#FBBF24',
-    fontSize: 12,
-    fontWeight: '600',
-    marginLeft: 4,
-  },
-  voiceBtnEnabled: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(20, 184, 166, 0.1)',
-    borderColor: 'rgba(20, 184, 166, 0.2)',
-    borderWidth: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 6,
-    gap: 4,
-  },
-  voiceBtnTextEnabled: {
-    color: '#2DD4BF',
-    fontSize: 12,
-    fontWeight: '600',
-    marginLeft: 4,
   },
   content: {
     marginBottom: 16,
