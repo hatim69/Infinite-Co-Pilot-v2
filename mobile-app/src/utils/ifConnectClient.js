@@ -50,6 +50,7 @@ class IFConnectClient {
 
     // Active TCP socket for polling
     this._pollSocket = null;
+    this._mSocket = null; // Track manifest socket to abort on close
     this._receiveBuffer = null;
     this._isPollWaiting = false;
 
@@ -62,6 +63,7 @@ class IFConnectClient {
     // Timers
     this._reconnectTimer = null;
     this._watchdogTimer = null;
+    this._mTimeout = null;
     this._lastDataTime = 0;
   }
 
@@ -131,12 +133,20 @@ class IFConnectClient {
     this._isConnected = false;
     clearTimeout(this._reconnectTimer);
     clearInterval(this._watchdogTimer);
+    clearTimeout(this._mTimeout);
 
     if (this._pollSocket) {
       try {
         this._pollSocket.destroy();
       } catch (e) {}
       this._pollSocket = null;
+    }
+    
+    if (this._mSocket) {
+      try {
+        this._mSocket.destroy();
+      } catch (e) {}
+      this._mSocket = null;
     }
 
     this._resetState();
@@ -146,24 +156,24 @@ class IFConnectClient {
   // ─── Internal: Manifest Phase ─────────────────────────────────────────────
 
   _fetchManifest() {
-    let mSocket = null;
+    this._mSocket = null;
     let mBuffer = null;
     let mStringLength = 0;
     let done = false;
-    let timeoutId = null;
+    this._mTimeout = null;
 
     const cleanup = () => {
-      clearTimeout(timeoutId);
-      if (mSocket) {
+      clearTimeout(this._mTimeout);
+      if (this._mSocket) {
         try {
-          mSocket.destroy();
+          this._mSocket.destroy();
         } catch (e) {}
-        mSocket = null;
+        this._mSocket = null;
       }
     };
 
     try {
-      mSocket = TcpSocket.createConnection(
+      this._mSocket = TcpSocket.createConnection(
         { port: this._port, host: this._host },
         () => {
           console.log('[IFConnect] Manifest socket connected, requesting manifest...');
@@ -171,7 +181,7 @@ class IFConnectClient {
           const buf = Buffer.alloc(5);
           buf.writeInt32LE(-1, 0);
           buf.writeInt8(0, 4);
-          mSocket.write(buf);
+          if (this._mSocket) this._mSocket.write(buf);
         }
       );
     } catch (e) {
@@ -184,7 +194,7 @@ class IFConnectClient {
       return;
     }
 
-    mSocket.on('data', (rawData) => {
+    this._mSocket.on('data', (rawData) => {
       if (done) return;
       const chunk = Buffer.isBuffer(rawData) ? rawData : Buffer.from(rawData);
       mBuffer = mBuffer ? Buffer.concat([mBuffer, chunk]) : chunk;
@@ -200,12 +210,16 @@ class IFConnectClient {
         const manifestStr = mBuffer.toString('utf8', 12, 12 + mStringLength);
         this._parseManifest(manifestStr);
         cleanup();
-        // Proceed to open the poll socket
-        this._openPollSocket();
+        // Proceed to open the poll socket after a brief delay
+        // This ensures the simulator's TCP server has time to properly close the manifest session
+        setTimeout(() => {
+          if (this._isConnected || !done) return;
+          this._openPollSocket();
+        }, 500);
       }
     });
 
-    mSocket.on('error', (err) => {
+    this._mSocket.on('error', (err) => {
       if (done) return;
       console.log('[IFConnect] Manifest error:', err.message);
       done = true;
@@ -213,14 +227,14 @@ class IFConnectClient {
       this._emit('error', { message: err.message });
     });
 
-    mSocket.on('close', () => {
+    this._mSocket.on('close', () => {
       if (!done) {
         console.log('[IFConnect] Manifest socket closed prematurely');
       }
     });
 
     // Abort if manifest takes too long
-    timeoutId = setTimeout(() => {
+    this._mTimeout = setTimeout(() => {
       if (!done) {
         done = true;
         console.log('[IFConnect] Manifest fetch timed out');

@@ -516,6 +516,7 @@ export const useTelemetry = () => {
             speak(`${name} ${on ? "on" : "off"}.`, "notice");
             if (key === "strobe" && on && state.onGround && !flags.vSpeedBriefed && state.weight > 0) {
               flags.vSpeedBriefed = true;
+              speechManager.stopBoardingAnnouncement();
               speak("Cabin crew prepare for take off.", "notice");
             }
           }

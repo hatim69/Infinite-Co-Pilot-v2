@@ -170,10 +170,11 @@ class SpeechManager {
 
       if (options.withChime) {
         try {
-          if (this.chimePlayer) {
-            try { this.chimePlayer.release(); } catch (e) {}
+          if (!this.chimePlayer) {
+            this.chimePlayer = createAudioPlayer(require("../../assets/chime.mp3"));
+          } else {
+            this.chimePlayer.seekTo(0);
           }
-          this.chimePlayer = createAudioPlayer(require("../../assets/chime.mp3"));
           this.chimePlayer.play();
         } catch (e) {}
         await new Promise((resolve) => setTimeout(resolve, 1500));
@@ -211,10 +212,11 @@ class SpeechManager {
 
   playChime() {
     try {
-      if (this.chimePlayer) {
-        try { this.chimePlayer.release(); } catch (e) {}
+      if (!this.chimePlayer) {
+        this.chimePlayer = createAudioPlayer(require("../../assets/chime.mp3"));
+      } else {
+        this.chimePlayer.seekTo(0);
       }
-      this.chimePlayer = createAudioPlayer(require("../../assets/chime.mp3"));
       this.chimePlayer.play();
     } catch (e) {
       console.log("[Speech] Chime play failed:", e);
@@ -257,6 +259,17 @@ class SpeechManager {
     }
   }
 
+  stopBoardingAnnouncement() {
+    if (this.boardingAnnouncePlayer) {
+      try {
+        this.boardingAnnouncePlayer.pause();
+        this.boardingAnnouncePlayer.release();
+      } catch (e) {}
+      this.boardingAnnouncePlayer = null;
+      this.setDucking(false);
+    }
+  }
+
   playSiren() {
     if (this.sirenPlaying) return;
     this.sirenPlaying = true;
@@ -291,7 +304,7 @@ class SpeechManager {
       }
       this.boardingMusic = createAudioPlayer(file);
       this.boardingMusic.loop = true; // expo-audio uses 'loop' instead of 'isLooping'
-      this.boardingMusic.volume = 0.35;
+      this.boardingMusic.volume = 0.25;
       this.boardingMusic.play();
     } catch (e) {
       console.log("[Speech] Boarding music failed:", e);

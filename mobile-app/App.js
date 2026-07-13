@@ -23,7 +23,7 @@ import {
   Platform,
 } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
-import notifee, { AndroidImportance, AndroidColor } from '@notifee/react-native';
+import notifee, { AndroidImportance, AndroidColor, AndroidForegroundServiceType } from '@notifee/react-native';
 
 notifee.registerForegroundService((notification) => {
   return new Promise(() => {
@@ -128,6 +128,16 @@ export default function App() {
     setTimeout(() => {
       setVoicePreferenceState(speechManager.voicePreference);
     }, 500);
+
+    // Request permissions on first open (Android 13+ & iOS)
+    async function requestPermissions() {
+      try {
+        await notifee.requestPermission();
+      } catch (e) {
+        console.log("Permission request failed:", e);
+      }
+    }
+    requestPermissions();
   }, []);
 
   const scrollViewRef = useRef(null);
@@ -171,6 +181,7 @@ export default function App() {
             android: {
               channelId,
               asForegroundService: true,
+              foregroundServiceTypes: [AndroidForegroundServiceType.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK],
               color: notifee.AndroidColor?.AQUA || '#0D9488',
               ongoing: true,
             },

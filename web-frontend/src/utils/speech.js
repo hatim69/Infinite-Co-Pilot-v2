@@ -239,7 +239,7 @@ class SpeechManager {
 		const file = getMusicFile(livery);
 		this.boardingMusic = new Audio(`/music/${file}`);
 		this.boardingMusic.loop = true;
-		this.boardingMusic.volume = 0.35; // Peaceful background volume
+		this.boardingMusic.volume = 0.25; // Peaceful background volume
 		this.boardingMusic.play().catch(e => console.error("Boarding music play failed:", e));
 	}
 
