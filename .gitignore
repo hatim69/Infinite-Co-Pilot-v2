@@ -4,3 +4,5 @@ flight_deck_dashboard.html
 .DS_Store
 test*.js
 *.log
+Global Airport Database (ICAO) - airport-codes.csv
+.DS_Store

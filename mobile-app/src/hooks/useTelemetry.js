@@ -17,20 +17,7 @@ import { speechManager } from "../utils/speech";
 import { calculatePerformance, getFlapString } from "../utils/calculatePerformance";
 import { formatTime } from "../utils/flightMath";
 
-const airportCities = {
-  KJFK: "New York",
-  KLAX: "Los Angeles",
-  EGLL: "London",
-  LFPG: "Paris",
-  EDDF: "Frankfurt",
-  RJTT: "Tokyo",
-  OMDB: "Dubai",
-  VHHH: "Hong Kong",
-  WSSS: "Singapore",
-  YSSY: "Sydney",
-  KSFO: "San Francisco",
-  KORD: "Chicago",
-};
+import airportNames from "../utils/airports.json";
 
 const ALTITUDE_CALLOUT_BUFFER_FT = 100;
 const AIRSPEED_CALLOUT_BUFFER_KTS = 3;
@@ -289,7 +276,7 @@ export const useTelemetry = () => {
           updateNext("gs", gs);
 
           if (state.onGround && flags.hasFlown && gs < 30 && !flags.welcome) {
-            const cityName = airportCities[state.airport] || state.airport || "your destination";
+            const cityName = airportNames[state.airport] || state.airport || "your destination";
             speak(
               `Ladies and gentlemen, welcome to ${cityName}. The local time is ${state.time}. ` +
                 `Please remain seated with your seatbelt fastened until the aircraft has come to a complete stop.`,

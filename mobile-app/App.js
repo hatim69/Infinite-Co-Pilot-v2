@@ -67,6 +67,7 @@ import { getFlapString } from "./src/utils/calculatePerformance";
 import SystemStatus from "./src/components/cards/SystemStatus";
 import FlightStrip from "./src/components/layout/FlightStrip";
 import CrewAssistant from "./src/components/assistant/CrewAssistant";
+import SettingsModal from "./src/components/ui/SettingsModal";
 
 // ─── Section Header ────────────────────────────────────────────────────────────
 const SectionHeader = ({ title, icon: Icon, color }) => (
@@ -122,6 +123,7 @@ export default function App() {
   const [voicePreference, setVoicePreferenceState] = useState("female");
   const [showLogs, setShowLogs] = useState(true);
   const [isInBackground, setIsInBackground] = useState(false);
+  const [settingsVisible, setSettingsVisible] = useState(false);
 
   useEffect(() => {
     // Sync initial voice preference
@@ -490,6 +492,10 @@ export default function App() {
             )}
           </View>
           <View style={styles.headerRight}>
+            <TouchableOpacity onPress={() => setSettingsVisible(true)} style={styles.iconBtn} activeOpacity={0.7}>
+              <Settings size={18} color="#94A3B8" />
+            </TouchableOpacity>
+
             <TouchableOpacity onPress={toggleVoiceGender} style={[styles.iconBtn, { width: 'auto', paddingHorizontal: 10 }]} activeOpacity={0.7}>
               <Text style={{color: '#9CA3AF', fontSize: 11, fontWeight: 'bold'}}>{voicePreference === 'female' ? 'FEMALE' : 'MALE'}</Text>
             </TouchableOpacity>
@@ -533,6 +539,7 @@ export default function App() {
         {/* ── Main content ──────────────────────────────────────────── */}
         {isConnected ? renderDashboard() : renderConnectionScreen()}
       </View>
+      <SettingsModal visible={settingsVisible} onClose={() => setSettingsVisible(false)} />
     </SafeAreaView>
     </SafeAreaProvider>
   );

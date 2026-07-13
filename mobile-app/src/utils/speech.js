@@ -23,6 +23,14 @@ class SpeechManager {
     this.isDucking = false;
     this.voicePreference = "female";
     this.voiceEnabled = true;
+
+    // Volumes
+    this.masterVolume = 1.0;
+    this.coPilotVolume = 1.0;
+    this.boardingMusicVolume = 1.0;
+    this.safetyBriefingVolume = 1.0;
+    this.chimeEnabled = true;
+
     this.boardingMusic = null;
     this.sirenPlayer = null;
     this.chimePlayer = null;
@@ -34,10 +42,20 @@ class SpeechManager {
   }
 
   async init() {
-    // Load saved voice preference
+    // Load saved voice preference and volumes
     try {
       const pref = await AsyncStorage.getItem("voicePreference");
       if (pref) this.voicePreference = pref;
+
+      const storedVolumes = await AsyncStorage.getItem("appVolumes");
+      if (storedVolumes) {
+        const parsed = JSON.parse(storedVolumes);
+        this.masterVolume = parsed.masterVolume ?? 1.0;
+        this.coPilotVolume = parsed.coPilotVolume ?? 1.0;
+        this.boardingMusicVolume = parsed.boardingMusicVolume ?? 1.0;
+        this.safetyBriefingVolume = parsed.safetyBriefingVolume ?? 1.0;
+        this.chimeEnabled = parsed.chimeEnabled ?? true;
+      }
     } catch (e) {}
 
     // Configure audio session for background playback
@@ -101,6 +119,37 @@ class SpeechManager {
   async setVoicePreference(preference) {
     this.voicePreference = preference;
     await AsyncStorage.setItem("voicePreference", preference);
+  }
+
+  async setVolumes(volumes) {
+    this.masterVolume = volumes.masterVolume ?? this.masterVolume;
+    this.coPilotVolume = volumes.coPilotVolume ?? this.coPilotVolume;
+    this.boardingMusicVolume = volumes.boardingMusicVolume ?? this.boardingMusicVolume;
+    this.safetyBriefingVolume = volumes.safetyBriefingVolume ?? this.safetyBriefingVolume;
+    this.chimeEnabled = volumes.chimeEnabled ?? this.chimeEnabled;
+
+    try {
+      await AsyncStorage.setItem("appVolumes", JSON.stringify({
+        masterVolume: this.masterVolume,
+        coPilotVolume: this.coPilotVolume,
+        boardingMusicVolume: this.boardingMusicVolume,
+        safetyBriefingVolume: this.safetyBriefingVolume,
+        chimeEnabled: this.chimeEnabled,
+      }));
+    } catch (e) {
+      console.log("[Speech] Error saving volumes:", e);
+    }
+
+    // Apply live volume updates
+    if (this.boardingMusic) {
+      this.boardingMusic.volume = 0.25 * this.masterVolume * this.boardingMusicVolume;
+    }
+    if (this.boardingAnnouncePlayer) {
+      this.boardingAnnouncePlayer.volume = 1.0 * this.masterVolume * this.safetyBriefingVolume;
+    }
+    if (this.chimePlayer) {
+      this.chimePlayer.volume = 1.0 * this.masterVolume;
+    }
   }
 
   formatText(text, tone) {
@@ -168,7 +217,7 @@ class SpeechManager {
     while (this.speechQueue.length > 0) {
       const { spokenText, options, profile } = this.speechQueue.shift();
 
-      if (options.withChime) {
+      if (options.withChime && this.chimeEnabled) {
         try {
           if (!this.chimePlayer) {
             this.chimePlayer = createAudioPlayer(require("../../assets/chime.mp3"));
@@ -200,6 +249,7 @@ class SpeechManager {
           voice: voiceId,
           rate: profile.rate,
           pitch: finalPitch,
+          volume: profile.volume * this.masterVolume * this.coPilotVolume,
           onDone: resolve,
           onStopped: resolve,
           onError: resolve,
@@ -211,6 +261,7 @@ class SpeechManager {
   }
 
   playChime() {
+    if (!this.chimeEnabled) return;
     try {
       if (!this.chimePlayer) {
         this.chimePlayer = createAudioPlayer(require("../../assets/chime.mp3"));
@@ -247,6 +298,7 @@ class SpeechManager {
         try { this.boardingAnnouncePlayer.release(); } catch (e) {}
       }
       this.boardingAnnouncePlayer = createAudioPlayer(getFile(livery));
+      this.boardingAnnouncePlayer.volume = 1.0 * this.masterVolume * this.safetyBriefingVolume;
       this.setDucking(true);
       this.boardingAnnouncePlayer.play();
       setTimeout(() => {
@@ -304,7 +356,7 @@ class SpeechManager {
       }
       this.boardingMusic = createAudioPlayer(file);
       this.boardingMusic.loop = true; // expo-audio uses 'loop' instead of 'isLooping'
-      this.boardingMusic.volume = 0.25;
+      this.boardingMusic.volume = 0.25 * this.masterVolume * this.boardingMusicVolume;
       this.boardingMusic.play();
     } catch (e) {
       console.log("[Speech] Boarding music failed:", e);
