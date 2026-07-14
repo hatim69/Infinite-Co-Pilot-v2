@@ -320,11 +320,13 @@ export const useTelemetry = () => {
 
           if (state.onGround && flags.hasFlown && gs < 30 && !flags.welcome) {
             const cityName = airportNames[state.airport] || state.airport || "your destination";
-            speak(
+            const welcomeText =
               `Ladies and gentlemen, welcome to ${cityName}. The local time is ${state.time}. ` +
-                `Please remain seated with your seatbelt fastened until the aircraft has come to a complete stop.`,
-              "briefing"
-            );
+              `Please remain seated with your seatbelt fastened until the aircraft has come to a complete stop.`;
+            // Route through Amazon Polly Neural TTS (Ruth for female, Matthew for male)
+            // Automatically falls back to expo-speech if the backend is unreachable.
+            const pollyVoice = speechManager.voicePreference === "male" ? "Matthew" : "Ruth";
+            speechManager.speakWithPollyFallback(welcomeText, pollyVoice, { tone: "briefing" });
             flags.welcome = true;
           }
         }

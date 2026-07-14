@@ -2,16 +2,25 @@
  * speech.js
  *
  * Manages all audio output for Infinite Co-Pilot:
- *   - TTS announcements via expo-speech
+ *   - TTS announcements via expo-speech (all standard callouts)
+ *   - Amazon Polly Neural TTS for the arrival welcome announcement
  *   - Chime, boarding announcements, boarding music, and siren via expo-audio
  *
  * Background audio is configured so announcements fire even when the user
  * switches to the game app. Requires UIBackgroundModes: ["audio"] in app.json.
+ *
+ * Polly backend URL is read from EXPO_PUBLIC_POLLY_BACKEND_URL env var.
+ * Falls back to expo-speech automatically if the backend is unreachable.
  */
 
 import * as Speech from "expo-speech";
 import { createAudioPlayer, setAudioModeAsync } from "expo-audio";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+
+// ─── Polly backend URL (set in mobile-app/.env) ───────────────────────────────
+// Must be your Mac's LAN IP when running locally (not 'localhost' on device).
+// e.g. EXPO_PUBLIC_POLLY_BACKEND_URL=http://192.168.1.10:3001
+const POLLY_BACKEND_URL = process.env.EXPO_PUBLIC_POLLY_BACKEND_URL || "";
 
 class SpeechManager {
   constructor() {
@@ -35,8 +44,14 @@ class SpeechManager {
     this.chimePlayer = null;
     this.boardingAnnouncePlayer = null;
     this.silentPlayer = null;
+    this.pollyPlayer = null; // dedicated player for Polly audio
     this._audioConfigured = false;
     this.isProcessingQueue = false;
+
+    // In-memory Polly response cache: Map<"text|voiceId", base64DataUri>
+    // Avoids repeat network calls for identical text+voice combinations.
+    this.pollyCache = new Map();
+
     this.init();
   }
 
@@ -234,36 +249,219 @@ class SpeechManager {
         await new Promise((resolve) => setTimeout(resolve, 1500));
       }
 
-      await new Promise((resolve) => {
-        let finalPitch = profile.pitch;
-        let voiceId = undefined;
+      // ── If this queue item was routed through Polly, use speakPolly ────────
+      if (options._pollyVoiceId) {
+        await this.speakPolly(spokenText, options._pollyVoiceId, profile);
+      } else {
+        await new Promise((resolve) => {
+          let finalPitch = profile.pitch;
+          let voiceId = undefined;
 
-        if (this.voicePreference === "male") {
-          finalPitch = finalPitch * 0.9;
-          if (this.availableVoices) {
-            const maleVoice = this.availableVoices.find(
-              (v) =>
-                v.language.startsWith("en") &&
-                (v.name.includes("Daniel") || v.name.includes("Arthur") || v.name.includes("Aaron") || v.name.includes("Fred") || v.name.includes("Alex"))
-            );
-            if (maleVoice) voiceId = maleVoice.identifier;
+          if (this.voicePreference === "male") {
+            finalPitch = finalPitch * 0.9;
+            if (this.availableVoices) {
+              const maleVoice = this.availableVoices.find(
+                (v) =>
+                  v.language.startsWith("en") &&
+                  (v.name.includes("Daniel") || v.name.includes("Arthur") || v.name.includes("Aaron") || v.name.includes("Fred") || v.name.includes("Alex"))
+              );
+              if (maleVoice) voiceId = maleVoice.identifier;
+            }
           }
-        }
 
-        // Apply master + co-pilot volume from settings
-        Speech.speak(spokenText, {
-          voice: voiceId,
-          rate: profile.rate,
-          pitch: finalPitch,
-          volume: profile.volume * this.masterVolume * this.coPilotVolume,
-          onDone: resolve,
-          onStopped: resolve,
-          onError: resolve,
+          // Apply master + co-pilot volume from settings
+          Speech.speak(spokenText, {
+            voice: voiceId,
+            rate: profile.rate,
+            pitch: finalPitch,
+            volume: profile.volume * this.masterVolume * this.coPilotVolume,
+            onDone: resolve,
+            onStopped: resolve,
+            onError: resolve,
+          });
         });
-      });
+      }
     }
 
     this.isProcessingQueue = false;
+  }
+
+  // ─── Amazon Polly TTS ─────────────────────────────────────────────────────
+
+  /**
+   * Synthesize `text` via Amazon Polly Neural TTS and play it immediately.
+   * Falls back silently to expo-speech on any network/API error.
+   *
+   * @param {string} text       - Text to synthesize.
+   * @param {string} voiceId    - "Ruth" (female) or "Matthew" (male).
+   * @param {object} profile    - Voice profile from getVoiceProfile().
+   */
+  async speakPolly(text, voiceId, profile) {
+    if (!POLLY_BACKEND_URL) {
+      // No backend configured — fall back immediately
+      console.log("[Polly] No backend URL configured, using expo-speech fallback.");
+      return this._speakExpofallback(text, profile);
+    }
+
+    const cacheKey = `${voiceId}|${text}`;
+
+    // ── Cache hit: skip network entirely ──────────────────────────────────────
+    if (this.pollyCache.has(cacheKey)) {
+      console.log("[Polly] Cache hit, playing from memory.");
+      const dataUri = this.pollyCache.get(cacheKey);
+      return this._playPollyAudio(dataUri, profile);
+    }
+
+    // ── Fetch from backend with 3-second timeout ───────────────────────────
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const response = await fetch(`${POLLY_BACKEND_URL}/api/tts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, voiceId }),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error(`Polly backend returned ${response.status}`);
+      }
+
+      // Convert audio/mpeg response to base64 data URI
+      const arrayBuffer = await response.arrayBuffer();
+      const uint8 = new Uint8Array(arrayBuffer);
+      let binary = "";
+      for (let i = 0; i < uint8.length; i++) {
+        binary += String.fromCharCode(uint8[i]);
+      }
+      const base64 = btoa(binary);
+      const dataUri = `data:audio/mpeg;base64,${base64}`;
+
+      // Cache for this session
+      this.pollyCache.set(cacheKey, dataUri);
+
+      return this._playPollyAudio(dataUri, profile);
+    } catch (err) {
+      clearTimeout(timeoutId);
+      if (err.name === "AbortError") {
+        console.warn("[Polly] Request timed out (>3s), falling back to expo-speech.");
+      } else {
+        console.warn("[Polly] Request failed:", err.message, "— falling back to expo-speech.");
+      }
+      return this._speakExpofallback(text, profile);
+    }
+  }
+
+  /**
+   * Play a base64 data URI as audio using expo-audio's createAudioPlayer.
+   * @private
+   */
+  async _playPollyAudio(dataUri, profile) {
+    return new Promise((resolve) => {
+      try {
+        // Release any previous Polly player
+        if (this.pollyPlayer) {
+          try { this.pollyPlayer.pause(); this.pollyPlayer.release(); } catch (_) {}
+          this.pollyPlayer = null;
+        }
+
+        const player = createAudioPlayer({ uri: dataUri });
+        player.volume = profile.volume * this.masterVolume * this.coPilotVolume;
+        this.pollyPlayer = player;
+
+        // Resolve when playback ends (or on error)
+        const cleanup = player.addListener("playbackStatusUpdate", (status) => {
+          if (status.didJustFinish || status.isLoaded === false) {
+            try { cleanup.remove(); } catch (_) {}
+            resolve();
+          }
+        });
+
+        // Safety-net resolve after reasonable max time (60s)
+        const safetyTimer = setTimeout(() => {
+          try { cleanup.remove(); } catch (_) {}
+          resolve();
+        }, 60000);
+
+        player.play();
+
+        // Override resolve to also clear safetyTimer
+        const originalResolve = resolve;
+        resolve = () => {
+          clearTimeout(safetyTimer);
+          originalResolve();
+        };
+      } catch (err) {
+        console.warn("[Polly] Audio playback failed:", err.message);
+        resolve();
+      }
+    });
+  }
+
+  /**
+   * Fallback: speak `text` using expo-speech with the given profile.
+   * @private
+   */
+  _speakExpofallback(text, profile) {
+    return new Promise((resolve) => {
+      let finalPitch = profile.pitch;
+      let voiceId = undefined;
+
+      if (this.voicePreference === "male") {
+        finalPitch = finalPitch * 0.9;
+        if (this.availableVoices) {
+          const maleVoice = this.availableVoices.find(
+            (v) =>
+              v.language.startsWith("en") &&
+              (v.name.includes("Daniel") || v.name.includes("Arthur") ||
+               v.name.includes("Aaron") || v.name.includes("Fred") ||
+               v.name.includes("Alex"))
+          );
+          if (maleVoice) voiceId = maleVoice.identifier;
+        }
+      }
+
+      Speech.speak(text, {
+        voice: voiceId,
+        rate: profile.rate,
+        pitch: finalPitch,
+        volume: profile.volume * this.masterVolume * this.coPilotVolume,
+        onDone: resolve,
+        onStopped: resolve,
+        onError: resolve,
+      });
+    });
+  }
+
+  /**
+   * Public helper: speak `text` through Polly with automatic expo-speech fallback.
+   * Queues behind other announcements via the standard speech queue.
+   *
+   * @param {string} text     - Text to synthesize.
+   * @param {string} voiceId  - "Ruth" or "Matthew".
+   * @param {object} options  - Same options object passed to speak().
+   */
+  async speakWithPollyFallback(text, voiceId, options = {}) {
+    const tone = options.tone || "default";
+    const now = Date.now();
+    const spokenText = this.formatText(text, tone);
+
+    // De-duplicate rapid identical announcements
+    if (spokenText === this.lastSpokenText && now - this.lastSpokenAt < 900) return;
+    this.lastSpokenText = spokenText;
+    this.lastSpokenAt = now;
+
+    if (this.addLog) this.addLog(spokenText);
+    if (!this.voiceEnabled) return;
+
+    const profile = this.getVoiceProfile(tone);
+
+    // Use polly-aware queue entry
+    this.speechQueue.push({ spokenText, options: { ...options, _pollyVoiceId: voiceId }, profile });
+    this.processQueue();
   }
 
   async playChime() {
@@ -394,6 +592,10 @@ class SpeechManager {
     if (this.sirenPlayer) {
       try { this.sirenPlayer.pause(); this.sirenPlayer.release(); } catch (e) {}
       this.sirenPlayer = null;
+    }
+    if (this.pollyPlayer) {
+      try { this.pollyPlayer.pause(); this.pollyPlayer.release(); } catch (e) {}
+      this.pollyPlayer = null;
     }
   }
 }

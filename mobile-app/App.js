@@ -21,15 +21,11 @@ import {
   Animated,
   AppState,
   Platform,
-  LayoutAnimation,
-  UIManager,
   Image,
 } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
+
 import notifee, { AndroidImportance, AndroidColor, AndroidForegroundServiceType } from '@notifee/react-native';
 
 notifee.registerForegroundService((notification) => {
@@ -110,6 +106,25 @@ const PulseDot = ({ active }) => {
   );
 };
 
+// ─── FadeTransition ───────────────────────────────────────────────────────────
+const FadeTransition = ({ children }) => {
+  const opacity = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.timing(opacity, {
+      toValue: 1,
+      duration: 400,
+      useNativeDriver: true,
+    }).start();
+  }, [opacity]);
+
+  return (
+    <Animated.View style={{ flex: 1, opacity }}>
+      {children}
+    </Animated.View>
+  );
+};
+
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App() {
   const {
@@ -135,7 +150,6 @@ export default function App() {
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       setIsSplashVisible(false);
     }, 2500);
     return () => clearTimeout(timer);
@@ -164,12 +178,7 @@ export default function App() {
   const isConnected = connectionStatus === "FLIGHT LINK ACTIVE";
   const isConnecting = connectionStatus === "CONNECTING..." || connectionStatus === "VERIFYING STATE...";
 
-  // Smooth transition for connection status change
-  useEffect(() => {
-    if (!isSplashVisible) {
-      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    }
-  }, [connectionStatus, isSplashVisible]);
+
 
   // Wire up the speech logger
   useEffect(() => {
@@ -368,7 +377,7 @@ export default function App() {
           </TouchableOpacity>
         </View>
         
-        <View style={{ flex: 1 }}>
+        <FadeTransition key={dashboardPage}>
           {/* Page 0: Crew Assistant */}
           {dashboardPage === 0 && (
             <View style={{ flex: 1, paddingHorizontal: 16 }}>
@@ -503,7 +512,7 @@ export default function App() {
             </ScrollView>
             </View>
           )}
-        </View>
+        </FadeTransition>
       </View>
     );
   };
@@ -572,9 +581,13 @@ export default function App() {
 
         {/* ── Main content ──────────────────────────────────────────── */}
         {isSplashVisible ? (
-          renderSplashScreen()
+          <FadeTransition key="splash">
+            {renderSplashScreen()}
+          </FadeTransition>
         ) : (
-          isConnected ? renderDashboard() : renderConnectionScreen()
+          <FadeTransition key={isConnected ? "dashboard" : "connection"}>
+            {isConnected ? renderDashboard() : renderConnectionScreen()}
+          </FadeTransition>
         )}
       </View>
       <SettingsModal visible={settingsVisible} onClose={() => setSettingsVisible(false)} />
