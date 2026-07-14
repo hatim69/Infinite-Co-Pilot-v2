@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet, Platform } from 'react-native';
+import { useTheme } from '../../context/ThemeContext';
 
 /**
  * SystemStatus — a data cell used in the systems grid.
@@ -7,23 +8,27 @@ import { View, Text, StyleSheet, Platform } from 'react-native';
  * Supports an optional 'highlight' prop for values that are active/on.
  */
 const SystemStatus = ({ label, value, icon: Icon, highlight }) => {
+  const { theme } = useTheme();
+
   const isActive = highlight || (typeof value === 'string' && (value === 'ON' || value === 'SET' || value === 'CONN' || value === 'ACTIVE' || value === 'ARMED'));
   const isWarning = typeof value === 'string' && (value === 'MOVING');
 
   return (
     <View style={[
       styles.container,
-      isActive && styles.containerActive,
+      { backgroundColor: theme.surface, borderColor: theme.border },
+      isActive && { borderColor: theme.accentActiveBorder, backgroundColor: theme.accentActive },
       isWarning && styles.containerWarning,
     ]}>
       <View style={styles.left}>
-        {Icon && <Icon size={12} color="#475569" style={styles.icon} />}
-        <Text style={styles.label} numberOfLines={1}>{label}</Text>
+        {Icon && <Icon size={12} color={theme.textDim} style={styles.icon} />}
+        <Text style={[styles.label, { color: theme.textDim }]} numberOfLines={1}>{label}</Text>
       </View>
       <Text
         style={[
           styles.value,
-          isActive && styles.valueActive,
+          { color: theme.textSlate },
+          isActive && { color: theme.accentText },
           isWarning && styles.valueWarning,
         ]}
         numberOfLines={1}
@@ -36,9 +41,7 @@ const SystemStatus = ({ label, value, icon: Icon, highlight }) => {
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: 'rgba(15, 23, 42, 0.7)',
     borderWidth: 1,
-    borderColor: '#1E293B',
     borderRadius: 8,
     paddingVertical: 10,
     paddingHorizontal: 12,
@@ -47,10 +50,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     width: '48.5%',
     marginBottom: 8,
-  },
-  containerActive: {
-    borderColor: 'rgba(13, 148, 136, 0.4)',
-    backgroundColor: 'rgba(13, 148, 136, 0.08)',
   },
   containerWarning: {
     borderColor: 'rgba(245, 158, 11, 0.4)',
@@ -67,7 +66,6 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: 9,
-    color: '#475569',
     textTransform: 'uppercase',
     letterSpacing: 0.8,
     fontWeight: '700',
@@ -77,12 +75,8 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
-    color: '#94A3B8',
     textAlign: 'right',
     flexShrink: 0,
-  },
-  valueActive: {
-    color: '#2DD4BF',
   },
   valueWarning: {
     color: '#FBBF24',

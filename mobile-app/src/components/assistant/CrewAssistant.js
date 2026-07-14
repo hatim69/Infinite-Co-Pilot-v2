@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { CheckSquare, ShieldCheck, Zap } from 'lucide-react-native';
+import { useTheme } from '../../context/ThemeContext';
 
 const CrewAssistant = ({ telemetry, isConnected }) => {
+  const { theme } = useTheme();
 
   let phaseTitle = "Standing By";
   let checklist = [];
@@ -33,26 +35,29 @@ const CrewAssistant = ({ telemetry, isConnected }) => {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[
+      styles.container,
+      { backgroundColor: theme.crewAssistantBg, borderColor: theme.crewAssistantBorder }
+    ]}>
       <View style={styles.topSection}>
-        <View style={styles.headerRow}>
+        <View style={[styles.headerRow, { borderBottomColor: theme.borderMid }]}>
           <View style={styles.titleContainer}>
-            <View style={styles.iconWrapper}>
-              <ShieldCheck size={20} color="#2DD4BF" />
+            <View style={[styles.iconWrapper, { backgroundColor: theme.accentBg }]}>
+              <ShieldCheck size={20} color={theme.accentText} />
             </View>
-            <Text style={styles.headerTitle}>FLIGHTDECK ASSISTANT</Text>
+            <Text style={[styles.headerTitle, { color: theme.textSecondary }]}>FLIGHTDECK ASSISTANT</Text>
           </View>
         </View>
 
         <View style={styles.content}>
-          <Text style={styles.phaseTitle}>{phaseTitle}</Text>
+          <Text style={[styles.phaseTitle, { color: theme.textPrimary }]}>{phaseTitle}</Text>
           
           {isConnected && checklist.length > 0 && (
             <View style={styles.checklist}>
               {checklist.map((item, idx) => (
                 <View key={idx} style={styles.checklistItem}>
-                  <CheckSquare size={16} color="#14B8A6" style={styles.checkIcon} />
-                  <Text style={styles.checklistText}>{item}</Text>
+                  <CheckSquare size={16} color={theme.accent} style={styles.checkIcon} />
+                  <Text style={[styles.checklistText, { color: theme.textLabel }]}>{item}</Text>
                 </View>
               ))}
             </View>
@@ -60,8 +65,8 @@ const CrewAssistant = ({ telemetry, isConnected }) => {
         </View>
       </View>
 
-      <View style={styles.nextActionBox}>
-        <Text style={styles.nextActionLabel}>NEXT ACTION</Text>
+      <View style={[styles.nextActionBox, { backgroundColor: theme.nextActionBg, borderColor: theme.borderSoft }]}>
+        <Text style={[styles.nextActionLabel, { color: theme.textMuted }]}>NEXT ACTION</Text>
         <View style={styles.nextActionContent}>
           <Zap size={16} color="#FBBF24" style={styles.zapIcon} />
           <Text style={styles.nextActionText}>{nextAction}</Text>
@@ -73,8 +78,6 @@ const CrewAssistant = ({ telemetry, isConnected }) => {
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: 'rgba(30, 41, 59, 0.8)',
-    borderColor: 'rgba(51, 65, 85, 0.8)',
     borderWidth: 1,
     borderRadius: 12,
     padding: 16,
@@ -90,7 +93,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(51, 65, 85, 0.5)',
     paddingBottom: 12,
     marginBottom: 16,
   },
@@ -100,7 +102,6 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   iconWrapper: {
-    backgroundColor: 'rgba(20, 184, 166, 0.2)',
     padding: 6,
     borderRadius: 8,
     marginRight: 8,
@@ -108,7 +109,6 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#E2E8F0',
     letterSpacing: 1.5,
   },
   content: {
@@ -117,7 +117,6 @@ const styles = StyleSheet.create({
   phaseTitle: {
     fontSize: 22,
     fontWeight: 'bold',
-    color: '#F1F5F9',
     marginBottom: 16,
   },
   checklist: {
@@ -135,18 +134,14 @@ const styles = StyleSheet.create({
   },
   checklistText: {
     fontSize: 14,
-    color: '#CBD5E1',
   },
   nextActionBox: {
-    backgroundColor: 'rgba(15, 23, 42, 0.5)',
     borderRadius: 8,
     padding: 12,
-    borderColor: 'rgba(51, 65, 85, 0.5)',
     borderWidth: 1,
   },
   nextActionLabel: {
     fontSize: 10,
-    color: '#64748B',
     letterSpacing: 1.5,
     marginBottom: 6,
   },

@@ -6,6 +6,8 @@ export default function Slider({
   onValueChange,
   minimumValue = 0,
   maximumValue = 1,
+  fillColor = '#34D399',
+  trackColor = 'rgba(51, 65, 85, 0.6)',
 }) {
   // Store trackWidth in a ref so PanResponder callbacks always read the latest value
   const trackWidthRef = useRef(0);
@@ -113,7 +115,7 @@ export default function Slider({
   return (
     <View style={styles.container}>
       <View
-        style={styles.track}
+        style={[styles.track, { backgroundColor: trackColor }]}
         onLayout={onTrackLayout}
         {...panResponder.panHandlers}
       >
@@ -122,6 +124,7 @@ export default function Slider({
           style={[
             styles.fill,
             {
+              backgroundColor: fillColor,
               width: position.interpolate({
                 inputRange: clampedRange,
                 outputRange: clampedRange,
@@ -161,14 +164,14 @@ const styles = StyleSheet.create({
   },
   track: {
     height: 6,
-    backgroundColor: "rgba(51, 65, 85, 0.6)",
+    backgroundColor: "rgba(51, 65, 85, 0.6)", // overridden inline via trackColor prop
     borderRadius: 3,
     position: "relative",
     justifyContent: "center",
   },
   fill: {
     height: "100%",
-    backgroundColor: "#34D399",
+    backgroundColor: "#34D399", // overridden inline via fillColor prop
     borderRadius: 3,
     position: "absolute",
     left: 0,
