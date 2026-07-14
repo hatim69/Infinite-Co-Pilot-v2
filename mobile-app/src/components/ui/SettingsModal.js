@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Modal, View, Text, TouchableOpacity, StyleSheet, BlurView, Switch } from "react-native";
+import { Modal, View, Text, TouchableOpacity, StyleSheet, Switch } from "react-native";
 import { X, Volume2 } from "lucide-react-native";
 import Slider from "./Slider";
 import { speechManager } from "../../utils/speech";
@@ -26,9 +26,13 @@ export default function SettingsModal({ visible, onClose }) {
   }, [visible]);
 
   const updateVolume = (key, value) => {
-    const newVolumes = { ...volumes, [key]: value };
-    setVolumes(newVolumes);
-    speechManager.setVolumes(newVolumes);
+    // Use functional setState so we always spread the latest state, not a stale
+    // closure snapshot. Without this, rapidly dragging one slider would reset
+    // the others back to wherever they were at the last render.
+    setVolumes((prev) => ({ ...prev, [key]: value }));
+    // Pass only the changed key — speechManager.setVolumes uses ?? to keep
+    // the rest unchanged, and persists the full object to AsyncStorage.
+    speechManager.setVolumes({ [key]: value });
   };
 
   return (

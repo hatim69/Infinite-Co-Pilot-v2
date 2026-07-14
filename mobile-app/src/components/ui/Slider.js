@@ -1,93 +1,146 @@
-import React, { useRef, useState, useEffect } from "react";
+import React, { useRef, useState, useCallback } from "react";
 import { View, StyleSheet, PanResponder, Animated } from "react-native";
 
-export default function Slider({ value, onValueChange, minimumValue = 0, maximumValue = 1 }) {
+export default function Slider({
+  value,
+  onValueChange,
+  minimumValue = 0,
+  maximumValue = 1,
+}) {
+  // Store trackWidth in a ref so PanResponder callbacks always read the latest value
+  const trackWidthRef = useRef(0);
   const [trackWidth, setTrackWidth] = useState(0);
-  const [isDragging, setIsDragging] = useState(false);
-  const pan = useRef(new Animated.Value(0)).current;
-  const panValue = useRef(0);
 
-  useEffect(() => {
-    const listenerId = pan.addListener((state) => {
-      panValue.current = state.value;
-    });
-    return () => {
-      pan.removeListener(listenerId);
-    };
-  }, [pan]);
+  // The animated position of the thumb/fill (in pixels, 0..trackWidth)
+  const position = useRef(new Animated.Value(0)).current;
 
-  // Initialize position based on current value
-  useEffect(() => {
-    if (trackWidth > 0 && !isDragging) {
-      const clampedValue = Math.max(minimumValue, Math.min(maximumValue, value));
-      const percentage = (clampedValue - minimumValue) / (maximumValue - minimumValue);
-      pan.setValue(percentage * trackWidth);
-      pan.setOffset(0);
+  // Track whether we're in the middle of a drag
+  const isDragging = useRef(false);
+
+  // Keep a ref to the current external value so we can initialise properly
+  const valueRef = useRef(value);
+  valueRef.current = value;
+
+  // Convert a pixel position → normalised value and fire the callback
+  const fireChange = useCallback(
+    (px) => {
+      const w = trackWidthRef.current;
+      if (w === 0) return;
+      const clamped = Math.max(0, Math.min(w, px));
+      const pct = clamped / w;
+      const newVal = minimumValue + pct * (maximumValue - minimumValue);
+      if (onValueChange) onValueChange(newVal);
+    },
+    [minimumValue, maximumValue, onValueChange]
+  );
+
+  // When track layout is known (or changes), set position from current value
+  const onTrackLayout = useCallback(
+    (e) => {
+      const w = e.nativeEvent.layout.width;
+      trackWidthRef.current = w;
+      setTrackWidth(w);
+
+      if (!isDragging.current) {
+        const pct =
+          (valueRef.current - minimumValue) / (maximumValue - minimumValue);
+        position.setValue(Math.max(0, Math.min(w, pct * w)));
+      }
+    },
+    [minimumValue, maximumValue, position]
+  );
+
+  // Keep the thumb in sync when the external value changes (e.g. on modal open)
+  // Only while not dragging — during drag we drive position ourselves
+  React.useEffect(() => {
+    if (!isDragging.current && trackWidthRef.current > 0) {
+      const pct = (value - minimumValue) / (maximumValue - minimumValue);
+      const px = Math.max(0, Math.min(trackWidthRef.current, pct * trackWidthRef.current));
+      position.setValue(px);
     }
-  }, [value, trackWidth, minimumValue, maximumValue, pan, isDragging]);
+  }, [value, minimumValue, maximumValue, position]);
+
+  // The start-of-drag pixel position (so we can compute delta correctly)
+  const dragStartPx = useRef(0);
 
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: (evt, gestureState) => {
-        setIsDragging(true);
-        pan.setOffset(panValue.current);
-        pan.setValue(0);
+
+      onPanResponderGrant: (evt) => {
+        isDragging.current = true;
+        // Capture the position at the moment the finger touches down
+        // so we can compute absolute position as startPx + dx
+        position.stopAnimation((v) => {
+          dragStartPx.current = v;
+        });
+        // Synchronously read the current value via _value (reliable for grant)
+        dragStartPx.current = position._value;
       },
+
       onPanResponderMove: (evt, gestureState) => {
-        let newX = pan._offset + gestureState.dx;
-        newX = Math.max(0, Math.min(trackWidth, newX));
-        updateValue(newX);
-        pan.setValue(gestureState.dx);
+        const w = trackWidthRef.current;
+        if (w === 0) return;
+        const newPx = Math.max(0, Math.min(w, dragStartPx.current + gestureState.dx));
+        position.setValue(newPx);
+        // Fire live update for instant feedback
+        const pct = newPx / w;
+        const newVal = minimumValue + pct * (maximumValue - minimumValue);
+        if (onValueChange) onValueChange(newVal);
       },
+
       onPanResponderRelease: (evt, gestureState) => {
-        pan.flattenOffset();
-        let currentX = panValue.current;
-        currentX = Math.max(0, Math.min(trackWidth, currentX));
-        updateValue(currentX);
-        setIsDragging(false);
+        const w = trackWidthRef.current;
+        if (w > 0) {
+          const finalPx = Math.max(0, Math.min(w, dragStartPx.current + gestureState.dx));
+          position.setValue(finalPx);
+          const pct = finalPx / w;
+          const finalVal = minimumValue + pct * (maximumValue - minimumValue);
+          if (onValueChange) onValueChange(finalVal);
+        }
+        isDragging.current = false;
+      },
+
+      onPanResponderTerminate: () => {
+        isDragging.current = false;
       },
     })
   ).current;
 
-  const updateValue = (xPos) => {
-    if (trackWidth === 0) return;
-    const percentage = xPos / trackWidth;
-    const newValue = minimumValue + percentage * (maximumValue - minimumValue);
-    if (onValueChange) {
-      onValueChange(newValue);
-    }
-  };
+  const clampedRange = [0, Math.max(1, trackWidth)];
 
   return (
     <View style={styles.container}>
       <View
         style={styles.track}
-        onLayout={(e) => setTrackWidth(e.nativeEvent.layout.width)}
+        onLayout={onTrackLayout}
         {...panResponder.panHandlers}
       >
+        {/* Filled portion */}
         <Animated.View
           style={[
             styles.fill,
             {
-              width: pan.interpolate({
-                inputRange: [0, Math.max(1, trackWidth)],
-                outputRange: [0, Math.max(1, trackWidth)],
+              width: position.interpolate({
+                inputRange: clampedRange,
+                outputRange: clampedRange,
                 extrapolate: "clamp",
               }),
             },
           ]}
         />
+
+        {/* Thumb */}
         <Animated.View
           style={[
             styles.thumb,
             {
               transform: [
                 {
-                  translateX: pan.interpolate({
-                    inputRange: [0, Math.max(1, trackWidth)],
-                    outputRange: [0, Math.max(1, trackWidth)],
+                  translateX: position.interpolate({
+                    inputRange: clampedRange,
+                    outputRange: clampedRange,
                     extrapolate: "clamp",
                   }),
                 },
@@ -121,16 +174,16 @@ const styles = StyleSheet.create({
     left: 0,
   },
   thumb: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     backgroundColor: "#FFFFFF",
     position: "absolute",
-    left: -10, // center thumb over edge
+    left: -11, // centre the thumb over the edge of the fill
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
     elevation: 5,
   },
 });

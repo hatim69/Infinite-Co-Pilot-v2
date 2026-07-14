@@ -20,11 +20,10 @@ class SpeechManager {
     this.addLog = null;
     this.lastSpokenText = "";
     this.lastSpokenAt = 0;
-    this.isDucking = false;
     this.voicePreference = "female";
     this.voiceEnabled = true;
 
-    // Volumes
+    // Volumes — 100% by default; user adjusts via settings
     this.masterVolume = 1.0;
     this.coPilotVolume = 1.0;
     this.boardingMusicVolume = 1.0;
@@ -116,9 +115,6 @@ class SpeechManager {
     return this.voiceEnabled;
   }
 
-  setDucking(active) {
-    this.isDucking = active;
-  }
 
   setLogger(loggerFn) {
     this.addLog = loggerFn;
@@ -148,15 +144,15 @@ class SpeechManager {
       console.log("[Speech] Error saving volumes:", e);
     }
 
-    // Apply live volume updates
+    // Apply live volume updates to any currently-playing players
     if (this.boardingMusic) {
-      this.boardingMusic.volume = 0.25 * this.masterVolume * this.boardingMusicVolume;
+      this.boardingMusic.volume = this.masterVolume * this.boardingMusicVolume;
     }
     if (this.boardingAnnouncePlayer) {
-      this.boardingAnnouncePlayer.volume = 1.0 * this.masterVolume * this.safetyBriefingVolume;
+      this.boardingAnnouncePlayer.volume = this.masterVolume * this.safetyBriefingVolume;
     }
     if (this.chimePlayer) {
-      this.chimePlayer.volume = 1.0 * this.masterVolume;
+      this.chimePlayer.volume = this.masterVolume;
     }
   }
 
@@ -184,11 +180,8 @@ class SpeechManager {
       notice: { rate: 0.95, pitch: 1, volume: 1 },
       default: { rate: 0.93, pitch: 1, volume: 1 },
     };
-    const profile = profiles[tone] || profiles.default;
-    if (this.isDucking) {
-      return { ...profile, volume: profile.volume * 0.25 };
-    }
-    return profile;
+    // Volume is controlled exclusively by the settings sliders — no hidden multipliers.
+    return profiles[tone] || profiles.default;
   }
 
   async speak(text, options = {}) {
@@ -229,10 +222,14 @@ class SpeechManager {
         try {
           if (!this.chimePlayer) {
             this.chimePlayer = createAudioPlayer(require("../../assets/chime.mp3"));
+            this.chimePlayer.volume = this.masterVolume;
+            this.chimePlayer.play();
           } else {
-            this.chimePlayer.seekTo(0);
+            // Await the seek so play() always starts from position 0, not wherever
+            // the previous playback left off — this was causing the intermittent delay.
+            await this.chimePlayer.seekTo(0);
+            this.chimePlayer.play();
           }
-          this.chimePlayer.play();
         } catch (e) {}
         await new Promise((resolve) => setTimeout(resolve, 1500));
       }
@@ -253,6 +250,7 @@ class SpeechManager {
           }
         }
 
+        // Apply master + co-pilot volume from settings
         Speech.speak(spokenText, {
           voice: voiceId,
           rate: profile.rate,
@@ -268,15 +266,18 @@ class SpeechManager {
     this.isProcessingQueue = false;
   }
 
-  playChime() {
+  async playChime() {
     if (!this.chimeEnabled) return;
     try {
       if (!this.chimePlayer) {
         this.chimePlayer = createAudioPlayer(require("../../assets/chime.mp3"));
+        this.chimePlayer.volume = this.masterVolume;
+        this.chimePlayer.play();
       } else {
-        this.chimePlayer.seekTo(0);
+        // Await seek so the chime always starts from the top with no delay
+        await this.chimePlayer.seekTo(0);
+        this.chimePlayer.play();
       }
-      this.chimePlayer.play();
     } catch (e) {
       console.log("[Speech] Chime play failed:", e);
     }
@@ -306,15 +307,12 @@ class SpeechManager {
         try { this.boardingAnnouncePlayer.release(); } catch (e) {}
       }
       this.boardingAnnouncePlayer = createAudioPlayer(getFile(livery));
-      this.boardingAnnouncePlayer.volume = 1.0 * this.masterVolume * this.safetyBriefingVolume;
-      this.setDucking(true);
+      this.boardingAnnouncePlayer.volume = this.masterVolume * this.safetyBriefingVolume;
       this.boardingAnnouncePlayer.play();
       setTimeout(() => {
-        this.setDucking(false);
         this.playChime();
       }, 35000);
     } catch (e) {
-      this.setDucking(false);
       console.log("[Speech] Boarding announcement failed:", e);
     }
   }
@@ -326,7 +324,6 @@ class SpeechManager {
         this.boardingAnnouncePlayer.release();
       } catch (e) {}
       this.boardingAnnouncePlayer = null;
-      this.setDucking(false);
     }
   }
 
@@ -363,8 +360,8 @@ class SpeechManager {
         try { this.boardingMusic.release(); } catch (e) {}
       }
       this.boardingMusic = createAudioPlayer(file);
-      this.boardingMusic.loop = true; // expo-audio uses 'loop' instead of 'isLooping'
-      this.boardingMusic.volume = 0.25 * this.masterVolume * this.boardingMusicVolume;
+      this.boardingMusic.loop = true;
+      this.boardingMusic.volume = this.masterVolume * this.boardingMusicVolume;
       this.boardingMusic.play();
     } catch (e) {
       console.log("[Speech] Boarding music failed:", e);
