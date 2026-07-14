@@ -21,8 +21,8 @@ import { Buffer } from 'buffer';
 
 const DEFAULT_PORT = 10112;
 const MANIFEST_TIMEOUT_MS = 8000;
-const WATCHDOG_INTERVAL_MS = 4000;
-const WATCHDOG_STALE_THRESHOLD_MS = 8000;
+const WATCHDOG_INTERVAL_MS = 2000;
+const WATCHDOG_STALE_THRESHOLD_MS = 15000;
 const RECONNECT_DELAY_MS = 2000;
 
 /** IF Connect v2 data type codes */
@@ -433,7 +433,7 @@ class IFConnectClient {
     clearInterval(this._watchdogTimer);
     this._watchdogTimer = setInterval(() => {
       if (this._isConnected && Date.now() - this._lastDataTime > WATCHDOG_STALE_THRESHOLD_MS) {
-        console.log('[IFConnect] Watchdog: no data for 8s — reconnecting...');
+        console.log('[IFConnect] Watchdog: no data for 15s — reconnecting...');
         this._scheduleReconnect();
       }
     }, WATCHDOG_INTERVAL_MS);

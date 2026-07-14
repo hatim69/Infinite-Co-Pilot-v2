@@ -102,8 +102,16 @@ class SpeechManager {
   toggleVoice() {
     this.voiceEnabled = !this.voiceEnabled;
     if (!this.voiceEnabled) {
-      this.stopBoardingMusic();
+      if (this.boardingMusic) {
+        try { this.boardingMusic.pause(); } catch (e) {}
+      }
       Speech.stop();
+      this.speechQueue = [];
+      this.isProcessingQueue = false;
+    } else {
+      if (this.boardingMusic) {
+        try { this.boardingMusic.play(); } catch (e) {}
+      }
     }
     return this.voiceEnabled;
   }

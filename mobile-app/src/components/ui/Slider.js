@@ -3,28 +3,37 @@ import { View, StyleSheet, PanResponder, Animated } from "react-native";
 
 export default function Slider({ value, onValueChange, minimumValue = 0, maximumValue = 1 }) {
   const [trackWidth, setTrackWidth] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
   const pan = useRef(new Animated.Value(0)).current;
+  const panValue = useRef(0);
+
+  useEffect(() => {
+    const listenerId = pan.addListener((state) => {
+      panValue.current = state.value;
+    });
+    return () => {
+      pan.removeListener(listenerId);
+    };
+  }, [pan]);
 
   // Initialize position based on current value
   useEffect(() => {
-    if (trackWidth > 0) {
+    if (trackWidth > 0 && !isDragging) {
       const clampedValue = Math.max(minimumValue, Math.min(maximumValue, value));
       const percentage = (clampedValue - minimumValue) / (maximumValue - minimumValue);
       pan.setValue(percentage * trackWidth);
+      pan.setOffset(0);
     }
-  }, [value, trackWidth, minimumValue, maximumValue, pan]);
+  }, [value, trackWidth, minimumValue, maximumValue, pan, isDragging]);
 
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: (evt, gestureState) => {
-        // When touch starts, jump to that position if it's within bounds
-        const touchX = evt.nativeEvent.locationX;
-        let newX = Math.max(0, Math.min(trackWidth, touchX));
-        pan.setOffset(newX);
+        setIsDragging(true);
+        pan.setOffset(panValue.current);
         pan.setValue(0);
-        updateValue(newX);
       },
       onPanResponderMove: (evt, gestureState) => {
         let newX = pan._offset + gestureState.dx;
@@ -34,9 +43,10 @@ export default function Slider({ value, onValueChange, minimumValue = 0, maximum
       },
       onPanResponderRelease: (evt, gestureState) => {
         pan.flattenOffset();
-        let currentX = pan._value;
+        let currentX = panValue.current;
         currentX = Math.max(0, Math.min(trackWidth, currentX));
         updateValue(currentX);
+        setIsDragging(false);
       },
     })
   ).current;

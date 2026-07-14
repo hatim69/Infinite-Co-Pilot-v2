@@ -21,8 +21,15 @@ import {
   Animated,
   AppState,
   Platform,
+  LayoutAnimation,
+  UIManager,
+  Image,
 } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 import notifee, { AndroidImportance, AndroidColor, AndroidForegroundServiceType } from '@notifee/react-native';
 
 notifee.registerForegroundService((notification) => {
@@ -124,6 +131,15 @@ export default function App() {
   const [showLogs, setShowLogs] = useState(true);
   const [isInBackground, setIsInBackground] = useState(false);
   const [settingsVisible, setSettingsVisible] = useState(false);
+  const [isSplashVisible, setIsSplashVisible] = useState(true);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      setIsSplashVisible(false);
+    }, 2500);
+    return () => clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     // Sync initial voice preference
@@ -146,7 +162,14 @@ export default function App() {
   const logScrollRef = useRef(null);
 
   const isConnected = connectionStatus === "FLIGHT LINK ACTIVE";
-  const isConnecting = connectionStatus === "CONNECTING...";
+  const isConnecting = connectionStatus === "CONNECTING..." || connectionStatus === "VERIFYING STATE...";
+
+  // Smooth transition for connection status change
+  useEffect(() => {
+    if (!isSplashVisible) {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    }
+  }, [connectionStatus, isSplashVisible]);
 
   // Wire up the speech logger
   useEffect(() => {
@@ -241,6 +264,17 @@ export default function App() {
     "SYSTEMS & POWER",
     "GROUND & LIGHTS",
   ];
+
+  // ─── Splash Screen ────────────────────────────────────────────────────────
+  const renderSplashScreen = () => (
+    <View style={styles.splashContainer}>
+      <View style={styles.splashLogoWrapper}>
+        <Plane size={60} color="#0D9488" />
+      </View>
+      <Text style={styles.splashTitle}>Infinite Co-Pilot</Text>
+      <Text style={styles.splashSubtitle}>PREPARING FLIGHT DECK...</Text>
+    </View>
+  );
 
   // ─── Connection Screen ────────────────────────────────────────────────────
   const renderConnectionScreen = () => (
@@ -537,7 +571,11 @@ export default function App() {
         </View>
 
         {/* ── Main content ──────────────────────────────────────────── */}
-        {isConnected ? renderDashboard() : renderConnectionScreen()}
+        {isSplashVisible ? (
+          renderSplashScreen()
+        ) : (
+          isConnected ? renderDashboard() : renderConnectionScreen()
+        )}
       </View>
       <SettingsModal visible={settingsVisible} onClose={() => setSettingsVisible(false)} />
     </SafeAreaView>
@@ -639,6 +677,41 @@ const styles = StyleSheet.create({
     width: 7,
     height: 7,
     borderRadius: 4,
+  },
+
+  // Splash Screen
+  splashContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(15, 23, 42, 0.7)",
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "#1E293B",
+  },
+  splashLogoWrapper: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: "rgba(13, 148, 136, 0.15)",
+    borderWidth: 2,
+    borderColor: "#0D9488",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 24,
+  },
+  splashTitle: {
+    fontSize: 28,
+    fontWeight: "800",
+    color: "#F8FAFC",
+    letterSpacing: -0.5,
+    marginBottom: 12,
+  },
+  splashSubtitle: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#34D399",
+    letterSpacing: 2,
   },
 
   // Connection screen

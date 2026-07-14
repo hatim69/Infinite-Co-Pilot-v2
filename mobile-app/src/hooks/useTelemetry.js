@@ -11,6 +11,7 @@
  */
 
 import { useState, useEffect, useRef } from "react";
+import { Alert } from "react-native";
 import dgram from "react-native-udp";
 import ifConnect from "../utils/ifConnectClient";
 import { speechManager } from "../utils/speech";
@@ -33,6 +34,7 @@ const crossedThreshold = (previousValue, currentValue, thresholdValue, bufferVal
 
 /** All IF Connect API parameters to poll */
 const POLL_COMMANDS = [
+  "infiniteflight/app_state",
   "aircraft/0/indicated_airspeed",
   "aircraft/0/groundspeed",
   "aircraft/0/vertical_speed",
@@ -118,6 +120,7 @@ const INITIAL_TELEMETRY = {
   time: "---",
   airport: "---",
   performance: null,
+  appState: -1,
 };
 
 export const useTelemetry = () => {
@@ -129,6 +132,7 @@ export const useTelemetry = () => {
   const stateRef = useRef(telemetry);
   const connectToIFRef = useRef(null);
   const isConnectedRef = useRef(false);
+  const disconnectDeviceRef = useRef(null);
 
   const flagsRef = useRef({
     eightyKnots: false,
@@ -146,6 +150,7 @@ export const useTelemetry = () => {
     vrAnnounced: false,
     v2Announced: false,
     connectedAt: 0,
+    isManualConnection: false,
   });
 
   // Keep stateRef in sync with latest telemetry
@@ -190,9 +195,18 @@ export const useTelemetry = () => {
             return prev;
           });
 
-          // Auto-connect on first discovered device
-          if (!isConnectedRef.current && connectToIFRef.current) {
-            connectToIFRef.current(ip);
+          // If State is not 1 (or "Playing"), we assume it's in the menu
+          const stateStr = String(data.State || data.state || data.AppState || data.appState);
+          const isReady = stateStr === "1" || stateStr === "Playing";
+
+          // Auto-connect on first discovered device if it's in flight
+          if (!isConnectedRef.current && connectToIFRef.current && isReady) {
+            connectToIFRef.current(ip, false);
+          } else if (isConnectedRef.current && !isReady) {
+            // Simulator broadcasted that it's in the menu! Instant disconnect.
+            if (disconnectDeviceRef.current) {
+              disconnectDeviceRef.current();
+            }
           }
         } catch (e) {
           // Silently ignore malformed UDP packets
@@ -231,7 +245,36 @@ export const useTelemetry = () => {
         };
 
         // ── Basic aircraft info ──────────────────────────────────────────
-        if (command === "aircraft/0/name") updateNext("name", data);
+        if (command === "infiniteflight/app_state") {
+          updateNext("appState", data);
+          if (data !== "Playing" && data !== 1) {
+            // Client is in main menu!
+            setTimeout(() => {
+              isConnectedRef.current = false;
+              ifConnect.close(() => {});
+              setConnectionStatus("AWAITING SIMULATOR LINK...");
+              setConnectedIp("");
+              setTelemetry({ ...INITIAL_TELEMETRY });
+              if (flagsRef.current.isManualConnection) {
+                Alert.alert(
+                  "Simulator in Main Menu",
+                  "Client is in the main menu. Please enter the game first before connecting.",
+                  [{ text: "OK" }]
+                );
+              }
+            }, 0);
+            return prev;
+          } else if (data === "Playing" || data === 1) {
+            setConnectionStatus(prevStatus => prevStatus !== "FLIGHT LINK ACTIVE" ? "FLIGHT LINK ACTIVE" : prevStatus);
+          }
+        }
+        
+        if (command === "aircraft/0/name") {
+          updateNext("name", data);
+          if (data && typeof data === "string" && data.trim() !== "") {
+            setConnectionStatus(prevStatus => prevStatus !== "FLIGHT LINK ACTIVE" ? "FLIGHT LINK ACTIVE" : prevStatus);
+          }
+        }
         if (command === "aircraft/0/livery") updateNext("livery", data);
         if (command === "aircraft/0/systems/load/total_weight") updateNext("weight", data);
         if (command === "aircraft/0/is_on_ground") {
@@ -602,7 +645,7 @@ export const useTelemetry = () => {
     ifConnect.on("data", dataHandler);
 
     // ─── 3. Connect function ───────────────────────────────────────────────
-    const connectToIF = (ip) => {
+    const connectToIF = (ip, isManual = false) => {
       if (isConnectedRef.current) return;
       isConnectedRef.current = true;
       setConnectionStatus("CONNECTING...");
@@ -615,13 +658,14 @@ export const useTelemetry = () => {
         if (typeof flags[k] === "boolean") flags[k] = false;
         if (typeof flags[k] === "number") flags[k] = 0;
       });
+      flags.isManualConnection = isManual;
 
       // Close any existing connection, then connect fresh
       ifConnect.close(() => {
         ifConnect.init(
           () => {
-            // Success — now register all poll commands
-            setConnectionStatus("FLIGHT LINK ACTIVE");
+            // Success — register all poll commands, but stay in VERIFYING until app_state or aircraft name is received
+            setConnectionStatus("VERIFYING STATE...");
             flags.connectedAt = Date.now();
             speechManager.stopBoardingMusic();
 
@@ -643,14 +687,19 @@ export const useTelemetry = () => {
       setConnectedIp("");
       isConnectedRef.current = false;
       speechManager.stopAll();
+      speechManager.speak("Client disconnected.", { tone: "notice" });
     };
 
     const disconnectHandler = () => {
-      setConnectionStatus("CONNECTING...");
+      setConnectionStatus("AWAITING SIMULATOR LINK...");
+      setConnectedIp("");
+      isConnectedRef.current = false;
+      speechManager.stopAll();
+      speechManager.speak("Client disconnected.", { tone: "notice" });
     };
 
     const reconnectHandler = () => {
-      setConnectionStatus("FLIGHT LINK ACTIVE");
+      setConnectionStatus("VERIFYING STATE...");
       flagsRef.current.connectedAt = Date.now();
     };
 
@@ -709,6 +758,23 @@ export const useTelemetry = () => {
     }
   }, [telemetry.engines, telemetry.brakes, telemetry.throttle]);
 
+  // ─── Verification Timeout ────────────────────────────────────────────────────
+  useEffect(() => {
+    let verifyTimer;
+    if (connectionStatus === "VERIFYING STATE...") {
+      verifyTimer = setTimeout(() => {
+        if (isConnectedRef.current) {
+          isConnectedRef.current = false;
+          ifConnect.close(() => {});
+          setConnectionStatus("AWAITING SIMULATOR LINK...");
+          setConnectedIp("");
+          setTelemetry({ ...INITIAL_TELEMETRY });
+        }
+      }, 5000);
+    }
+    return () => clearTimeout(verifyTimer);
+  }, [connectionStatus]);
+
   // ─── Public API ────────────────────────────────────────────────────────────
 
   const manualConnect = (ip) => {
@@ -716,7 +782,7 @@ export const useTelemetry = () => {
     speechManager.speak(`Connecting to ${ip}.`, { tone: "notice" });
     isConnectedRef.current = false; // Allow new connection
     if (connectToIFRef.current) {
-      connectToIFRef.current(ip);
+      connectToIFRef.current(ip, true);
     }
   };
 
@@ -725,7 +791,7 @@ export const useTelemetry = () => {
     if (dev && dev.ip) {
       isConnectedRef.current = false;
       if (connectToIFRef.current) {
-        connectToIFRef.current(dev.ip);
+        connectToIFRef.current(dev.ip, true);
       }
     }
   };
@@ -736,7 +802,11 @@ export const useTelemetry = () => {
     setConnectionStatus("AWAITING SIMULATOR LINK...");
     setConnectedIp("");
     setTelemetry({ ...INITIAL_TELEMETRY });
+    speechManager.stopAll();
+    speechManager.speak("Client disconnected.", { tone: "notice" });
   };
+
+  disconnectDeviceRef.current = disconnectDevice;
 
   return {
     connectionStatus,
