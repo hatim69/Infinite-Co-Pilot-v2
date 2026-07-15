@@ -35,7 +35,7 @@ class SpeechManager {
     // Volumes — 100% by default; user adjusts via settings
     this.masterVolume = 1.0;
     this.coPilotVolume = 1.0;
-    this.boardingMusicVolume = 1.0;
+    this.boardingMusicVolume = 0.5;
     this.safetyBriefingVolume = 1.0;
     this.chimeEnabled = true;
 
@@ -579,7 +579,7 @@ class SpeechManager {
       if (lower.includes("indigo")) return require("../../assets/music/indigo.mp3");
       if (lower.includes("lufthansa")) return require("../../assets/music/lufthansa.mp3");
       if (lower.includes("turkish")) return require("../../assets/music/turkish-airlines.mp3");
-      return require("../../assets/music/lufthansa.mp3"); // Fallback
+      return require("../../assets/music/american-airlines.mp3"); // Fallback
     };
 
     try {

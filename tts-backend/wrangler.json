@@ -1,5 +1,5 @@
 {
-    "name": "infinite-tts-backend",
+    "name": "infinite-co-pilot-tts",
     "main": "server.js",
     "compatibility_date": "2024-04-01"
 }

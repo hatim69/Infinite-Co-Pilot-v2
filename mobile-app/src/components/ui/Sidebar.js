@@ -23,7 +23,7 @@ import {
   Platform,
   Modal
 } from 'react-native';
-import { X, Volume2, Palette, Info, MessageCircle, Check } from 'lucide-react-native';
+import { X, Volume2, Palette, Info, MessageCircle, Check, Settings } from 'lucide-react-native';
 
 import { useTheme, THEMES } from '../../context/ThemeContext';
 import { speechManager } from '../../utils/speech';
@@ -123,7 +123,7 @@ function SidebarSection({ icon: Icon, title, theme, children }) {
 
 // ─── Main Sidebar ─────────────────────────────────────────────────────────────
 
-export default function Sidebar({ visible, onClose }) {
+export default function Sidebar({ visible, onClose, isBackgroundMode, setIsBackgroundMode }) {
   const { theme, activeTheme, setTheme } = useTheme();
   const translateX = useRef(new Animated.Value(SIDEBAR_WIDTH)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
@@ -134,7 +134,7 @@ export default function Sidebar({ visible, onClose }) {
   const [volumes, setVolumes] = useState({
     masterVolume: 1.0,
     coPilotVolume: 1.0,
-    boardingMusicVolume: 1.0,
+    boardingMusicVolume: 0.5,
     safetyBriefingVolume: 1.0,
     chimeEnabled: true,
   });
@@ -236,6 +236,25 @@ export default function Sidebar({ visible, onClose }) {
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
           >
+            {/* ── General ─────────────────────────────────────────────── */}
+            <SidebarSection icon={Settings} title="GENERAL" theme={theme}>
+              <View style={[styles.toggleRow, { borderTopWidth: 0, marginTop: 0, paddingTop: 4 }]}>
+                <View style={{ flex: 1, paddingRight: 16 }}>
+                  <Text style={[styles.sliderLabel, { color: theme.textLabel }]}>Background Mode</Text>
+                  <Text style={[styles.toggleSub, { color: theme.textMuted }]}>
+                    Minimizes UI to save performance. Callouts and TTS continue running.
+                  </Text>
+                </View>
+                <Switch
+                  value={isBackgroundMode}
+                  onValueChange={setIsBackgroundMode}
+                  trackColor={{ false: theme.borderMid, true: theme.switchTrack }}
+                  thumbColor="#FFFFFF"
+                  ios_backgroundColor={theme.sliderTrack}
+                />
+              </View>
+            </SidebarSection>
+
             {/* ── Appearance ─────────────────────────────────────────────── */}
             <SidebarSection icon={Palette} title="APPEARANCE" theme={theme}>
               <View style={styles.swatchRow}>
@@ -296,6 +315,27 @@ export default function Sidebar({ visible, onClose }) {
               </View>
             </SidebarSection>
 
+            {/* ── Testing ────────────────────────────────────────────────── */}
+            <SidebarSection icon={Volume2} title="TESTING" theme={theme}>
+              <TouchableOpacity
+                style={[styles.discordBtn, { backgroundColor: theme.accentBg, borderColor: theme.accentBorder }]}
+                onPress={() => {
+                  const welcomeText = "Ladies and gentlemen, welcome to our test airport. We have safely landed, and the local time is currently 12:00 PM with an outside temperature of 25°C. We hope you enjoyed the cruise, and we look forward to welcoming you on board again soon.";
+                  const pollyVoice = speechManager.voicePreference === "male" ? "Matthew" : "Ruth";
+                  speechManager.speakWithPollyFallback(welcomeText, pollyVoice, { tone: "briefing" });
+                }}
+                activeOpacity={0.75}
+              >
+                <Volume2 size={16} color={theme.accent} style={{ marginRight: 10 }} />
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.discordLabel, { color: theme.textPrimary }]}>Test Arrival Message</Text>
+                  <Text style={[styles.discordSub, { color: theme.textMuted }]}>
+                    Plays the arrival announcement
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            </SidebarSection>
+
             {/* ── About ──────────────────────────────────────────────────── */}
             <SidebarSection icon={Info} title="ABOUT" theme={theme}>
               {/* Version row */}
@@ -321,7 +361,7 @@ export default function Sidebar({ visible, onClose }) {
                 <View style={{ flex: 1 }}>
                   <Text style={[styles.discordLabel, { color: theme.textPrimary }]}>Join our Discord</Text>
                   <Text style={[styles.discordSub, { color: theme.textMuted }]}>
-                    Community, support & updates
+                    Community, support, bug-reports & updates
                   </Text>
                 </View>
                 <View style={[styles.discordArrow, { backgroundColor: theme.accentBgStrong }]}>

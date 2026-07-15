@@ -8,7 +8,7 @@ export default function SettingsModal({ visible, onClose }) {
   const [volumes, setVolumes] = useState({
     masterVolume: 1.0,
     coPilotVolume: 1.0,
-    boardingMusicVolume: 1.0,
+    boardingMusicVolume: 0.5,
     safetyBriefingVolume: 1.0,
     chimeEnabled: true,
   });

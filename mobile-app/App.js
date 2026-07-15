@@ -151,6 +151,7 @@ function AppInner() {
   const [voicePreference, setVoicePreferenceState] = useState("female");
   const [showLogs, setShowLogs] = useState(true);
   const [isInBackground, setIsInBackground] = useState(false);
+  const [isBackgroundMode, setIsBackgroundMode] = useState(false);
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const [isSplashVisible, setIsSplashVisible] = useState(true);
 
@@ -365,6 +366,19 @@ function AppInner() {
           </TouchableOpacity>
         </View>
       </View>
+    </View>
+  );
+
+  // ─── Background Mode (Minimal) ────────────────────────────────────────────
+  const renderBackgroundMode = () => (
+    <View style={[styles.splashContainer, { backgroundColor: theme.surface, borderColor: theme.border, flex: 1, padding: 20 }]}>
+      <View style={[styles.splashLogoWrapper, { backgroundColor: theme.accentBg, borderColor: theme.accent, marginBottom: 16 }]}>
+        <PulseDot active={true} />
+      </View>
+      <Text style={[styles.splashTitle, { color: theme.textPrimary, textAlign: 'center', fontSize: 22 }]}>Background Mode Active</Text>
+      <Text style={[styles.splashSubtitle, { color: theme.textMuted, textAlign: 'center', lineHeight: 20, marginTop: 8 }]}>
+        UI rendering is minimized to conserve resources. Callouts, TTS, and telemetry are running perfectly in the background.
+      </Text>
     </View>
   );
 
@@ -595,14 +609,19 @@ function AppInner() {
             {renderSplashScreen()}
           </FadeTransition>
         ) : (
-          <FadeTransition key={isConnected ? "dashboard" : "connection"}>
-            {isConnected ? renderDashboard() : renderConnectionScreen()}
+          <FadeTransition key={isConnected ? (isBackgroundMode ? "backgroundMode" : "dashboard") : "connection"}>
+            {isConnected ? (isBackgroundMode ? renderBackgroundMode() : renderDashboard()) : renderConnectionScreen()}
           </FadeTransition>
         )}
       </View>
 
       {/* ── Sidebar ─────────────────────────────────────────────────── */}
-      <Sidebar visible={sidebarVisible} onClose={() => setSidebarVisible(false)} />
+      <Sidebar 
+        visible={sidebarVisible} 
+        onClose={() => setSidebarVisible(false)} 
+        isBackgroundMode={isBackgroundMode}
+        setIsBackgroundMode={setIsBackgroundMode}
+      />
     </SafeAreaView>
   );
 }

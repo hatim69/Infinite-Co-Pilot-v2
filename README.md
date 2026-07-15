@@ -2,34 +2,31 @@
 
 > Your intelligent mobile flight assistant.
 
-Infinite Co-Pilot (formerly FlightDeck) is a companion app for Infinite Flight, providing cockpit-aware callouts, smart briefings, telemetry awareness, and crew-style assistance.
+Infinite Co-Pilot is a dedicated mobile companion app for Infinite Flight. It provides cockpit-aware callouts, smart briefings, telemetry awareness, and crew-style assistance right from your iOS or Android device.
 
 ## Overview
 
-The project initially started with a web-based frontend. This web phase allowed us to experiment, test core telemetry features, and learn exactly what makes a great flight assistant. Having gathered those insights, we've now shifted our complete focus to our main objective: **a dedicated mobile app**. 
+The core objective of Infinite Co-Pilot is to deliver a highly polished, responsive, and realistic flight assistant on your mobile device. Rather than just dumping raw telemetry, it listens to the flight state, understands the current phase of flight, and responds with useful, pilot-facing voice callouts and cabin announcements.
 
-While the web frontend remains in the repository as a legacy component of our journey, all active development is now centered on the mobile experience, alongside our robust proxy and text-to-speech (TTS) backends.
+*(Note: The repository contains some legacy web frontend code from our early prototyping phase, but all active development is strictly focused on the mobile application.)*
 
-## Current Focus
+## Key Features
 
-Our active development is entirely focused on the `mobile-app` and its supporting backends. We are currently working on:
+- **Mobile First Experience:** A clean, intuitive iOS/Android interface designed to be your second-screen companion.
+- **Advanced Text-to-Speech:** Features specialized aviation radio voice filters and optimized male/female voice models for realistic communications.
+- **Dynamic Cabin Announcements:** Automatically triggers safety briefings, turbulence warnings, and phase-of-flight specific announcements.
+- **Smart Callouts:** Provides real-time V-speed calculations, gear-up reminders, and flap callouts based on live simulator telemetry.
+- **Performance Mode:** A built-in background mode to conserve device battery and CPU on lower-end devices during long haul flights.
 
-- **Mobile First Experience:** A clean, intuitive iOS/Android interface.
-- **Advanced Text-to-Speech:** Including specialized aviation radio voice filters, hybrid TTS implementation strategies, and optimized male/female voice models.
-- **Dynamic Cabin Announcements:** Safety briefings, turbulence warnings, and phase-of-flight specific announcements.
-- **Smart Callouts:** Automatic V-speed calculations, gear-up reminders, and flap callouts based on real-time telemetry.
+## Architecture & Project Structure
 
-## Project Structure
+The ecosystem is split into three active components:
 
 | Path | Purpose |
 | ---- | ------- |
-| `mobile-app/` | **Active:** The main mobile application source code. |
-| `proxy-backend/` | **Active:** Node.js backend that handles connection logic, telemetry polling, and WebSocket delivery. |
+| `mobile-app/` | **Active:** The main iOS/Android mobile application (React Native/Expo). |
+| `proxy-backend/` | **Active:** Node.js backend handling connection logic, telemetry polling, and WebSocket delivery. |
 | `tts-backend/` | **Active:** Dedicated backend for processing and serving Text-to-Speech audio and voice filters. |
-| `web-frontend/` | **Legacy:** The original web-based UI used for early testing and experimentation. No longer actively updated. |
-| `airport-codes.csv` | Global Airport Database (ICAO) used for route tracking and telemetry. |
-
-## Architecture
 
 ```mermaid
 flowchart LR
@@ -60,7 +57,12 @@ npm start
 ```
 
 ### 3. Mobile App
-For running the mobile app, please refer to the specific instructions within the `mobile-app/` directory.
+```bash
+cd mobile-app
+npm install
+npx expo start
+```
+For more specific instructions, please refer to the `mobile-app/` directory.
 
 ## Future Features
 
