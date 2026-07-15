@@ -1,5 +1,6 @@
 {
   "name": "tts-backend",
+  "type": "module",
   "version": "1.0.0",
   "description": "Amazon Polly Neural TTS proxy for Infinite Co-Pilot",
   "main": "server.js",

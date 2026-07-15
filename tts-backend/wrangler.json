@@ -1,0 +1,5 @@
+{
+    "name": "infinite-tts-backend",
+    "main": "server.js",
+    "compatibility_date": "2024-04-01"
+}
