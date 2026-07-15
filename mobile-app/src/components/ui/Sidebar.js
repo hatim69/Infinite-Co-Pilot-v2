@@ -343,7 +343,7 @@ export default function Sidebar({ visible, onClose, isBackgroundMode, setIsBackg
                 <View>
                   <Text style={[styles.aboutAppName, { color: theme.textPrimary }]}>Infinite Co-Pilot</Text>
                   <Text style={[styles.aboutSub, { color: theme.textMuted }]}>
-                    Real-time flight deck assistant
+                    Real-time flight assistant
                   </Text>
                 </View>
                 <View style={[styles.versionBadge, { backgroundColor: theme.accentBg, borderColor: theme.accentBorder }]}>
