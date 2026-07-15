@@ -6,3 +6,6 @@ test*.js
 *.log
 Global Airport Database (ICAO) - airport-codes.csv
 .DS_Store
+mobile-app/assets/mic_click_off.wav
+mobile-app/assets/radio_static.wav
+mobile-app/assets/mic_click_on.wav

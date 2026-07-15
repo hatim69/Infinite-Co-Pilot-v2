@@ -267,8 +267,13 @@ function AppInner() {
   const handleDisconnect = () => {
     disconnectDevice();
     speechManager.stopAll();
-    setLogs([{ time: new Date().toLocaleTimeString(), text: "System initialized. Awaiting simulator..." }]);
   };
+
+  useEffect(() => {
+    if (connectionStatus === "CONNECTING...") {
+      setLogs([{ time: new Date().toLocaleTimeString(), text: "Starting new flight session..." }]);
+    }
+  }, [connectionStatus]);
 
   const [dashboardPage, setDashboardPage] = useState(0);
   const totalPages = 5;

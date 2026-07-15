@@ -109,6 +109,71 @@ class IFConnectClient {
   }
 
   /**
+   * Send a SET command to IF for a writable parameter.
+   * Encodes the value according to the manifest data type for the command.
+   *
+   * @param {string} commandName - The IF Connect parameter name (e.g. "aircraft/0/systems/signs/seatbelt")
+   * @param {boolean|number|string} value - The value to write
+   * @returns {boolean} true if the command was sent, false if not connected or unknown
+   */
+  set(commandName, value) {
+    if (!this._isConnected || !this._pollSocket) {
+      console.warn('[IFConnect] set() called but not connected:', commandName);
+      return false;
+    }
+    const cmdInfo = this._manifestByName[commandName];
+    if (!cmdInfo) {
+      console.warn('[IFConnect] set() — unknown command (not in manifest):', commandName);
+      return false;
+    }
+
+    try {
+      let valueBuf;
+      switch (cmdInfo.type) {
+        case DataType.BOOLEAN:
+          valueBuf = Buffer.alloc(1);
+          valueBuf.writeUInt8(value ? 1 : 0, 0);
+          break;
+        case DataType.INTEGER:
+          valueBuf = Buffer.alloc(4);
+          valueBuf.writeInt32LE(Math.round(value), 0);
+          break;
+        case DataType.FLOAT:
+          valueBuf = Buffer.alloc(4);
+          valueBuf.writeFloatLE(value, 0);
+          break;
+        case DataType.DOUBLE:
+          valueBuf = Buffer.alloc(8);
+          valueBuf.writeDoubleLE(value, 0);
+          break;
+        case DataType.STRING: {
+          const strBuf = Buffer.from(String(value), 'utf8');
+          valueBuf = Buffer.alloc(4 + strBuf.length);
+          valueBuf.writeUInt32LE(strBuf.length, 0);
+          strBuf.copy(valueBuf, 4);
+          break;
+        }
+        default:
+          console.warn('[IFConnect] set() — unsupported type:', cmdInfo.type);
+          return false;
+      }
+
+      // Header: [Int32LE: cmdCode][Int8: 1=SET][Int32LE: dataLen]
+      const header = Buffer.alloc(9);
+      header.writeInt32LE(cmdInfo.command, 0);
+      header.writeInt8(1, 4); // SET flag
+      header.writeInt32LE(valueBuf.length, 5);
+
+      this._pollSocket.write(Buffer.concat([header, valueBuf]));
+      console.log(`[IFConnect] SET ${commandName} = ${value}`);
+      return true;
+    } catch (e) {
+      console.warn('[IFConnect] set() — write error:', e.message);
+      return false;
+    }
+  }
+
+  /**
    * Register a command name to be polled continuously.
    * Only commands present in the manifest will actually be polled.
    */

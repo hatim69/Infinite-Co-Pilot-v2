@@ -81,6 +81,9 @@ const POLL_COMMANDS = [
   "aircraft/0/systems/engines/3/n1",
   "aircraft/0/systems/parking_brake/state",
   "aircraft/0/systems/engines/0/throttle_lever",
+  "aircraft/0/is_on_runway",
+  "aircraft/0/location/destination_distance",
+  "environment/turbulence_factor",
 ];
 
 const INITIAL_TELEMETRY = {
@@ -119,8 +122,13 @@ const INITIAL_TELEMETRY = {
   engines: {},
   time: "---",
   airport: "---",
+  oat: null,
+  onRunway: false,
+  destDist: null,
+  turbulence: 0,
   performance: null,
   appState: -1,
+  phase: "preflight",
 };
 
 export const useTelemetry = () => {
@@ -151,6 +159,8 @@ export const useTelemetry = () => {
     v2Announced: false,
     connectedAt: 0,
     isManualConnection: false,
+    moderateTurbulenceAnnounced: false,
+    severeTurbulenceAnnounced: false,
   });
 
   // Keep stateRef in sync with latest telemetry
@@ -320,9 +330,23 @@ export const useTelemetry = () => {
 
           if (state.onGround && flags.hasFlown && gs < 30 && !flags.welcome) {
             const cityName = airportNames[state.airport] || state.airport || "your destination";
+            const liveryName = state.livery || "";
+            const oatCelsius = state.oat !== null ? Math.round(state.oat) : null;
+            const tempAdjective =
+              oatCelsius === null
+                ? null
+                : oatCelsius < 15
+                ? "chilly"
+                : oatCelsius <= 28
+                ? "beautiful"
+                : "warm";
+            const tempPhrase =
+              oatCelsius !== null && tempAdjective
+                ? ` It's a ${tempAdjective} ${oatCelsius}°C outside.`
+                : "";
+            const airlinePhrase = liveryName ? ` It was a pleasure having you on board this ${liveryName} flight today.` : "";
             const welcomeText =
-              `Ladies and gentlemen, welcome to ${cityName}. The local time is ${state.time}. ` +
-              `Please remain seated with your seatbelt fastened until the aircraft has come to a complete stop.`;
+              `Ladies and gentlemen, welcome to ${cityName}. We have safely landed, and the local time is currently ${state.time} with an outside temperature of${oatCelsius !== null ? ` ${oatCelsius}°C` : " --"}.${tempPhrase}${airlinePhrase} We hope you enjoyed the cruise, and we look forward to welcoming you on board again soon.`;
             // Route through Amazon Polly Neural TTS (Ruth for female, Matthew for male)
             // Automatically falls back to expo-speech if the backend is unreachable.
             const pollyVoice = speechManager.voicePreference === "male" ? "Matthew" : "Ruth";
@@ -406,6 +430,74 @@ export const useTelemetry = () => {
         if (command === "simulator/time_local") updateNext("time", formatTime(data));
         if (command === "infiniteflight/nearest_airport") updateNext("airport", data);
 
+        // ── Outside Air Temperature (Kelvin → Celsius) ───────────────────
+        if (command === "environment/temperature") {
+          const celsius = typeof data === "number" ? data - 273.15 : null;
+          updateNext("oat", celsius);
+        }
+
+        // ── Turbulence ───────────────────────────────────────────────────
+        // Thresholds:
+        //   ≥ 0.25 — moderate turbulence (announce once; reset when it drops below 0.10)
+        //   ≥ 0.50 — severe  turbulence (announce once on top of moderate; same reset)
+        if (command === "environment/turbulence_factor") {
+          const factor = typeof data === "number" ? data : 0;
+          updateNext("turbulence", factor);
+
+          const isSevere   = factor >= 0.50;
+          const isModerate = factor >= 0.25;
+
+          if (isSevere && !flags.severeTurbulenceAnnounced) {
+            // ── Severe turbulence announcement ────────────────────────────
+            flags.severeTurbulenceAnnounced = true;
+            flags.moderateTurbulenceAnnounced = true; // absorb the moderate flag too
+
+            // Turn on seatbelt sign if it isn't already
+            if (state.seatbelt !== 1) {
+              ifConnect.set("aircraft/0/systems/signs/seatbelt", true);
+            }
+
+            const announcement =
+              "Ladies and gentlemen, this is your captain speaking. " +
+              "We are currently experiencing severe turbulence. " +
+              "For your safety, the seatbelt sign has been turned on. " +
+              "Please return to your seats immediately, fasten your seatbelts securely, " +
+              "and stow any tray tables and loose items. " +
+              "Please remain seated until the seatbelt sign has been switched off. " +
+              "We apologize for the inconvenience and appreciate your cooperation.";
+
+            speak(announcement, { tone: "briefing", withChime: true });
+
+          } else if (isModerate && !flags.moderateTurbulenceAnnounced) {
+            // ── Moderate turbulence announcement ──────────────────────────
+            flags.moderateTurbulenceAnnounced = true;
+
+            // Turn on seatbelt sign if it isn't already
+            if (state.seatbelt !== 1) {
+              ifConnect.set("aircraft/0/systems/signs/seatbelt", true);
+            }
+
+            const announcement =
+              "Ladies and gentlemen, this is your captain speaking. " +
+              "We are currently experiencing some turbulence. " +
+              "The seatbelt sign has been switched on. " +
+              "We ask that you please return to your seats and fasten your seatbelts. " +
+              "Please also ensure your tray tables are stowed and any overhead bins are secure. " +
+              "We will do our best to find a smoother altitude. " +
+              "Thank you for your patience.";
+
+            speak(announcement, { tone: "briefing", withChime: true });
+
+          } else if (factor < 0.10) {
+            // Turbulence has cleared — reset flags so the next bout can be announced
+            if (flags.moderateTurbulenceAnnounced || flags.severeTurbulenceAnnounced) {
+              flags.moderateTurbulenceAnnounced = false;
+              flags.severeTurbulenceAnnounced = false;
+              console.log("[Turbulence] Factor dropped below 0.10 — announcement flags reset.");
+            }
+          }
+        }
+
         // ── Battery ──────────────────────────────────────────────────────
         if (command === "aircraft/0/systems/battery/main_battery/amp_draw") {
           updateNext("batteryAmp", data);
@@ -475,12 +567,23 @@ export const useTelemetry = () => {
           }
         }
 
+
         // ── Pushback ─────────────────────────────────────────────────────
         if (command === "aircraft/0/is_pushback_active") {
           const on = data === 1 || data === true;
           if (state.pushback === 0 && on) speak("Pushback started.", "notice");
           else if (state.pushback === 1 && !on) speak("Pushback ended.", "notice");
           updateNext("pushback", on ? 1 : 0);
+        }
+
+        // ── Runway / Destination ───────────────────────────────────────
+        if (command === "aircraft/0/is_on_runway") {
+          updateNext("onRunway", data === 1 || data === true);
+        }
+        if (command === "aircraft/0/location/destination_distance") {
+          // Value arrives in metres; convert to nautical miles
+          const nm = typeof data === "number" ? data / 1852 : null;
+          updateNext("destDist", nm);
         }
 
         // ── Autopilot ─────────────────────────────────────────────────────
@@ -638,6 +741,84 @@ export const useTelemetry = () => {
         // ── Recalculate performance if aircraft/weight changed ────────────
         if (updated && next.name && next.weight) {
           next.performance = calculatePerformance(next.name, next.weight);
+        }
+
+        // ── Phase derivation (runs every update) ──────────────────────────────
+        //
+        // All 12 phases from the IF Connect API reference chart, evaluated
+        // in priority order against the fully-updated `next` snapshot.
+        //
+        // Phases:
+        //   preflight  — before any ground service connects
+        //   boarding   — on ground + GS≈0 + stairs connected + not yet flown
+        //   de-boarding — on ground + GS≈0 + stairs connected + flight finished
+        //   pushback   — on ground + pushback active
+        //   taxi_out   — on ground + off runway + 0<GS<35 + not yet flown
+        //   takeoff    — on ground + on runway + GS>45
+        //   initial_climb — airborne + VS>500 fpm + MSL≤5000 ft
+        //   climb      — airborne + VS>500 fpm + MSL>5000 ft
+        //   cruise     — airborne + MSL>10000 ft + VS between −100 and +100 fpm
+        //   descent    — airborne + VS<−500 fpm + dest>15 nm
+        //   approach   — airborne + dest≤15 nm + MSL<5000 ft
+        //   landing    — on ground + on runway + GS>40 (was approach)
+        //   taxi_in    — on ground + GS<35 + flight finished
+        if (updated) {
+          const s = next; // alias for readability
+          const gs = s.gs ?? 0;
+          const vs = s.vs ?? 0;
+          const msl = s.msl ?? 0;
+          const destNm = s.destDist; // null if no FPL set
+
+          let newPhase = s.phase; // sticky by default
+
+          if (s.onGround) {
+            // ── Ground phases ──────────────────────────────────────────────
+            const stairsDown = s.stairs === 1;
+            const gsNearZero = gs < 2;
+
+            if (s.onRunway && gs > 40 && flags.hasFlown) {
+              // Landing (Touchdown) — came from approach, now rolling on runway
+              newPhase = "landing";
+            } else if (s.onRunway && gs > 45 && !flags.hasFlown) {
+              // Takeoff roll — on runway, fast, hasn't flown yet
+              newPhase = "takeoff";
+            } else if (s.pushback === 1) {
+              // Pushback overrides everything else on the ground
+              newPhase = "pushback";
+            } else if (stairsDown && gsNearZero && flags.hasFlown) {
+              // De-boarding — flight is complete, stairs are out
+              newPhase = "de-boarding";
+            } else if (stairsDown && gsNearZero && !flags.hasFlown) {
+              // Boarding — still pre-departure, stairs connected
+              newPhase = "boarding";
+            } else if (gs > 2 && gs < 35 && !s.onRunway && flags.hasFlown) {
+              // Taxi inbound — slow ground movement after landing
+              newPhase = "taxi_in";
+            } else if (gs > 2 && gs < 35 && !s.onRunway && !flags.hasFlown) {
+              // Taxi outbound — slow ground movement before departure
+              newPhase = "taxi_out";
+            } else if (s.onRunway && gs <= 45 && !flags.hasFlown) {
+              // Holding on runway / lining up before takeoff roll
+              newPhase = "taxi_out";
+            }
+            // Otherwise keep the last phase (e.g. brief GS gap during turns)
+          } else {
+            // ── Airborne phases ───────────────────────────────────────────
+            if (vs > 500 && msl <= 5000) {
+              newPhase = "initial_climb";
+            } else if (vs > 500 && msl > 5000) {
+              newPhase = "climb";
+            } else if (msl > 10000 && vs >= -100 && vs <= 100) {
+              newPhase = "cruise";
+            } else if (vs < -500 && (destNm === null || destNm > 15)) {
+              newPhase = "descent";
+            } else if (destNm !== null && destNm <= 15 && msl < 5000) {
+              newPhase = "approach";
+            }
+            // Gaps (e.g. levelling during climb) stay on the previous phase
+          }
+
+          updateNext("phase", newPhase);
         }
 
         return updated ? next : prev;
