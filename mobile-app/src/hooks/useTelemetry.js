@@ -430,9 +430,9 @@ export const useTelemetry = () => {
         if (command === "simulator/time_local") updateNext("time", formatTime(data));
         if (command === "infiniteflight/nearest_airport") updateNext("airport", data);
 
-        // ── Outside Air Temperature (Kelvin → Celsius) ───────────────────
+        // ── Outside Air Temperature (Celsius) ───────────────────
         if (command === "environment/temperature") {
-          const celsius = typeof data === "number" ? data - 273.15 : null;
+          const celsius = typeof data === "number" ? data : null;
           updateNext("oat", celsius);
         }
 
