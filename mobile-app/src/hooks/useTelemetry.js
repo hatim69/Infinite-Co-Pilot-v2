@@ -868,7 +868,9 @@ export const useTelemetry = () => {
       console.log("[useTelemetry] Connection error:", err.message);
       setConnectionStatus("AWAITING SIMULATOR LINK...");
       setConnectedIp("");
+      setTelemetry({ ...INITIAL_TELEMETRY });
       isConnectedRef.current = false;
+      ifConnect.close(() => {});
       speechManager.stopAll();
       speechManager.speak("Client disconnected.", { tone: "notice" });
     };
@@ -876,7 +878,9 @@ export const useTelemetry = () => {
     const disconnectHandler = () => {
       setConnectionStatus("AWAITING SIMULATOR LINK...");
       setConnectedIp("");
+      setTelemetry({ ...INITIAL_TELEMETRY });
       isConnectedRef.current = false;
+      ifConnect.close(() => {});
       speechManager.stopAll();
       speechManager.speak("Client disconnected.", { tone: "notice" });
     };

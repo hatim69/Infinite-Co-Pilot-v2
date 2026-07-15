@@ -258,14 +258,32 @@ class SpeechManager {
           let voiceId = undefined;
 
           if (this.voicePreference === "male") {
-            finalPitch = finalPitch * 0.9;
             if (this.availableVoices) {
-              const maleVoice = this.availableVoices.find(
-                (v) =>
-                  v.language.startsWith("en") &&
-                  (v.name.includes("Daniel") || v.name.includes("Arthur") || v.name.includes("Aaron") || v.name.includes("Fred") || v.name.includes("Alex"))
+              let maleVoice = this.availableVoices.find(
+                (v) => v.language.startsWith("en") && (v.name === "Aaron" || v.name === "Daniel" || v.name === "Arthur")
               );
-              if (maleVoice) voiceId = maleVoice.identifier;
+              if (!maleVoice) {
+                maleVoice = this.availableVoices.find(
+                  (v) => v.language.startsWith("en") && (v.name.toLowerCase().includes("male") || v.identifier.toLowerCase().includes("male"))
+                );
+              }
+              if (!maleVoice) {
+                maleVoice = this.availableVoices.find(
+                  (v) => v.language.startsWith("en") && (v.identifier.includes("-iom") || v.identifier.includes("-tpd") || v.identifier.includes("-rjs") || v.identifier.includes("-gpl"))
+                );
+              }
+              if (!maleVoice) {
+                maleVoice = this.availableVoices.find(
+                  (v) => v.language.startsWith("en") && (v.name.includes("Alex") || v.name.includes("Fred"))
+                );
+              }
+              if (maleVoice) {
+                voiceId = maleVoice.identifier;
+              } else {
+                finalPitch = finalPitch * 0.9;
+              }
+            } else {
+              finalPitch = finalPitch * 0.9;
             }
           }
 
@@ -411,16 +429,32 @@ class SpeechManager {
       let voiceId = undefined;
 
       if (this.voicePreference === "male") {
-        finalPitch = finalPitch * 0.9;
         if (this.availableVoices) {
-          const maleVoice = this.availableVoices.find(
-            (v) =>
-              v.language.startsWith("en") &&
-              (v.name.includes("Daniel") || v.name.includes("Arthur") ||
-               v.name.includes("Aaron") || v.name.includes("Fred") ||
-               v.name.includes("Alex"))
+          let maleVoice = this.availableVoices.find(
+            (v) => v.language.startsWith("en") && (v.name === "Aaron" || v.name === "Daniel" || v.name === "Arthur")
           );
-          if (maleVoice) voiceId = maleVoice.identifier;
+          if (!maleVoice) {
+            maleVoice = this.availableVoices.find(
+              (v) => v.language.startsWith("en") && (v.name.toLowerCase().includes("male") || v.identifier.toLowerCase().includes("male"))
+            );
+          }
+          if (!maleVoice) {
+            maleVoice = this.availableVoices.find(
+              (v) => v.language.startsWith("en") && (v.identifier.includes("-iom") || v.identifier.includes("-tpd") || v.identifier.includes("-rjs") || v.identifier.includes("-gpl"))
+            );
+          }
+          if (!maleVoice) {
+            maleVoice = this.availableVoices.find(
+              (v) => v.language.startsWith("en") && (v.name.includes("Alex") || v.name.includes("Fred"))
+            );
+          }
+          if (maleVoice) {
+            voiceId = maleVoice.identifier;
+          } else {
+            finalPitch = finalPitch * 0.9;
+          }
+        } else {
+          finalPitch = finalPitch * 0.9;
         }
       }
 

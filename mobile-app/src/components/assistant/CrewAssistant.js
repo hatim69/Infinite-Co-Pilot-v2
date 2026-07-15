@@ -45,7 +45,7 @@ const CrewAssistant = ({ telemetry, isConnected }) => {
             <View style={[styles.iconWrapper, { backgroundColor: theme.accentBg }]}>
               <ShieldCheck size={20} color={theme.accentText} />
             </View>
-            <Text style={[styles.headerTitle, { color: theme.textSecondary }]}>FLIGHTDECK ASSISTANT</Text>
+            <Text style={[styles.headerTitle, { color: theme.textSecondary }]}>INFINITE CO-PILOT ASSISTANT</Text>
           </View>
         </View>
 
