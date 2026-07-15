@@ -32,7 +32,7 @@ import Slider from './Slider';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const SIDEBAR_WIDTH = Math.min(SCREEN_WIDTH * 0.88, 360);
 const APP_VERSION = '1.0.0';
-const DISCORD_URL = 'https://discord.gg/infinitecopilot';
+const DISCORD_URL = 'https://discord.gg/hb3HkrfBEK';
 
 // ─── Theme Swatch ─────────────────────────────────────────────────────────────
 
