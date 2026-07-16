@@ -28,6 +28,7 @@ import { X, Volume2, Palette, Info, MessageCircle, Check, Settings } from 'lucid
 import { useTheme, THEMES } from '../../context/ThemeContext';
 import { speechManager } from '../../utils/speech';
 import Slider from './Slider';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const SIDEBAR_WIDTH = Math.min(SCREEN_WIDTH * 0.88, 360);
@@ -125,6 +126,7 @@ function SidebarSection({ icon: Icon, title, theme, children }) {
 
 export default function Sidebar({ visible, onClose, isBackgroundMode, setIsBackgroundMode }) {
   const { theme, activeTheme, setTheme } = useTheme();
+  const insets = useSafeAreaInsets();
   const translateX = useRef(new Animated.Value(SIDEBAR_WIDTH)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
 
@@ -220,6 +222,8 @@ export default function Sidebar({ visible, onClose, isBackgroundMode, setIsBackg
               backgroundColor: theme.surfaceStrong,
               borderLeftColor: theme.border,
               transform: [{ translateX }],
+              marginTop: insets.top,
+              marginBottom: insets.bottom,
             },
           ]}
         >
@@ -233,7 +237,7 @@ export default function Sidebar({ visible, onClose, isBackgroundMode, setIsBackg
 
           <ScrollView
             style={styles.scrollArea}
-            contentContainerStyle={styles.scrollContent}
+            contentContainerStyle={[styles.scrollContent, { paddingBottom: 40 }]}
             showsVerticalScrollIndicator={false}
           >
             {/* ── General ─────────────────────────────────────────────── */}
@@ -401,7 +405,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingTop: Platform.OS === 'ios' ? 56 : 36,
+    paddingTop: 24,
     paddingBottom: 16,
     borderBottomWidth: 1,
   },
@@ -423,7 +427,6 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    paddingBottom: 40,
   },
 
   // Sections

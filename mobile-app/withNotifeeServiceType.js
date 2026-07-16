@@ -30,12 +30,12 @@ function withNotifeeManifest(config) {
     );
     
     if (notifeeService) {
-      notifeeService.$['android:foregroundServiceType'] = 'mediaPlayback';
+      notifeeService.$['android:foregroundServiceType'] = 'dataSync';
     } else {
       application.service.push({
         $: {
           'android:name': 'app.notifee.core.ForegroundService',
-          'android:foregroundServiceType': 'mediaPlayback'
+          'android:foregroundServiceType': 'dataSync'
         }
       });
     }

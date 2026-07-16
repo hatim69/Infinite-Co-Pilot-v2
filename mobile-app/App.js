@@ -225,7 +225,7 @@ function AppInner() {
             android: {
               channelId,
               asForegroundService: true,
-              foregroundServiceTypes: [AndroidForegroundServiceType.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK],
+              foregroundServiceTypes: [AndroidForegroundServiceType.FOREGROUND_SERVICE_TYPE_DATA_SYNC],
               color: notifee.AndroidColor?.AQUA || '#0D9488',
               ongoing: true,
             },
