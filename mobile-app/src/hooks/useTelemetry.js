@@ -416,7 +416,7 @@ export const useTelemetry = () => {
         // ── Altitude AGL (positive rate) ─────────────────────────────────
         if (command === "aircraft/0/altitude_agl") {
           const prevAgl = state.agl;
-          const agl = data * 3.28084;
+          const agl = data;
           updateNext("agl", agl);
 
           if (prevAgl !== null) {

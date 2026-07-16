@@ -969,7 +969,7 @@ const styles = StyleSheet.create({
     fontSize: 10,
     marginRight: 8,
     fontFamily: Platform.OS === "ios" ? "Courier" : "monospace",
-    marginTop: 2,
+    lineHeight: 18,
     flexShrink: 0,
   },
   logEntry: {
@@ -978,7 +978,8 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
   },
   logText: {
-    fontSize: 13,
+    fontSize: 12,
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
     flex: 1,
     lineHeight: 18,
   },
