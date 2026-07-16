@@ -159,6 +159,14 @@ export const staticAudioMap = {
     female: require("../../assets/audio/female_crew_prepare_for_takeoff.mp3"),
     male: require("../../assets/audio/male_crew_prepare_for_takeoff.mp3")
   },
+  "Ladies and gentlemen, this is your captain speaking. We are currently experiencing some turbulence. The seatbelt sign has been switched on. We ask that you please return to your seats and fasten your seatbelts. Please also ensure your tray tables are stowed and any overhead bins are secure. We will do our best to find a smoother altitude. Thank you for your patience.": {
+    female: require("../../assets/audio/female_crew_moderate_turbulence.mp3"),
+    male: require("../../assets/audio/male_crew_moderate_turbulence.mp3")
+  },
+  "Ladies and gentlemen, this is your captain speaking. We are currently experiencing severe turbulence. For your safety, the seatbelt sign has been turned on. Please return to your seats immediately, fasten your seatbelts securely, and stow any tray tables and loose items. Please remain seated until the seatbelt sign has been switched off. We apologize for the inconvenience and appreciate your cooperation.": {
+    female: require("../../assets/audio/female_crew_severe_turbulence.mp3"),
+    male: require("../../assets/audio/male_crew_severe_turbulence.mp3")
+  },
   "Belt loader connected.": {
     female: require("../../assets/audio/female_service_belt_loader_connected.mp3"),
     male: require("../../assets/audio/male_service_belt_loader_connected.mp3")
