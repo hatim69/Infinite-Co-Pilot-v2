@@ -17,6 +17,7 @@ import * as Speech from "expo-speech";
 import { createAudioPlayer, setAudioModeAsync } from "expo-audio";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getCachedAudioUri } from "./audioCache";
+import { staticAudioMap } from "./staticAudioMap";
 
 // ─── Polly backend URL (set in mobile-app/.env) ───────────────────────────────
 // Must be your Mac's LAN IP when running locally (not 'localhost' on device).
@@ -256,8 +257,53 @@ class SpeechManager {
         await new Promise((resolve) => setTimeout(resolve, 1500));
       }
 
+      // ── If there is a pre-recorded audio file for this exact text ────────
+      const staticAudioEntry = staticAudioMap[spokenText];
+      if (staticAudioEntry) {
+        await new Promise((resolve) => {
+          try {
+            const audioAsset = staticAudioEntry[this.voicePreference] || staticAudioEntry.female;
+            const player = createAudioPlayer(audioAsset);
+            player.volume = profile.volume * this.masterVolume * this.coPilotVolume;
+            player.play();
+            
+            let isResolved = false;
+            const finish = () => {
+              if (isResolved) return;
+              isResolved = true;
+              try { player.release(); } catch(e){}
+              resolve();
+            };
+
+            // Poll for completion since expo-audio API varies
+            const checkInterval = setInterval(() => {
+              try {
+                if (player.duration > 0 && player.currentTime >= player.duration - 0.1) {
+                  clearInterval(checkInterval);
+                  finish();
+                } else if (!player.playing && player.currentTime > 0) {
+                  clearInterval(checkInterval);
+                  finish();
+                }
+              } catch (e) {
+                clearInterval(checkInterval);
+                finish();
+              }
+            }, 250);
+
+            // Safety timeout (max 10 seconds for any static voice line)
+            setTimeout(() => {
+              clearInterval(checkInterval);
+              finish();
+            }, 10000);
+
+          } catch (e) {
+            resolve();
+          }
+        });
+      } 
       // ── If this queue item was routed through Polly, use speakPolly ────────
-      if (options._pollyVoiceId) {
+      else if (options._pollyVoiceId) {
         await this.speakPolly(spokenText, options._pollyVoiceId, profile);
       } else {
         await new Promise((resolve) => {

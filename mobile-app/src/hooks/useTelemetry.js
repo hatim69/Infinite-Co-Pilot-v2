@@ -161,6 +161,8 @@ export function useTelemetry(disableAutoConnect = false) {
     alt15k: false,
     alt24k: false,
     boardingAnnouncementPlayed: false,
+    boardingMusicStarted: false,
+    boardingMusicStopped: false,
     welcomeMessagePlayed: false,
     v1Announced: false,
     vrAnnounced: false,
@@ -677,6 +679,12 @@ export function useTelemetry(disableAutoConnect = false) {
         if (command === "aircraft/0/systems/signs/seatbelt") {
           const on = data === 1 || data === true;
           const val = on ? 1 : 0;
+
+          if (on && flags.boardingMusicStarted && !flags.boardingMusicStopped) {
+            flags.boardingMusicStopped = true;
+            speechManager.stopBoardingMusic();
+          }
+
           if (state.seatbelt !== -1 && val !== state.seatbelt) {
             if (on && state.onGround && !flags.boardingAnnouncementPlayed) {
               flags.boardingAnnouncementPlayed = true;
@@ -929,17 +937,22 @@ export function useTelemetry(disableAutoConnect = false) {
     const anyEngineRunning = Object.values(telemetry.engines || {}).some((s) => s > 0);
     const hasPower = telemetry.battery === 1 || telemetry.apu === 2 || telemetry.gpu === 1;
 
-    const isBoardingPhase =
+    const canStartBoardingMusic =
       telemetry.onGround &&
       !anyEngineRunning &&
       telemetry.beacon === 0 &&
       hasPower &&
       telemetry.livery && // Ensure livery has arrived
-      !flagsRef.current.boardingAnnouncementPlayed;
+      !flagsRef.current.boardingMusicStopped;
 
-    if (isBoardingPhase) {
+    if (canStartBoardingMusic && !flagsRef.current.boardingMusicStarted) {
+      flagsRef.current.boardingMusicStarted = true;
       speechManager.playBoardingMusic(telemetry.livery);
-    } else {
+    }
+    
+    // Fallback: stop boarding music if we take off and seatbelt signs were somehow missed
+    if (!telemetry.onGround && flagsRef.current.boardingMusicStarted && !flagsRef.current.boardingMusicStopped) {
+      flagsRef.current.boardingMusicStopped = true;
       speechManager.stopBoardingMusic();
     }
   }, [

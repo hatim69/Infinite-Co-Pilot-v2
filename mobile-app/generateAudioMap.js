@@ -1,0 +1,84 @@
+const fs = require('fs');
+
+const mappings = {
+  "Client disconnected.": "app_client_disconnected",
+  "80 knots": "callout_80_knots",
+  "Gears down.": "callout_gear_down",
+  "Landing gear up.": "callout_gear_up",
+  "Passing 10,000. Landing lights off.": "callout_passing_10000_landing_lights_off",
+  "Passing 15,000.": "callout_passing_15000",
+  "Passing 24,000.": "callout_passing_24000",
+  "Passing 5,000": "callout_passing_5000",
+  "Positive rate. Gear up.": "callout_positive_rate_gear_up",
+  "Rotate": "callout_rotate",
+  "Spoilers armed.": "callout_spoilers_armed",
+  "Spoilers flight.": "callout_spoilers_flight",
+  "Spoilers off.": "callout_spoilers_off",
+  "V1": "callout_v1",
+  "V2": "callout_v2",
+  "Welcome to the flight Captain.": "crew_welcome_captain_ground",
+  "Welcome back to the flight Captain.": "crew_welcome_back_captain_airborne",
+  "Cabin crew prepare for take off.": "crew_prepare_for_takeoff",
+  
+  "Belt loader connected.": "service_belt_loader_connected",
+  "Belt loader disconnected.": "service_belt_loader_disconnected",
+  "Catering truck connected.": "service_catering_truck_connected",
+  "Catering truck disconnected.": "service_catering_truck_disconnected",
+  "GPU connected.": "service_gpu_connected",
+  "GPU disconnected.": "service_gpu_disconnected",
+  "Pallet loader connected.": "service_pallet_loader_connected",
+  "Pallet loader disconnected.": "service_pallet_loader_disconnected",
+  "Parking brakes released.": "service_parking_brakes_released",
+  "Parking brakes set.": "service_parking_brakes_set",
+  "Pushback ended.": "service_pushback_ended",
+  "Pushback started.": "service_pushback_started",
+  "Stairs connected.": "service_stairs_connected",
+  "Stairs disconnected.": "service_stairs_disconnected",
+  
+  "APU off.": "system_apu_off",
+  "APU on.": "system_apu_on",
+  "APU starting.": "system_apu_starting",
+  "Autopilot off.": "system_autopilot_off",
+  "Autopilot on.": "system_autopilot_on",
+  "Beacon lights off.": "system_beacon_lights_off",
+  "Beacon lights on.": "system_beacon_lights_on",
+  "Engine 1 shutdown.": "system_engine_1_shutdown",
+  "Engine 1 shutting down.": "system_engine_1_shutting_down",
+  "Engine 1 started.": "system_engine_1_started",
+  "Engine 1 starting.": "system_engine_1_starting",
+  "Engine 2 shutdown.": "system_engine_2_shutdown",
+  "Engine 2 shutting down.": "system_engine_2_shutting_down",
+  "Engine 2 started.": "system_engine_2_started",
+  "Engine 2 starting.": "system_engine_2_starting",
+  "Engine 3 shutdown.": "system_engine_3_shutdown",
+  "Engine 3 shutting down.": "system_engine_3_shutting_down",
+  "Engine 3 started.": "system_engine_3_started",
+  "Engine 3 starting.": "system_engine_3_starting",
+  "Engine 4 shutdown.": "system_engine_4_shutdown",
+  "Engine 4 shutting down.": "system_engine_4_shutting_down",
+  "Engine 4 started.": "system_engine_4_started",
+  "Engine 4 starting.": "system_engine_4_starting",
+  "Landing lights off.": "system_landing_lights_off",
+  "Landing lights on.": "system_landing_lights_on",
+  "Navigation lights off.": "system_navigation_lights_off",
+  "Navigation lights on.": "system_navigation_lights_on",
+  "No smoking signs off.": "system_no_smoking_signs_off",
+  "No smoking signs on.": "system_no_smoking_signs_on",
+  "Seatbelt signs off.": "system_seatbelt_signs_off",
+  "Seatbelt signs on.": "system_seatbelt_signs_on",
+  "Strobe lights off.": "system_strobe_lights_off",
+  "Strobe lights on.": "system_strobe_lights_on",
+  "VNAV off.": "system_vnav_off",
+  "VNAV on.": "system_vnav_on",
+};
+
+let content = "export const staticAudioMap = {\n";
+for (const [text, filename] of Object.entries(mappings)) {
+  content += `  "${text}": {\n`;
+  content += `    female: require("../../assets/audio/female_${filename}.mp3"),\n`;
+  content += `    male: require("../../assets/audio/male_${filename}.mp3")\n`;
+  content += `  },\n`;
+}
+content += "};\n";
+
+fs.writeFileSync("src/utils/staticAudioMap.js", content);
