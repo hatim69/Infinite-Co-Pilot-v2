@@ -28,12 +28,14 @@ import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 
 import notifee, { AndroidImportance, AndroidColor, AndroidForegroundServiceType } from '@notifee/react-native';
 
-notifee.registerForegroundService((notification) => {
-  return new Promise(() => {
-    // The service will keep running as long as this promise is unresolved,
-    // which keeps our socket polling and speech synthesis alive in the background.
+if (Platform.OS === 'android' && notifee && notifee.registerForegroundService) {
+  notifee.registerForegroundService((notification) => {
+    return new Promise(() => {
+      // The service will keep running as long as this promise is unresolved,
+      // which keeps our socket polling and speech synthesis alive in the background.
+    });
   });
-});
+}
 import {
   Settings,
   Droplet,
@@ -171,6 +173,7 @@ function AppInner() {
     // Request permissions on first open (Android 13+ & iOS)
     async function requestPermissions() {
       try {
+        if (!notifee) return;
         await notifee.requestPermission();
       } catch (e) {
         console.log("Permission request failed:", e);
@@ -205,9 +208,9 @@ function AppInner() {
     return () => sub.remove();
   }, []);
 
-  // Manage Background Foreground Service (Persistent Notification)
   useEffect(() => {
     async function manageForegroundService() {
+      if (!notifee) return;
       if (isConnected) {
         if (Platform.OS === 'android') {
           const channelId = await notifee.createChannel({
@@ -406,7 +409,7 @@ function AppInner() {
           {/* Page 0: Crew Assistant */}
           {dashboardPage === 0 && (
             <View style={{ flex: 1, paddingHorizontal: 16 }}>
-            <CrewAssistant telemetry={telemetry} isConnected={isConnected} />
+            {/* <CrewAssistant telemetry={telemetry} isConnected={isConnected} /> */}
             <View style={[styles.card, { flex: 1, marginBottom: 20, backgroundColor: theme.surfaceMid, borderColor: theme.border }]}>
               <TouchableOpacity style={styles.cardHeader} onPress={() => setShowLogs((v) => !v)} activeOpacity={0.8}>
                 <View style={styles.cardHeaderLeft}>

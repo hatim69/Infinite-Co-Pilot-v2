@@ -141,6 +141,8 @@ export const useTelemetry = () => {
   const connectToIFRef = useRef(null);
   const isConnectedRef = useRef(false);
   const disconnectDeviceRef = useRef(null);
+  const discoveredDevicesRef = useRef([]);
+  const autoConnectTimerRef = useRef(null);
 
   const flagsRef = useRef({
     eightyKnots: false,
@@ -199,19 +201,26 @@ export const useTelemetry = () => {
           }
           if (!ip) return;
 
-          setDiscoveredDevices((prev) => {
-            const exists = prev.find((d) => d.deviceId === devId);
-            if (!exists) return [...prev, { deviceId: devId, deviceName: devName, ip }];
-            return prev;
-          });
+          const exists = discoveredDevicesRef.current.find((d) => d.deviceId === devId);
+          if (!exists) {
+            discoveredDevicesRef.current.push({ deviceId: devId, deviceName: devName, ip });
+            setDiscoveredDevices([...discoveredDevicesRef.current]);
+          }
 
           // If State is not 1 (or "Playing"), we assume it's in the menu
           const stateStr = String(data.State || data.state || data.AppState || data.appState);
           const isReady = stateStr === "1" || stateStr === "Playing";
 
-          // Auto-connect on first discovered device if it's in flight
+          // Auto-connect after 1.5s only if there's exactly 1 device discovered
           if (!isConnectedRef.current && connectToIFRef.current && isReady) {
-            connectToIFRef.current(ip, false);
+            if (!autoConnectTimerRef.current) {
+              autoConnectTimerRef.current = setTimeout(() => {
+                if (discoveredDevicesRef.current.length === 1 && !isConnectedRef.current && connectToIFRef.current) {
+                  connectToIFRef.current(discoveredDevicesRef.current[0].ip, false);
+                }
+                autoConnectTimerRef.current = null;
+              }, 1500);
+            }
           } else if (isConnectedRef.current && !isReady) {
             // Simulator broadcasted that it's in the menu! Instant disconnect.
             if (disconnectDeviceRef.current) {
@@ -919,6 +928,7 @@ export const useTelemetry = () => {
       !anyEngineRunning &&
       telemetry.beacon === 0 &&
       hasPower &&
+      telemetry.livery && // Ensure livery has arrived
       !flagsRef.current.boardingAnnouncementPlayed;
 
     if (isBoardingPhase) {

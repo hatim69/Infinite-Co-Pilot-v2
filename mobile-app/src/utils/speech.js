@@ -16,6 +16,7 @@
 import * as Speech from "expo-speech";
 import { createAudioPlayer, setAudioModeAsync } from "expo-audio";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { getCachedAudioUri } from "./audioCache";
 
 // ─── Polly backend URL (set in mobile-app/.env) ───────────────────────────────
 // Must be your Mac's LAN IP when running locally (not 'localhost' on device).
@@ -119,12 +120,18 @@ class SpeechManager {
       if (this.boardingMusic) {
         try { this.boardingMusic.pause(); } catch (e) {}
       }
+      if (this.boardingAnnouncePlayer) {
+        try { this.boardingAnnouncePlayer.pause(); } catch (e) {}
+      }
       Speech.stop();
       this.speechQueue = [];
       this.isProcessingQueue = false;
     } else {
       if (this.boardingMusic) {
         try { this.boardingMusic.play(); } catch (e) {}
+      }
+      if (this.boardingAnnouncePlayer) {
+        try { this.boardingAnnouncePlayer.play(); } catch (e) {}
       }
     }
     return this.voiceEnabled;
@@ -515,41 +522,73 @@ class SpeechManager {
     }
   }
 
-  playBoardingAnnouncement(livery) {
+  async playBoardingAnnouncement(livery) {
     this.stopBoardingMusic();
+    
+    if (this.boardingAnnouncePlayer) return;
+    if (this._isFetchingBoardingAnnounce && this._fetchingBoardingAnnounceFor === livery) return;
 
-    const getFile = (l) => {
+    this._isFetchingBoardingAnnounce = true;
+    this._fetchingBoardingAnnounceFor = livery;
+
+    this._requestCounter = (this._requestCounter || 0) + 1;
+    const playRequestId = this._requestCounter;
+    this._boardingAnnounceRequestId = playRequestId;
+
+    const getFileName = (l) => {
       const lower = (l || "").toLowerCase();
-      if (lower.includes("air canada")) return require("../../assets/announcements/air-canada.mp3");
-      if (lower.includes("air france")) return require("../../assets/announcements/air-france.mp3");
-      if (lower.includes("air india")) return require("../../assets/announcements/air-india.mp3");
-      if (lower.includes("british airways")) return require("../../assets/announcements/british-airways.mp3");
-      if (lower.includes("delta")) return require("../../assets/announcements/delta.mp3");
-      if (lower.includes("emirates")) return require("../../assets/announcements/emirates.mp3");
-      if (lower.includes("indigo")) return require("../../assets/announcements/indigo.mp3");
-      if (lower.includes("lufthansa")) return require("../../assets/announcements/lufthansa.mp3");
-      if (lower.includes("qatar")) return require("../../assets/announcements/qatar.mp3");
-      if (lower.includes("singapore")) return require("../../assets/announcements/singapore-airlines.mp3");
-      if (lower.includes("turkish")) return require("../../assets/announcements/turkish-airlines.mp3");
-      return require("../../assets/announcements/fallback.mp3");
+      if (lower.includes("air canada")) return "announcements/air-canada.mp3";
+      if (lower.includes("air france")) return "announcements/air-france.mp3";
+      if (lower.includes("air india")) return "announcements/air-india.mp3";
+      if (lower.includes("british airways")) return "announcements/british-airways.mp3";
+      if (lower.includes("delta")) return "announcements/delta.mp3";
+      if (lower.includes("emirates")) return "announcements/emirates.mp3";
+      if (lower.includes("indigo")) return "announcements/indigo.mp3";
+      if (lower.includes("lufthansa")) return "announcements/lufthansa.mp3";
+      if (lower.includes("qatar")) return "announcements/qatar.mp3";
+      if (lower.includes("singapore")) return "announcements/singapore-airlines.mp3";
+      if (lower.includes("turkish")) return "announcements/turkish-airlines.mp3";
+      return "announcements/fallback.mp3";
     };
 
     try {
+      const remoteFileName = getFileName(livery);
+      const audioUri = await getCachedAudioUri(remoteFileName, "announcements/fallback.mp3");
+      
+      // If we were stopped or disconnected while downloading, abort
+      if (this._boardingAnnounceRequestId !== playRequestId) return;
+
+      if (!audioUri) {
+        console.warn("[Speech] Could not get cached audio for boarding announcement.");
+        return;
+      }
+
       if (this.boardingAnnouncePlayer) {
         try { this.boardingAnnouncePlayer.release(); } catch (e) {}
       }
-      this.boardingAnnouncePlayer = createAudioPlayer(getFile(livery));
+      this.boardingAnnouncePlayer = createAudioPlayer(audioUri);
       this.boardingAnnouncePlayer.volume = this.masterVolume * this.safetyBriefingVolume;
-      this.boardingAnnouncePlayer.play();
+      
+      if (this.voiceEnabled) {
+        this.boardingAnnouncePlayer.play();
+      }
+      
       setTimeout(() => {
-        this.playChime();
+        if (this._boardingAnnounceRequestId === playRequestId && this.voiceEnabled) {
+          this.playChime();
+        }
       }, 35000);
     } catch (e) {
       console.log("[Speech] Boarding announcement failed:", e);
+    } finally {
+      if (this._boardingAnnounceRequestId === playRequestId) {
+        this._isFetchingBoardingAnnounce = false;
+      }
     }
   }
 
   stopBoardingAnnouncement() {
+    this._boardingAnnounceRequestId = null;
     if (this.boardingAnnouncePlayer) {
       try {
         this.boardingAnnouncePlayer.pause();
@@ -568,39 +607,61 @@ class SpeechManager {
     }, 3000);
   }
 
-  playBoardingMusic(livery) {
+  async playBoardingMusic(livery) {
     if (this.boardingMusic) return;
+    if (this._isFetchingBoardingMusic && this._fetchingBoardingMusicFor === livery) return;
 
-    const getFile = (l) => {
+    this._isFetchingBoardingMusic = true;
+    this._fetchingBoardingMusicFor = livery;
+
+    this._requestCounter = (this._requestCounter || 0) + 1;
+    const playRequestId = this._requestCounter;
+    this._boardingMusicRequestId = playRequestId;
+
+    const getFileName = (l) => {
       const lower = (l || "").toLowerCase();
-      if (lower.includes("american")) return require("../../assets/music/american-airlines.mp3");
-      if (lower.includes("cathay")) return require("../../assets/music/cathay-pacific.mp3");
-      if (lower.includes("emirates")) return require("../../assets/music/emirates.mp3");
-      if (lower.includes("indigo")) return require("../../assets/music/indigo.mp3");
-      if (lower.includes("lufthansa")) return require("../../assets/music/lufthansa.mp3");
-      if (lower.includes("turkish")) return require("../../assets/music/turkish-airlines.mp3");
-      return require("../../assets/music/american-airlines.mp3"); // Fallback
+      if (lower.includes("american")) return "music/american-airlines.mp3";
+      if (lower.includes("cathay")) return "music/cathay-pacific.mp3";
+      if (lower.includes("emirates")) return "music/emirates.mp3";
+      if (lower.includes("indigo")) return "music/indigo.mp3";
+      if (lower.includes("lufthansa")) return "music/lufthansa.mp3";
+      if (lower.includes("turkish")) return "music/turkish-airlines.mp3";
+      return "music/american-airlines.mp3"; // Fallback
     };
 
     try {
-      const file = getFile(livery);
-      if (!file) {
-        console.log("[Speech] No boarding music for livery:", livery);
+      const remoteFileName = getFileName(livery);
+      const audioUri = await getCachedAudioUri(remoteFileName, "music/american-airlines.mp3");
+      
+      // If stopped or disconnected while downloading, abort
+      if (this._boardingMusicRequestId !== playRequestId) return;
+
+      if (!audioUri) {
+        console.warn("[Speech] Could not get cached audio for boarding music.");
         return;
       }
+
       if (this.boardingMusic) {
         try { this.boardingMusic.release(); } catch (e) {}
       }
-      this.boardingMusic = createAudioPlayer(file);
+      this.boardingMusic = createAudioPlayer(audioUri);
       this.boardingMusic.loop = true;
       this.boardingMusic.volume = this.masterVolume * this.boardingMusicVolume;
-      this.boardingMusic.play();
+      
+      if (this.voiceEnabled) {
+        this.boardingMusic.play();
+      }
     } catch (e) {
       console.log("[Speech] Boarding music failed:", e);
+    } finally {
+      if (this._boardingMusicRequestId === playRequestId) {
+        this._isFetchingBoardingMusic = false;
+      }
     }
   }
 
   stopBoardingMusic() {
+    this._boardingMusicRequestId = null;
     if (this.boardingMusic) {
       try {
         this.boardingMusic.pause();
@@ -615,13 +676,10 @@ class SpeechManager {
     this.isProcessingQueue = false;
     Speech.stop();
     this.stopBoardingMusic();
+    this.stopBoardingAnnouncement();
     if (this.chimePlayer) {
       try { this.chimePlayer.pause(); this.chimePlayer.release(); } catch (e) {}
       this.chimePlayer = null;
-    }
-    if (this.boardingAnnouncePlayer) {
-      try { this.boardingAnnouncePlayer.pause(); this.boardingAnnouncePlayer.release(); } catch (e) {}
-      this.boardingAnnouncePlayer = null;
     }
     if (this.sirenPlayer) {
       try { this.sirenPlayer.pause(); this.sirenPlayer.release(); } catch (e) {}
