@@ -102,7 +102,9 @@ class IFConnectClient {
    */
   init(successCallback, params = {}) {
     this._successCallback = successCallback;
-    this._host = params.host;
+    let h = params.host ? params.host.trim() : '127.0.0.1';
+    if (h === 'localhost') h = '127.0.0.1';
+    this._host = h;
     this._port = params.port || DEFAULT_PORT;
     console.log(`[IFConnect] Connecting to ${this._host}:${this._port}...`);
     this._fetchManifest();

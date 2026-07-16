@@ -343,9 +343,9 @@ export const aircraftPerformanceData = [
   {
     "aircraft": "Bombardier CRJ-200",
     "engine": "GE CF34-3B",
-    "flaps": ["0°", "8°", "20°", "30°", "45°"],
-    "takeoffLogic": { "threshold": 21.0, "low": "8°", "high": "20°", "short": "20°" },
-    "landingFlaps": "45°",
+    "flaps": ["0", "8", "20", "30", "45"],
+    "takeoffLogic": { "threshold": 21.0, "low": "8", "high": "20", "short": "20" },
+    "landingFlaps": "45",
     "vrScale": 1.95, "vrBase": 88, "v1Offset": 5, "v2Offset": 6,
     "trimBase": 7.8, "trimMinWeight": 16, "trimScale": 0.40,
     "vrefScale": 1.62, "vrefBase": 92,
@@ -354,9 +354,9 @@ export const aircraftPerformanceData = [
   {
     "aircraft": "Bombardier CRJ-700",
     "engine": "GE CF34-8C1",
-    "flaps": ["0°", "8°", "20°", "30°", "45°"],
-    "takeoffLogic": { "threshold": 32.0, "low": "8°", "high": "20°", "short": "20°" },
-    "landingFlaps": "45°",
+    "flaps": ["0", "8", "20", "30", "45"],
+    "takeoffLogic": { "threshold": 32.0, "low": "8", "high": "20", "short": "20" },
+    "landingFlaps": "45",
     "vrScale": 1.45, "vrBase": 90, "v1Offset": 4, "v2Offset": 5,
     "trimBase": 7.5, "trimMinWeight": 25, "trimScale": 0.25,
     "vrefScale": 1.28, "vrefBase": 94,
@@ -365,9 +365,9 @@ export const aircraftPerformanceData = [
   {
     "aircraft": "Bombardier CRJ-900",
     "engine": "GE CF34-8C5",
-    "flaps": ["0°", "8°", "20°", "30°", "45°"],
-    "takeoffLogic": { "threshold": 36.0, "low": "8°", "high": "20°", "short": "20°" },
-    "landingFlaps": "45°",
+    "flaps": ["0", "8", "20", "30", "45"],
+    "takeoffLogic": { "threshold": 36.0, "low": "8", "high": "20", "short": "20" },
+    "landingFlaps": "45",
     "vrScale": 1.32, "vrBase": 92, "v1Offset": 4, "v2Offset": 5,
     "trimBase": 7.2, "trimMinWeight": 28, "trimScale": 0.20,
     "vrefScale": 1.15, "vrefBase": 96,
@@ -376,9 +376,9 @@ export const aircraftPerformanceData = [
   {
     "aircraft": "Bombardier CRJ-1000",
     "engine": "GE CF34-8C5",
-    "flaps": ["0°", "8°", "20°", "30°", "45°"],
-    "takeoffLogic": { "threshold": 39.0, "low": "8°", "high": "20°", "short": "20°" },
-    "landingFlaps": "45°",
+    "flaps": ["0", "8", "20", "30", "45"],
+    "takeoffLogic": { "threshold": 39.0, "low": "8", "high": "20", "short": "20" },
+    "landingFlaps": "45",
     "vrScale": 1.25, "vrBase": 93, "v1Offset": 4, "v2Offset": 5,
     "trimBase": 7.0, "trimMinWeight": 30, "trimScale": 0.18,
     "vrefScale": 1.08, "vrefBase": 97,
@@ -387,9 +387,9 @@ export const aircraftPerformanceData = [
   {
     "aircraft": "Bombardier Dash 8 Q400",
     "engine": "PW150A Turboprop",
-    "flaps": ["0°", "5°", "10°", "15°", "35°"],
-    "takeoffLogic": { "threshold": 26.0, "low": "5°", "high": "15°", "short": "15°" },
-    "landingFlaps": "35°",
+    "flaps": ["0", "5", "10", "15", "35"],
+    "takeoffLogic": { "threshold": 26.0, "low": "5", "high": "15", "short": "15" },
+    "landingFlaps": "35",
     "vrScale": 1.65, "vrBase": 72, "v1Offset": 3, "v2Offset": 4,
     "trimBase": 4.5, "trimMinWeight": 20, "trimScale": 0.20,
     "vrefScale": 1.40, "vrefBase": 78,
@@ -420,9 +420,9 @@ export const aircraftPerformanceData = [
   {
     "aircraft": "McDonnell Douglas DC-10",
     "engine": "GE CF6-50C",
-    "flaps": ["0°", "5°", "15°", "22°", "35°", "50°"],
-    "takeoffLogic": { "threshold": 210.0, "low": "15°", "high": "22°", "short": "22°" },
-    "landingFlaps": "35°",
+    "flaps": ["0", "5", "15", "22", "35", "50"],
+    "takeoffLogic": { "threshold": 210.0, "low": "15", "high": "22", "short": "22" },
+    "landingFlaps": "35",
     "vrScale": 0.24, "vrBase": 108, "v1Offset": 7, "v2Offset": 8,
     "trimBase": 14.5, "trimMinWeight": 160, "trimScale": 0.05,
     "vrefScale": 0.31, "vrefBase": 92,
@@ -431,9 +431,9 @@ export const aircraftPerformanceData = [
   {
     "aircraft": "McDonnell Douglas DC-10F",
     "engine": "GE CF6-50C",
-    "flaps": ["0°", "5°", "15°", "22°", "35°", "50°"],
-    "takeoffLogic": { "threshold": 220.0, "low": "15°", "high": "22°", "short": "22°" },
-    "landingFlaps": "35°",
+    "flaps": ["0", "5", "15", "22", "35", "50"],
+    "takeoffLogic": { "threshold": 220.0, "low": "15", "high": "22", "short": "22" },
+    "landingFlaps": "35",
     "vrScale": 0.23, "vrBase": 109, "v1Offset": 7, "v2Offset": 8,
     "trimBase": 14.8, "trimMinWeight": 160, "trimScale": 0.05,
     "vrefScale": 0.30, "vrefBase": 93,
@@ -442,9 +442,9 @@ export const aircraftPerformanceData = [
   {
     "aircraft": "McDonnell Douglas MD-11",
     "engine": "PW4460",
-    "flaps": ["0°", "10°", "15°", "28°", "35°", "50°"],
-    "takeoffLogic": { "threshold": 230.0, "low": "15°", "high": "28°", "short": "28°" },
-    "landingFlaps": "35°",
+    "flaps": ["0", "10", "15", "28", "35", "50"],
+    "takeoffLogic": { "threshold": 230.0, "low": "15", "high": "28", "short": "28" },
+    "landingFlaps": "35",
     "vrScale": 0.21, "vrBase": 112, "v1Offset": 6, "v2Offset": 7,
     "trimBase": 12.0, "trimMinWeight": 180, "trimScale": 0.04,
     "vrefScale": 0.28, "vrefBase": 96,
@@ -453,9 +453,9 @@ export const aircraftPerformanceData = [
   {
     "aircraft": "McDonnell Douglas MD-11F",
     "engine": "GE CF6-80C2",
-    "flaps": ["0°", "10°", "15°", "28°", "35°", "50°"],
-    "takeoffLogic": { "threshold": 240.0, "low": "15°", "high": "28°", "short": "28°" },
-    "landingFlaps": "35°",
+    "flaps": ["0", "10", "15", "28", "35", "50"],
+    "takeoffLogic": { "threshold": 240.0, "low": "15", "high": "28", "short": "28" },
+    "landingFlaps": "35",
     "vrScale": 0.20, "vrBase": 114, "v1Offset": 6, "v2Offset": 7,
     "trimBase": 12.2, "trimMinWeight": 180, "trimScale": 0.04,
     "vrefScale": 0.27, "vrefBase": 97,
@@ -472,11 +472,11 @@ export const getFlapString = (aircraftName, flapIndex) => {
   });
 
   if (config && config.flaps) {
-    const hasZero = config.flaps[0] === "0" || config.flaps[0] === "0°";
+    const hasZero = config.flaps[0] === "0";
 
     if (hasZero) {
       if (flapIndex < config.flaps.length) {
-        return config.flaps[flapIndex] === "0" || config.flaps[flapIndex] === "0°" ? "UP" : config.flaps[flapIndex];
+        return config.flaps[flapIndex] === "0" ? "UP" : config.flaps[flapIndex];
       }
     } else {
       if (flapIndex === 0) return "UP";
@@ -491,7 +491,7 @@ export const getFlapString = (aircraftName, flapIndex) => {
 };
 
 function applyEnvironmentalCorrections(baseSpeed, oat, headwindComp) {
-  // OAT Correction: ISA deviation mapping (15°C baseline)
+  // OAT Correction: ISA deviation mapping (15C baseline)
   const oatCorrection = Math.round((oat - 15) / 10);
 
   // Wind Correction: Negative for headwinds, positive for tailwinds

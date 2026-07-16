@@ -423,7 +423,7 @@ function AppInner() {
           {/* Page 0: Crew Assistant */}
           {dashboardPage === 0 && (
             <View style={{ flex: 1, paddingHorizontal: 16 }}>
-            {/* <CrewAssistant telemetry={telemetry} isConnected={isConnected} /> */}
+            <CrewAssistant telemetry={telemetry} isConnected={isConnected} />
             <View style={[styles.card, { flex: 1, marginBottom: 20, backgroundColor: theme.surfaceMid, borderColor: theme.border }]}>
               <TouchableOpacity style={styles.cardHeader} onPress={() => setShowLogs((v) => !v)} activeOpacity={0.8}>
                 <View style={styles.cardHeaderLeft}>

@@ -59,6 +59,94 @@ export const staticAudioMap = {
     female: require("../../assets/audio/female_callout_v2.mp3"),
     male: require("../../assets/audio/male_callout_v2.mp3")
   },
+  "Flaps 1+F.": {
+    female: require("../../assets/audio/female_callout_flaps_1+F.mp3"),
+    male: require("../../assets/audio/male_callout_flaps_1+F.mp3")
+  },
+  "Flaps 1.": {
+    female: require("../../assets/audio/female_callout_flaps_1.mp3"),
+    male: require("../../assets/audio/male_callout_flaps_1.mp3")
+  },
+  "Flaps 2.": {
+    female: require("../../assets/audio/female_callout_flaps_2.mp3"),
+    male: require("../../assets/audio/male_callout_flaps_2.mp3")
+  },
+  "Flaps 3.": {
+    female: require("../../assets/audio/female_callout_flaps_3.mp3"),
+    male: require("../../assets/audio/male_callout_flaps_3.mp3")
+  },
+  "Flaps 4.": {
+    female: require("../../assets/audio/female_callout_flaps_4.mp3"),
+    male: require("../../assets/audio/male_callout_flaps_4.mp3")
+  },
+  "Flaps 5.": {
+    female: require("../../assets/audio/female_callout_flaps_5.mp3"),
+    male: require("../../assets/audio/male_callout_flaps_5.mp3")
+  },
+  "Flaps 8.": {
+    female: require("../../assets/audio/female_callout_flaps_8.mp3"),
+    male: require("../../assets/audio/male_callout_flaps_8.mp3")
+  },
+  "Flaps 10.": {
+    female: require("../../assets/audio/female_callout_flaps_10.mp3"),
+    male: require("../../assets/audio/male_callout_flaps_10.mp3")
+  },
+  "Flaps 13.": {
+    female: require("../../assets/audio/female_callout_flaps_13.mp3"),
+    male: require("../../assets/audio/male_callout_flaps_13.mp3")
+  },
+  "Flaps 15.": {
+    female: require("../../assets/audio/female_callout_flaps_15.mp3"),
+    male: require("../../assets/audio/male_callout_flaps_15.mp3")
+  },
+  "Flaps 18.": {
+    female: require("../../assets/audio/female_callout_flaps_18.mp3"),
+    male: require("../../assets/audio/male_callout_flaps_18.mp3")
+  },
+  "Flaps 20.": {
+    female: require("../../assets/audio/female_callout_flaps_20.mp3"),
+    male: require("../../assets/audio/male_callout_flaps_20.mp3")
+  },
+  "Flaps 22.": {
+    female: require("../../assets/audio/female_callout_flaps_22.mp3"),
+    male: require("../../assets/audio/male_callout_flaps_22.mp3")
+  },
+  "Flaps 25.": {
+    female: require("../../assets/audio/female_callout_flaps_25.mp3"),
+    male: require("../../assets/audio/male_callout_flaps_25.mp3")
+  },
+  "Flaps 28.": {
+    female: require("../../assets/audio/female_callout_flaps_28.mp3"),
+    male: require("../../assets/audio/male_callout_flaps_28.mp3")
+  },
+  "Flaps 30.": {
+    female: require("../../assets/audio/female_callout_flaps_30.mp3"),
+    male: require("../../assets/audio/male_callout_flaps_30.mp3")
+  },
+  "Flaps 35.": {
+    female: require("../../assets/audio/female_callout_flaps_35.mp3"),
+    male: require("../../assets/audio/male_callout_flaps_35.mp3")
+  },
+  "Flaps 40.": {
+    female: require("../../assets/audio/female_callout_flaps_40.mp3"),
+    male: require("../../assets/audio/male_callout_flaps_40.mp3")
+  },
+  "Flaps 45.": {
+    female: require("../../assets/audio/female_callout_flaps_45.mp3"),
+    male: require("../../assets/audio/male_callout_flaps_45.mp3")
+  },
+  "Flaps 50.": {
+    female: require("../../assets/audio/female_callout_flaps_50.mp3"),
+    male: require("../../assets/audio/male_callout_flaps_50.mp3")
+  },
+  "Flaps FULL.": {
+    female: require("../../assets/audio/female_callout_flaps_full.mp3"),
+    male: require("../../assets/audio/male_callout_flaps_full.mp3")
+  },
+  "Flaps UP.": {
+    female: require("../../assets/audio/female_callout_flaps_up.mp3"),
+    male: require("../../assets/audio/male_callout_flaps_up.mp3")
+  },
   "Welcome to the flight Captain.": {
     female: require("../../assets/audio/female_crew_welcome_captain_ground.mp3"),
     male: require("../../assets/audio/male_crew_welcome_captain_ground.mp3")
