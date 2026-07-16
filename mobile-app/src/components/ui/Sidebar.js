@@ -124,7 +124,7 @@ function SidebarSection({ icon: Icon, title, theme, children }) {
 
 // ─── Main Sidebar ─────────────────────────────────────────────────────────────
 
-export default function Sidebar({ visible, onClose, isBackgroundMode, setIsBackgroundMode }) {
+export default function Sidebar({ visible, onClose, isBackgroundMode, setIsBackgroundMode, disableAutoConnect, setDisableAutoConnect }) {
   const { theme, activeTheme, setTheme } = useTheme();
   const insets = useSafeAreaInsets();
   const translateX = useRef(new Animated.Value(SIDEBAR_WIDTH)).current;
@@ -252,6 +252,22 @@ export default function Sidebar({ visible, onClose, isBackgroundMode, setIsBackg
                 <Switch
                   value={isBackgroundMode}
                   onValueChange={setIsBackgroundMode}
+                  trackColor={{ false: theme.borderMid, true: theme.switchTrack }}
+                  thumbColor="#FFFFFF"
+                  ios_backgroundColor={theme.sliderTrack}
+                />
+              </View>
+
+              <View style={[styles.toggleRow, { borderTopColor: theme.borderMid }]}>
+                <View style={{ flex: 1, paddingRight: 16 }}>
+                  <Text style={[styles.sliderLabel, { color: theme.textLabel }]}>Disable Auto-Connect</Text>
+                  <Text style={[styles.toggleSub, { color: theme.textMuted }]}>
+                    Require manual connection to the simulator.
+                  </Text>
+                </View>
+                <Switch
+                  value={disableAutoConnect}
+                  onValueChange={setDisableAutoConnect}
                   trackColor={{ false: theme.borderMid, true: theme.switchTrack }}
                   thumbColor="#FFFFFF"
                   ios_backgroundColor={theme.sliderTrack}

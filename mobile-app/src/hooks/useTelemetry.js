@@ -131,11 +131,17 @@ const INITIAL_TELEMETRY = {
   phase: "preflight",
 };
 
-export const useTelemetry = () => {
+export function useTelemetry(disableAutoConnect = false) {
   const [connectionStatus, setConnectionStatus] = useState("AWAITING SIMULATOR LINK...");
   const [connectedIp, setConnectedIp] = useState("");
   const [discoveredDevices, setDiscoveredDevices] = useState([]);
   const [telemetry, setTelemetry] = useState(INITIAL_TELEMETRY);
+
+  // Use a ref so the UDP listener always sees the latest boolean without re-binding
+  const disableAutoConnectRef = useRef(disableAutoConnect);
+  useEffect(() => {
+    disableAutoConnectRef.current = disableAutoConnect;
+  }, [disableAutoConnect]);
 
   const stateRef = useRef(telemetry);
   const connectToIFRef = useRef(null);
@@ -213,9 +219,9 @@ export const useTelemetry = () => {
 
           // Auto-connect after 1.5s only if there's exactly 1 device discovered
           if (!isConnectedRef.current && connectToIFRef.current && isReady) {
-            if (!autoConnectTimerRef.current) {
+            if (!autoConnectTimerRef.current && !disableAutoConnectRef.current) {
               autoConnectTimerRef.current = setTimeout(() => {
-                if (discoveredDevicesRef.current.length === 1 && !isConnectedRef.current && connectToIFRef.current) {
+                if (discoveredDevicesRef.current.length === 1 && !isConnectedRef.current && connectToIFRef.current && !disableAutoConnectRef.current) {
                   connectToIFRef.current(discoveredDevicesRef.current[0].ip, false);
                 }
                 autoConnectTimerRef.current = null;

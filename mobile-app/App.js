@@ -24,6 +24,7 @@ import {
   Image,
 } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 
 import notifee, { AndroidImportance, AndroidColor, AndroidForegroundServiceType } from '@notifee/react-native';
@@ -135,6 +136,19 @@ const FadeTransition = ({ children }) => {
 function AppInner() {
   const { theme } = useTheme();
 
+  const [disableAutoConnect, setDisableAutoConnectState] = useState(false);
+
+  useEffect(() => {
+    AsyncStorage.getItem('disableAutoConnect').then(val => {
+      if (val === 'true') setDisableAutoConnectState(true);
+    });
+  }, []);
+
+  const setDisableAutoConnect = async (val) => {
+    setDisableAutoConnectState(val);
+    await AsyncStorage.setItem('disableAutoConnect', val.toString());
+  };
+
   const {
     connectionStatus,
     connectedIp,
@@ -143,7 +157,7 @@ function AppInner() {
     discoveredDevices,
     selectDevice,
     disconnectDevice,
-  } = useTelemetry();
+  } = useTelemetry(disableAutoConnect);
 
   const [logs, setLogs] = useState([
     { time: new Date().toLocaleTimeString(), text: "System initialized. Awaiting simulator..." },
@@ -624,6 +638,8 @@ function AppInner() {
         onClose={() => setSidebarVisible(false)} 
         isBackgroundMode={isBackgroundMode}
         setIsBackgroundMode={setIsBackgroundMode}
+        disableAutoConnect={disableAutoConnect}
+        setDisableAutoConnect={setDisableAutoConnect}
       />
     </SafeAreaView>
   );
