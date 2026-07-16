@@ -30,14 +30,21 @@ function withNotifeeManifest(config) {
     );
     
     if (notifeeService) {
-      notifeeService.$['android:foregroundServiceType'] = 'dataSync';
+      notifeeService.$['android:foregroundServiceType'] = 'mediaPlayback|dataSync|shortService';
+      notifeeService.$['tools:replace'] = 'android:foregroundServiceType';
     } else {
       application.service.push({
         $: {
           'android:name': 'app.notifee.core.ForegroundService',
-          'android:foregroundServiceType': 'dataSync'
+          'android:foregroundServiceType': 'mediaPlayback|dataSync|shortService',
+          'tools:replace': 'android:foregroundServiceType'
         }
       });
+    }
+
+    // Ensure tools namespace is defined in the manifest
+    if (!androidManifest.manifest.$['xmlns:tools']) {
+      androidManifest.manifest.$['xmlns:tools'] = 'http://schemas.android.com/tools';
     }
     
     return config;

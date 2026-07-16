@@ -14,7 +14,7 @@
  */
 
 import * as Speech from "expo-speech";
-import { createAudioPlayer, setAudioModeAsync } from "expo-audio";
+import { createAudioPlayer, setAudioModeAsync, preload } from "expo-audio";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getCachedAudioUri } from "./audioCache";
 import { staticAudioMap } from "./staticAudioMap";
@@ -97,6 +97,16 @@ class SpeechManager {
       this.silentPlayer.loop = true;
       this.silentPlayer.play();
     } catch (e) {}
+
+    // Preload all static audio files to completely eliminate the slight playback gap
+    try {
+      for (const entry of Object.values(staticAudioMap)) {
+        if (entry.female) preload(entry.female).catch(() => {});
+        if (entry.male) preload(entry.male).catch(() => {});
+      }
+    } catch (e) {
+      console.log("[Speech] Failed to preload static audio:", e);
+    }
   }
 
   async _configureAudioSession() {
@@ -672,6 +682,35 @@ class SpeechManager {
       if (lower.includes("indigo")) return "music/indigo.mp3";
       if (lower.includes("lufthansa")) return "music/lufthansa.mp3";
       if (lower.includes("turkish")) return "music/turkish-airlines.mp3";
+      
+      // New airlines added
+      if (lower.includes("aer lingus")) return "music/aer-lingus.mp3";
+      if (lower.includes("air canada")) return "music/air-canada.mp3";
+      if (lower.includes("air china")) return "music/air-china.mp3";
+      if (lower.includes("air france")) return "music/air-france.mp3";
+      if (lower.includes("air india")) return "music/air-india.mp3";
+      if (lower.includes("air japan")) return "music/air-japan.mp3";
+      if (lower.includes("air new zealand") || lower.includes("air nz")) return "music/air-new-zealand.mp3";
+      if (lower.includes("air portugal") || lower.includes("tap")) return "music/air-portugal.mp3";
+      if (lower.includes("ana") || lower.includes("all nippon")) return "music/ana.mp3";
+      if (lower.includes("british airways")) return "music/british-airways.mp3";
+      if (lower.includes("brussels")) return "music/brussels-airlines.mp3";
+      if (lower.includes("delta")) return "music/delta-air-lines.mp3";
+      if (lower.includes("egyptair")) return "music/egyptair.mp3";
+      if (lower.includes("ethiopian")) return "music/ethiopian-airlines.mp3";
+      if (lower.includes("finnair")) return "music/finnair.mp3";
+      if (lower.includes("gulf air")) return "music/gulf-air.mp3";
+      if (lower.includes("iran air")) return "music/iran-air.mp3";
+      if (lower.includes("klm")) return "music/klm.mp3";
+      if (lower.includes("malaysia")) return "music/malaysia-airlines.mp3";
+      if (lower.includes("qantas")) return "music/qantas.mp3";
+      if (lower.includes("qatar")) return "music/qatar-airways.mp3";
+      if (lower.includes("singapore")) return "music/singapore-airlines.mp3";
+      if (lower.includes("swiss")) return "music/swiss.mp3";
+      if (lower.includes("vietnam")) return "music/vietnam-airlines.mp3";
+      if (lower.includes("virgin atlantic")) return "music/virgin-atlantic.mp3";
+      if (lower.includes("westjet")) return "music/westjet.mp3";
+
       return "music/american-airlines.mp3"; // Fallback
     };
 
