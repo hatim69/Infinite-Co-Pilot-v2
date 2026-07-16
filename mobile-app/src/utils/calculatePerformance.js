@@ -132,6 +132,17 @@ export const aircraftPerformanceData = [
     "rotationPitch": 12.5, "tailstrikeRisk": "Medium"
   },
   {
+    "aircraft": "Airbus A350-1000",
+    "engine": "RR Trent XWB-97",
+    "flaps": ["0", "1", "1+F", "2", "3", "FULL"],
+    "takeoffLogic": { "threshold": 260.0, "low": "1+F", "high": "2", "short": "3" },
+    "landingFlaps": "FULL",
+    "vrScale": 0.25, "vrBase": 80, "v1Offset": 6, "v2Offset": 5,
+    "trimBase": 20, "trimMinWeight": 192, "trimScale": 0.04,
+    "vrefScale": 0.16, "vrefBase": 98,
+    "rotationPitch": 9.5, "tailstrikeRisk": "Very High"
+  },
+  {
     "aircraft": "Airbus A380-800",
     "engine": "Engine Alliance GP7200",
     "flaps": ["0", "1", "1+F", "2", "3", "FULL"],
@@ -459,10 +470,10 @@ export const getFlapString = (aircraftName, flapIndex) => {
     const cNameUpper = c.aircraft.toUpperCase();
     return nameUpper.includes(cNameUpper) || cNameUpper.includes(nameUpper);
   });
-  
+
   if (config && config.flaps) {
     const hasZero = config.flaps[0] === "0" || config.flaps[0] === "0°";
-    
+
     if (hasZero) {
       if (flapIndex < config.flaps.length) {
         return config.flaps[flapIndex] === "0" || config.flaps[flapIndex] === "0°" ? "UP" : config.flaps[flapIndex];
@@ -474,7 +485,7 @@ export const getFlapString = (aircraftName, flapIndex) => {
       }
     }
   }
-  
+
   // Fallback if not found
   return flapIndex === 0 ? "UP" : `${flapIndex}`;
 };
@@ -482,7 +493,7 @@ export const getFlapString = (aircraftName, flapIndex) => {
 function applyEnvironmentalCorrections(baseSpeed, oat, headwindComp) {
   // OAT Correction: ISA deviation mapping (15°C baseline)
   const oatCorrection = Math.round((oat - 15) / 10);
-  
+
   // Wind Correction: Negative for headwinds, positive for tailwinds
   let windCorrection = 0;
   if (headwindComp > 0) {
@@ -491,46 +502,46 @@ function applyEnvironmentalCorrections(baseSpeed, oat, headwindComp) {
     const tailwind = Math.abs(headwindComp);
     windCorrection = Math.floor(tailwind / 5) * 2;
   }
-  
+
   return Math.round(baseSpeed + oatCorrection + windCorrection);
 }
 
 export const calculatePerformance = (aircraftName, weightKG, oat = 15, headwindComp = 0) => {
   const weight = weightKG / 1000;
-  
+
   const config = aircraftPerformanceData.find(c => {
     const nameUpper = (aircraftName || '').toUpperCase();
     const cNameUpper = c.aircraft.toUpperCase();
     return nameUpper.includes(cNameUpper) || cNameUpper.includes(nameUpper);
   });
-  
+
   if (!config) {
-     const vrBase = Math.round(140 + ((weight - 60)/2));
-     return {
-       v1: vrBase - 5, 
-       vr: vrBase, 
-       v2: vrBase + 12, 
-       trim: 20, 
-       vref: vrBase - 5, 
-       takeoffFlaps: "1"
-     };
+    const vrBase = Math.round(140 + ((weight - 60) / 2));
+    return {
+      v1: vrBase - 5,
+      vr: vrBase,
+      v2: vrBase + 12,
+      trim: 20,
+      vref: vrBase - 5,
+      takeoffFlaps: "1"
+    };
   }
 
   const vrBaseCalc = (weight * config.vrScale) + config.vrBase;
   const vr = applyEnvironmentalCorrections(vrBaseCalc, oat, headwindComp);
-  
+
   const v1 = vr - config.v1Offset;
   const v2 = vr + config.v2Offset;
-  
+
   const trim = config.trimBase - ((weight - config.trimMinWeight) * config.trimScale);
   const trimClamped = Math.max(0, Math.round(trim * 10) / 10);
-  
+
   const vrefBaseCalc = (weight * config.vrefScale) + config.vrefBase;
   const vref = applyEnvironmentalCorrections(vrefBaseCalc, oat, headwindComp);
-  
+
   let recommendedFlaps = config.takeoffLogic.low;
   if (weight > config.takeoffLogic.threshold) {
-     recommendedFlaps = config.takeoffLogic.high;
+    recommendedFlaps = config.takeoffLogic.high;
   }
 
   return {

@@ -15,6 +15,9 @@ export const calculateVSpeeds = (aircraftName, weightKG) => {
   } else if (name.includes("737-8")) { 
     vr = Math.round(138 + ((weightTonnes - 65)/2)); 
     v1 = vr - 4; v2 = vr + 11; 
+  } else if (name.includes("A350-1000") || name.includes("A35K")) { 
+    vr = Math.round(155 + ((weightTonnes - 260)/2)); 
+    v1 = vr - 6; v2 = vr + 12; 
   } else if (name.includes("A350") || name.includes("A359")) { 
     vr = Math.round(154 + ((weightTonnes - 220)/2)); 
     v1 = vr - 5; v2 = vr + 12; 
