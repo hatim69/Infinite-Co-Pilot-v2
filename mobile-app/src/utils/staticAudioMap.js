@@ -3,6 +3,10 @@ export const staticAudioMap = {
     female: require("../../assets/audio/female_app_client_disconnected.mp3"),
     male: require("../../assets/audio/male_app_client_disconnected.mp3")
   },
+  "Connecting to client.": {
+    female: require("../../assets/audio/female_app_connecting_to_client.mp3"),
+    male: require("../../assets/audio/male_app_connecting_to_client.mp3")
+  },
   "80 knots": {
     female: require("../../assets/audio/female_callout_80_knots.mp3"),
     male: require("../../assets/audio/male_callout_80_knots.mp3")

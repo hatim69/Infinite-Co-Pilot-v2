@@ -9,6 +9,7 @@
  */
 
 import 'expo-dev-client';
+import { useKeepAwake } from 'expo-keep-awake';
 import React, { useState, useEffect, useRef } from "react";
 import {
   StyleSheet,
@@ -134,6 +135,7 @@ const FadeTransition = ({ children }) => {
 
 // ─── Inner App (uses ThemeContext) ────────────────────────────────────────────
 function AppInner() {
+  useKeepAwake();
   const { theme } = useTheme();
 
   const [disableAutoConnect, setDisableAutoConnectState] = useState(false);

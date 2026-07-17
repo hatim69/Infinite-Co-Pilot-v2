@@ -1022,7 +1022,7 @@ export function useTelemetry(disableAutoConnect = false) {
 
   const manualConnect = (ip) => {
     if (!ip) return;
-    speechManager.speak(`Connecting to ${ip}.`, { tone: "notice" });
+    speechManager.speak("Connecting to client.", { tone: "notice" });
     isConnectedRef.current = false; // Allow new connection
     if (connectToIFRef.current) {
       connectToIFRef.current(ip, true);

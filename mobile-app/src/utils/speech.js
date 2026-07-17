@@ -90,9 +90,9 @@ class SpeechManager {
 
     // Initialize silent looping audio to keep iOS alive indefinitely
     try {
-      // Using a genuine silent .wav file instead of a 0-volume mp3
-      // This prevents the MediaToolbox/AVAudioBuffer spam and stuttering issues on iOS
-      this.silentPlayer = createAudioPlayer(require("../../assets/silent.wav"));
+      // Using a 10-minute silent .m4a file
+      // This prevents the MediaToolbox spam since it only loops once every 10 minutes
+      this.silentPlayer = createAudioPlayer(require("../../assets/silent.m4a"));
       this.silentPlayer.volume = 1; // Real silence doesn't need to be 0 volume
       this.silentPlayer.loop = true;
       this.silentPlayer.play();

@@ -2,6 +2,7 @@ const fs = require('fs');
 
 const mappings = {
   "Client disconnected.": "app_client_disconnected",
+  "Connecting to client.": "app_connecting_to_client",
   "80 knots": "callout_80_knots",
   "Gears down.": "callout_gear_down",
   "Landing gear up.": "callout_gear_up",
