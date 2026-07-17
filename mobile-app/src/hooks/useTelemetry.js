@@ -17,20 +17,52 @@ import ifConnect from "../utils/ifConnectClient";
 import { speechManager } from "../utils/speech";
 import { calculatePerformance, getFlapString } from "../utils/calculatePerformance";
 import { formatTime } from "../utils/flightMath";
+import {
+  createPhaseTracker,
+  deriveFlightPhase,
+  normalizeDestinationDistanceNm,
+  normalizePercent,
+} from "../utils/flightPhase";
 
 import airportNames from "../utils/airports.json";
 
 const ALTITUDE_CALLOUT_BUFFER_FT = 100;
 const AIRSPEED_CALLOUT_BUFFER_KTS = 3;
 
-const crossedThreshold = (previousValue, currentValue, thresholdValue, bufferValue) => {
-  const lowerBound = thresholdValue - bufferValue;
-  const upperBound = thresholdValue + bufferValue;
+const crossedThreshold = (previousValue, currentValue, thresholdValue) => {
   return {
-    ascending: previousValue < lowerBound && currentValue >= upperBound,
-    descending: previousValue > upperBound && currentValue <= lowerBound,
+    ascending: previousValue < thresholdValue && currentValue >= thresholdValue,
+    descending: previousValue > thresholdValue && currentValue <= thresholdValue,
   };
 };
+
+const TAKEOFF_ROLL_PHASES = new Set(["takeoff"]);
+const TAKEOFF_SEQUENCE_PHASES = new Set(["takeoff", "initial_climb"]);
+const CLIMB_ANNOUNCEMENT_PHASES = new Set(["initial_climb", "climb"]);
+const DESCENT_ANNOUNCEMENT_PHASES = new Set(["descent", "approach", "final_approach"]);
+const ARRIVAL_GROUND_PHASES = new Set(["landing", "taxi_in", "deboarding"]);
+const PRE_TAKEOFF_PHASES = new Set(["taxi_out", "takeoff"]);
+const GEAR_UP_PHASES = new Set(["takeoff", "initial_climb", "climb"]);
+const GEAR_DOWN_PHASES = new Set(["descent", "approach", "final_approach", "landing"]);
+const BOARDING_ANNOUNCEMENT_PHASES = new Set(["preflight", "boarding"]);
+const FLAP_CALLOUT_PHASES = new Set([
+  "preflight",
+  "boarding",
+  "pushback",
+  "taxi_out",
+  "takeoff",
+  "initial_climb",
+  "climb",
+  "descent",
+  "approach",
+  "final_approach",
+  "landing",
+]);
+
+const isPhaseActive = (telemetry, phaseTracker, phases) =>
+  phases.has(telemetry.phase) ||
+  phases.has(phaseTracker.currentPhase) ||
+  phases.has(phaseTracker.candidatePhase);
 
 /** All IF Connect API parameters to poll */
 const POLL_COMMANDS = [
@@ -57,12 +89,16 @@ const POLL_COMMANDS = [
   "infiniteflight/nearest_airport",
   "aircraft/0/systems/apu/apu/state",
   "aircraft/0/systems/autopilot/on",
+  "aircraft/0/systems/autopilot/alt/on",
+  "aircraft/0/systems/autopilot/alt/target",
   "aircraft/0/systems/autopilot/vnav/on",
   "aircraft/0/ground_services/belt_loader/state",
   "aircraft/0/ground_services/catering/state",
   "aircraft/0/ground_services/gpu/state",
   "aircraft/0/ground_services/pallet_loader/state",
   "aircraft/0/ground_services/stairs/state",
+  "aircraft/0/ground_services/pushback/state",
+
   "aircraft/0/systems/beacon_lights_switch",
   "aircraft/0/systems/nav_lights_switch",
   "aircraft/0/systems/strobe_lights_switch",
@@ -74,6 +110,8 @@ const POLL_COMMANDS = [
   "aircraft/0/systems/engines/1/state",
   "aircraft/0/systems/engines/2/state",
   "aircraft/0/systems/engines/3/state",
+  "aircraft/0/systems/engines/are_all_engines_off",
+  "aircraft/0/systems/engines/are_all_engines_on",
   "aircraft/0/systems/engines/0/n1",
   "aircraft/0/systems/engines/1/n1",
   "aircraft/0/systems/engines/2/n1",
@@ -81,6 +119,7 @@ const POLL_COMMANDS = [
   "aircraft/0/systems/parking_brake/state",
   "aircraft/0/systems/engines/0/throttle_lever",
   "aircraft/0/is_on_runway",
+  "aircraft/0/flightplan/destination_dist",
   "aircraft/0/location/destination_distance",
   "environment/turbulence_factor",
 ];
@@ -101,6 +140,8 @@ const INITIAL_TELEMETRY = {
   brakes: -1,
   spoilers: -1,
   autopilot: -1,
+  autopilotAlt: -1,
+  autopilotAltTarget: null,
   vnav: -1,
   battery: -1,
   batteryAmp: 0,
@@ -119,6 +160,10 @@ const INITIAL_TELEMETRY = {
   nav: -1,
   landing: -1,
   engines: {},
+  engineN1: {},
+  n1: null,
+  allEnginesOff: null,
+  allEnginesOn: null,
   time: "---",
   airport: "---",
   oat: null,
@@ -148,6 +193,7 @@ export function useTelemetry(disableAutoConnect = false) {
   const disconnectDeviceRef = useRef(null);
   const discoveredDevicesRef = useRef([]);
   const autoConnectTimerRef = useRef(null);
+  const phaseTrackerRef = useRef(createPhaseTracker());
 
   const flagsRef = useRef({
     eightyKnots: false,
@@ -280,6 +326,7 @@ export function useTelemetry(disableAutoConnect = false) {
               ifConnect.close(() => {});
               setConnectionStatus("AWAITING SIMULATOR LINK...");
               setConnectedIp("");
+              phaseTrackerRef.current = createPhaseTracker();
               setTelemetry({ ...INITIAL_TELEMETRY });
               if (flagsRef.current.isManualConnection) {
                 Alert.alert(
@@ -316,13 +363,14 @@ export function useTelemetry(disableAutoConnect = false) {
           updateNext("ias", kts);
 
           if (prevKts !== null) {
-            const crossing = crossedThreshold(prevKts, kts, 80, AIRSPEED_CALLOUT_BUFFER_KTS);
-            if (state.onGround && crossing.ascending && !flags.eightyKnots) {
+            const inTakeoffRoll = state.onGround && isPhaseActive(state, phaseTrackerRef.current, TAKEOFF_ROLL_PHASES);
+            const crossing = crossedThreshold(prevKts, kts, 80);
+            if (inTakeoffRoll && crossing.ascending && !flags.eightyKnots) {
               speak("80 knots", "callout");
               flags.eightyKnots = true;
             }
 
-            if (state.onGround && state.performance) {
+            if (inTakeoffRoll && state.performance) {
               if (kts >= state.performance.v1 && !flags.v1Announced) {
                 speak("V1", "callout");
                 flags.v1Announced = true;
@@ -344,7 +392,13 @@ export function useTelemetry(disableAutoConnect = false) {
           const gs = data * 1.94384;
           updateNext("gs", gs);
 
-          if (state.onGround && flags.hasFlown && gs < 30 && !flags.welcome) {
+          if (
+            state.onGround &&
+            gs < 30 &&
+            !flags.welcome &&
+            isPhaseActive(state, phaseTrackerRef.current, ARRIVAL_GROUND_PHASES) &&
+            (flags.hasFlown || phaseTrackerRef.current.totalAirborneMs >= 120000)
+          ) {
             const cityName = airportNames[state.airport] || state.airport || "your destination";
             const liveryName = state.livery || "";
             const oatCelsius = state.oat !== null ? Math.round(state.oat) : null;
@@ -383,37 +437,40 @@ export function useTelemetry(disableAutoConnect = false) {
 
           if (prevMsl !== null) {
             const alt = (threshold) =>
-              crossedThreshold(prevMsl, data, threshold, ALTITUDE_CALLOUT_BUFFER_FT);
+              crossedThreshold(prevMsl, data, threshold);
 
-            if (alt(5000).ascending && !flags.alt5k) {
+            const inClimbAnnouncementPhase = isPhaseActive(state, phaseTrackerRef.current, CLIMB_ANNOUNCEMENT_PHASES);
+            const inDescentAnnouncementPhase = isPhaseActive(state, phaseTrackerRef.current, DESCENT_ANNOUNCEMENT_PHASES);
+
+            if (inClimbAnnouncementPhase && alt(5000).ascending && !flags.alt5k) {
               speak("Passing five thousand.", "notice");
               flags.alt5k = true;
             }
-            if (alt(5000).descending && flags.alt5k) {
+            if (inDescentAnnouncementPhase && alt(5000).descending && flags.alt5k) {
               speak("Passing five thousand.", "notice");
               flags.alt5k = false;
             }
-            if (alt(10000).ascending && !flags.alt10k) {
+            if (inClimbAnnouncementPhase && alt(10000).ascending && !flags.alt10k) {
               speak("Ten thousand. Landing lights off.", "caution");
               flags.alt10k = true;
             }
-            if (alt(10000).descending && flags.alt10k) {
+            if (inDescentAnnouncementPhase && alt(10000).descending && flags.alt10k) {
               speak("Ten thousand. Landing lights on.", "notice");
               flags.alt10k = false;
             }
-            if (alt(15000).ascending && !flags.alt15k) {
+            if (inClimbAnnouncementPhase && alt(15000).ascending && !flags.alt15k) {
               speak("Passing one-five thousand.", "notice");
               flags.alt15k = true;
             }
-            if (alt(15000).descending && flags.alt15k) {
+            if (inDescentAnnouncementPhase && alt(15000).descending && flags.alt15k) {
               speak("Passing one-five thousand.", "notice");
               flags.alt15k = false;
             }
-            if (alt(24000).ascending && !flags.alt24k) {
+            if (inClimbAnnouncementPhase && alt(24000).ascending && !flags.alt24k) {
               speak("Passing Flight Level two-four-zero.", "notice");
               flags.alt24k = true;
             }
-            if (alt(24000).descending && flags.alt24k) {
+            if (inDescentAnnouncementPhase && alt(24000).descending && flags.alt24k) {
               speak("Descending Flight Level two-four-zero.", "notice");
               flags.alt24k = false;
             }
@@ -434,6 +491,7 @@ export function useTelemetry(disableAutoConnect = false) {
               state.vs > 300 &&
               agl >= 300 &&
               state.ias >= flySpeed &&
+              isPhaseActive(state, phaseTrackerRef.current, TAKEOFF_SEQUENCE_PHASES) &&
               !flags.positiveRate
             ) {
               speak("Positive rate. Gear up.", "callout");
@@ -591,14 +649,14 @@ export function useTelemetry(disableAutoConnect = false) {
         if (engineStateMatch) {
           const engNum = parseInt(engineStateMatch[1], 10) + 1;
           const currentState = state.engines[engNum];
-          const nextState = data; // 0=stopped, 1=starting, 2=running, 3=stopping
+          const nextState = data; // 0=stopped, 1=starting, 2=running, 4=stopping
 
           if (currentState !== undefined && currentState !== nextState) {
             if (nextState === 1) {
               speak(`Engine ${engNum} starting.`, "briefing");
             } else if (nextState === 2) {
               speak(`Engine ${engNum} started.`, "notice");
-            } else if (nextState === 3) {
+            } else if (nextState === 4) {
               speak(`Engine ${engNum} shutting down.`, "notice");
             } else if (nextState === 0) {
               speak(`Engine ${engNum} shutdown.`, "notice");
@@ -611,9 +669,34 @@ export function useTelemetry(disableAutoConnect = false) {
           }
         }
 
+        if (command === "aircraft/0/systems/engines/are_all_engines_off") {
+          updateNext("allEnginesOff", data === 1 || data === true ? 1 : 0);
+        }
+        if (command === "aircraft/0/systems/engines/are_all_engines_on") {
+          updateNext("allEnginesOn", data === 1 || data === true ? 1 : 0);
+        }
+
+        const n1Match = command.match(/^aircraft\/0\/systems\/engines\/(\d+)\/n1$/);
+        if (n1Match) {
+          const engNum = parseInt(n1Match[1], 10) + 1;
+          const pct = normalizePercent(data);
+          if (pct !== null && next.engineN1[engNum] !== pct) {
+            const engineN1 = { ...next.engineN1, [engNum]: pct };
+            const values = Object.values(engineN1).filter((value) => typeof value === "number");
+            next.engineN1 = engineN1;
+            next.n1 = values.length
+              ? values.reduce((sum, value) => sum + value, 0) / values.length
+              : null;
+            updated = true;
+          }
+        }
+
 
         // ── Pushback ─────────────────────────────────────────────────────
-        if (command === "aircraft/0/is_pushback_active") {
+        if (
+          command === "aircraft/0/is_pushback_active" ||
+          command === "aircraft/0/ground_services/pushback/state"
+        ) {
           const on = data === 1 || data === true;
           if (state.pushback === 0 && on) speak("Pushback started.", "notice");
           else if (state.pushback === 1 && !on) speak("Pushback ended.", "notice");
@@ -624,10 +707,11 @@ export function useTelemetry(disableAutoConnect = false) {
         if (command === "aircraft/0/is_on_runway") {
           updateNext("onRunway", data === 1 || data === true);
         }
-        if (command === "aircraft/0/location/destination_distance") {
-          // Value arrives in metres; convert to nautical miles
-          const nm = typeof data === "number" ? data / 1852 : null;
-          updateNext("destDist", nm);
+        if (
+          command === "aircraft/0/location/destination_distance" ||
+          command === "aircraft/0/flightplan/destination_dist"
+        ) {
+          updateNext("destDist", normalizeDestinationDistanceNm(data));
         }
 
         // ── Autopilot ─────────────────────────────────────────────────────
@@ -636,6 +720,13 @@ export function useTelemetry(disableAutoConnect = false) {
           if (state.autopilot === 0 && on) speak("Autopilot on.", "notice");
           else if (state.autopilot === 1 && !on) speak("Autopilot off.", "notice");
           updateNext("autopilot", on ? 1 : 0);
+        }
+        if (command === "aircraft/0/systems/autopilot/alt/on") {
+          const on = data === 1 || data === true;
+          updateNext("autopilotAlt", on ? 1 : 0);
+        }
+        if (command === "aircraft/0/systems/autopilot/alt/target") {
+          updateNext("autopilotAltTarget", typeof data === "number" ? data : null);
         }
         if (command === "aircraft/0/systems/autopilot/vnav/on") {
           const on = data === 1 || data === true;
@@ -693,7 +784,14 @@ export function useTelemetry(disableAutoConnect = false) {
           const val = on ? 1 : 0;
           if (state[key] !== -1 && state[key] !== val) {
             speak(`${name} ${on ? "on" : "off"}.`, "notice");
-            if (key === "strobe" && on && state.onGround && !flags.vSpeedBriefed && state.weight > 0) {
+            if (
+              key === "strobe" &&
+              on &&
+              state.onGround &&
+              isPhaseActive(state, phaseTrackerRef.current, PRE_TAKEOFF_PHASES) &&
+              !flags.vSpeedBriefed &&
+              state.weight > 0
+            ) {
               flags.vSpeedBriefed = true;
               speechManager.stopBoardingAnnouncement();
               speak("Cabin crew prepare for take off.", "notice");
@@ -713,7 +811,12 @@ export function useTelemetry(disableAutoConnect = false) {
           }
 
           if (state.seatbelt !== -1 && val !== state.seatbelt) {
-            if (on && state.onGround && !flags.boardingAnnouncementPlayed) {
+            if (
+              on &&
+              state.onGround &&
+              isPhaseActive(state, phaseTrackerRef.current, BOARDING_ANNOUNCEMENT_PHASES) &&
+              !flags.boardingAnnouncementPlayed
+            ) {
               flags.boardingAnnouncementPlayed = true;
               speechManager.playBoardingAnnouncement(state.livery);
             } else {
@@ -737,9 +840,19 @@ export function useTelemetry(disableAutoConnect = false) {
           const isDown = data === 1;
           const isUp = data === 2 || data === 5 || data === 0;
           if (state.gear !== -1 && data !== state.gear) {
-            if (isDown && state.gear !== 1) speak("Gears down.", "callout");
-            else if (isUp && !(state.gear === 2 || state.gear === 5 || state.gear === 0))
+            if (
+              isDown &&
+              state.gear !== 1 &&
+              isPhaseActive(state, phaseTrackerRef.current, GEAR_DOWN_PHASES)
+            ) {
+              speak("Gears down.", "callout");
+            } else if (
+              isUp &&
+              !(state.gear === 2 || state.gear === 5 || state.gear === 0) &&
+              isPhaseActive(state, phaseTrackerRef.current, GEAR_UP_PHASES)
+            ) {
               speak("Landing gear up.", "callout");
+            }
           }
           updateNext("gear", data);
         }
@@ -765,7 +878,12 @@ export function useTelemetry(disableAutoConnect = false) {
 
         // ── Flaps ─────────────────────────────────────────────────────────
         if (command === "aircraft/0/systems/flaps/state") {
-          if (data !== state.flaps && state.name !== "" && state.flaps !== -1) {
+          if (
+            data !== state.flaps &&
+            state.name !== "" &&
+            state.flaps !== -1 &&
+            isPhaseActive(state, phaseTrackerRef.current, FLAP_CALLOUT_PHASES)
+          ) {
             speak(`Flaps ${getFlapString(state.name, data)}.`, "callout");
           }
           updateNext("flaps", data);
@@ -793,83 +911,10 @@ export function useTelemetry(disableAutoConnect = false) {
           next.performance = calculatePerformance(next.name, next.weight);
         }
 
-        // ── Phase derivation (runs every update) ──────────────────────────────
-        //
-        // All 12 phases from the IF Connect API reference chart, evaluated
-        // in priority order against the fully-updated `next` snapshot.
-        //
-        // Phases:
-        //   preflight  — before any ground service connects
-        //   boarding   — on ground + GS≈0 + stairs connected + not yet flown
-        //   de-boarding — on ground + GS≈0 + stairs connected + flight finished
-        //   pushback   — on ground + pushback active
-        //   taxi_out   — on ground + off runway + 0<GS<35 + not yet flown
-        //   takeoff    — on ground + on runway + GS>45
-        //   initial_climb — airborne + VS>500 fpm + MSL≤5000 ft
-        //   climb      — airborne + VS>500 fpm + MSL>5000 ft
-        //   cruise     — airborne + MSL>10000 ft + VS between −100 and +100 fpm
-        //   descent    — airborne + VS<−500 fpm + dest>15 nm
-        //   approach   — airborne + dest≤15 nm + MSL<5000 ft
-        //   landing    — on ground + on runway + GS>40 (was approach)
-        //   taxi_in    — on ground + GS<35 + flight finished
-        if (updated) {
-          const s = next; // alias for readability
-          const gs = s.gs ?? 0;
-          const vs = s.vs ?? 0;
-          const msl = s.msl ?? 0;
-          const destNm = s.destDist; // null if no FPL set
-
-          let newPhase = s.phase; // sticky by default
-
-          if (s.onGround) {
-            // ── Ground phases ──────────────────────────────────────────────
-            const stairsDown = s.stairs === 1;
-            const gsNearZero = gs < 2;
-
-            if (s.onRunway && gs > 40 && flags.hasFlown) {
-              // Landing (Touchdown) — came from approach, now rolling on runway
-              newPhase = "landing";
-            } else if (s.onRunway && gs > 45 && !flags.hasFlown) {
-              // Takeoff roll — on runway, fast, hasn't flown yet
-              newPhase = "takeoff";
-            } else if (s.pushback === 1) {
-              // Pushback overrides everything else on the ground
-              newPhase = "pushback";
-            } else if (stairsDown && gsNearZero && flags.hasFlown) {
-              // De-boarding — flight is complete, stairs are out
-              newPhase = "de-boarding";
-            } else if (stairsDown && gsNearZero && !flags.hasFlown) {
-              // Boarding — still pre-departure, stairs connected
-              newPhase = "boarding";
-            } else if (gs > 2 && gs < 35 && !s.onRunway && flags.hasFlown) {
-              // Taxi inbound — slow ground movement after landing
-              newPhase = "taxi_in";
-            } else if (gs > 2 && gs < 35 && !s.onRunway && !flags.hasFlown) {
-              // Taxi outbound — slow ground movement before departure
-              newPhase = "taxi_out";
-            } else if (s.onRunway && gs <= 45 && !flags.hasFlown) {
-              // Holding on runway / lining up before takeoff roll
-              newPhase = "taxi_out";
-            }
-            // Otherwise keep the last phase (e.g. brief GS gap during turns)
-          } else {
-            // ── Airborne phases ───────────────────────────────────────────
-            if (vs > 500 && msl <= 5000) {
-              newPhase = "initial_climb";
-            } else if (vs > 500 && msl > 5000) {
-              newPhase = "climb";
-            } else if (msl > 10000 && vs >= -100 && vs <= 100) {
-              newPhase = "cruise";
-            } else if (vs < -500 && (destNm === null || destNm > 15)) {
-              newPhase = "descent";
-            } else if (destNm !== null && destNm <= 15 && msl < 5000) {
-              newPhase = "approach";
-            }
-            // Gaps (e.g. levelling during climb) stay on the previous phase
-          }
-
-          updateNext("phase", newPhase);
-        }
+        // ── Phase derivation ──────────────────────────────────────────────
+        // Runs on every poll packet so time-hysteresis can mature even when
+        // the simulator is holding perfectly steady values.
+        updateNext("phase", deriveFlightPhase(next, phaseTrackerRef.current, flags, Date.now()));
 
         return updated ? next : prev;
       });
@@ -884,8 +929,13 @@ export function useTelemetry(disableAutoConnect = false) {
       setConnectionStatus("CONNECTING...");
       setConnectedIp(ip);
 
-      // Reset all telemetry & flags
+      // Reset displayed telemetry, but preserve phase memory so a reconnect
+      // into an active flight does not look like a brand-new preflight.
       setTelemetry({ ...INITIAL_TELEMETRY });
+      phaseTrackerRef.current.candidatePhase = null;
+      phaseTrackerRef.current.candidateSince = 0;
+      phaseTrackerRef.current.lastTickAt = 0;
+      phaseTrackerRef.current.hasBootstrapped = false;
       const flags = flagsRef.current;
       Object.keys(flags).forEach((k) => {
         if (typeof flags[k] === "boolean") flags[k] = false;
