@@ -41,8 +41,7 @@ const POLL_COMMANDS = [
   "aircraft/0/altitude_msl",
   "aircraft/0/altitude_agl",
   "aircraft/0/systems/landing_gear/state",
-  "aircraft/0/systems/battery/main_battery/amp_draw",
-  "aircraft/0/systems/battery/main_battery/voltage",
+  "aircraft/0/systems/apu/apu/amp_draw",
   "aircraft/0/aircraft_id",
   "aircraft/0/is_on_ground",
   "aircraft/0/systems/flaps/state",
@@ -516,20 +515,8 @@ export function useTelemetry(disableAutoConnect = false) {
         }
 
         // ── Battery ──────────────────────────────────────────────────────
-        if (command === "aircraft/0/systems/battery/main_battery/amp_draw") {
-          updateNext("batteryAmp", data);
-          const isOn = (data || 0) > 0 || (state.batteryVolts || 0) > 12;
-          
-          if (state.battery !== -1 && state.battery !== (isOn ? 1 : 0)) {
-            if (isOn) speak("Battery on.", "notice");
-            else speak("Battery off.", "notice");
-          }
-          
-          updateNext("battery", isOn ? 1 : 0);
-        }
-        if (command === "aircraft/0/systems/battery/main_battery/voltage") {
-          updateNext("batteryVolts", data);
-          const isOn = (state.batteryAmp || 0) > 0 || (data || 0) > 12;
+        if (command === "aircraft/0/systems/apu/apu/amp_draw") {
+          const isOn = data > 0;
           
           if (state.battery !== -1 && state.battery !== (isOn ? 1 : 0)) {
             if (isOn) speak("Battery on.", "notice");

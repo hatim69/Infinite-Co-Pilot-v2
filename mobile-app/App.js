@@ -429,7 +429,7 @@ function AppInner() {
           {/* Page 0: Crew Assistant */}
           {dashboardPage === 0 && (
             <View style={{ flex: 1, paddingHorizontal: 16 }}>
-            <CrewAssistant telemetry={telemetry} isConnected={isConnected} />
+            {/* <CrewAssistant telemetry={telemetry} isConnected={isConnected} /> */}
             <View style={[styles.card, { flex: 1, marginBottom: 20, backgroundColor: theme.surfaceMid, borderColor: theme.border }]}>
               <TouchableOpacity style={styles.cardHeader} onPress={() => setShowLogs((v) => !v)} activeOpacity={0.8}>
                 <View style={styles.cardHeaderLeft}>
@@ -525,7 +525,7 @@ function AppInner() {
                 </View>
                 <SectionHeader title="Power & Engines" icon={Power} color="#FBBF24" />
                 <View style={styles.gridContainer}>
-                  <SystemStatus label="Battery" value={telemetry.batteryVolts > 0 ? `${telemetry.batteryVolts.toFixed(1)}V` : telemetry.batteryAmp > 0 ? `${telemetry.batteryAmp.toFixed(1)}A` : telemetry.battery === 1 ? "ON" : telemetry.battery === 0 ? "OFF" : null} icon={Battery} />
+                  <SystemStatus label="Battery" value={telemetry.battery === 1 ? "ON" : telemetry.battery === 0 ? "OFF" : null} icon={Battery} />
                   <SystemStatus label="APU" value={telemetry.apu === 0 ? "OFF" : telemetry.apu === 1 ? "STARTING" : telemetry.apu === 2 ? "ON" : null} icon={Zap} />
                   <SystemStatus label="Engines" value={Object.values(telemetry.engines || {}).some((s) => s === 2) ? `ENG ${Object.entries(telemetry.engines).filter(([, s]) => s === 2).map(([n]) => n).join(",")} ON` : Object.keys(telemetry.engines || {}).length > 0 ? "OFF" : null} icon={Flame} />
                   <SystemStatus label="Throttle" value={telemetry.throttle !== null ? `${Math.round(telemetry.throttle * 100)}%` : null} icon={Flame} />
