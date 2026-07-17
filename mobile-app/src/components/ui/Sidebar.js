@@ -21,9 +21,12 @@ import {
   ScrollView,
   Dimensions,
   Platform,
-  Modal
+  Modal,
+  TextInput,
+  Alert
 } from 'react-native';
-import { X, Volume2, Palette, Info, MessageCircle, Check, Settings } from 'lucide-react-native';
+import { X, Volume2, Palette, Info, MessageCircle, Check, Settings, Bug } from 'lucide-react-native';
+import * as Sentry from '@sentry/react-native';
 
 import { useTheme, THEMES } from '../../context/ThemeContext';
 import { speechManager } from '../../utils/speech';
@@ -132,6 +135,32 @@ export default function Sidebar({ visible, onClose, isBackgroundMode, setIsBackg
 
   // Control modal mount state for exit animations
   const [isModalVisible, setModalVisible] = useState(visible);
+
+  const [feedbackText, setFeedbackText] = useState('');
+  const [feedbackEmail, setFeedbackEmail] = useState('');
+  const [isSendingFeedback, setIsSendingFeedback] = useState(false);
+
+  const handleFeedbackSubmit = () => {
+    if (!feedbackText.trim() || !feedbackEmail.trim()) return;
+    setIsSendingFeedback(true);
+    try {
+      const eventId = Sentry.captureMessage("User Feedback Submitted");
+      Sentry.captureFeedback({
+        message: feedbackText,
+        name: "Beta Tester",
+        email: feedbackEmail,
+      }, {
+        event_id: eventId 
+      });
+      setFeedbackText('');
+      setFeedbackEmail('');
+      Alert.alert("Feedback Sent", "Thank you for helping us improve!");
+    } catch (e) {
+      console.log("Feedback error:", e);
+      Alert.alert("Error", "Failed to send feedback. Please try again.");
+    }
+    setIsSendingFeedback(false);
+  };
 
   const [volumes, setVolumes] = useState({
     masterVolume: 1.0,
@@ -355,6 +384,40 @@ export default function Sidebar({ visible, onClose, isBackgroundMode, setIsBackg
                 </View>
               </TouchableOpacity>
             </SidebarSection> */}
+
+            {/* ── Feedback ────────────────────────────────────────────────── */}
+            <SidebarSection icon={Bug} title="FEEDBACK & BUGS" theme={theme}>
+              <View style={[styles.feedbackContainer, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+                <TextInput
+                  style={[styles.feedbackInput, { color: theme.textPrimary, borderColor: theme.borderMid, backgroundColor: theme.inputBg || 'rgba(0,0,0,0.1)' }]}
+                  placeholder="Email"
+                  placeholderTextColor={theme.textFaint || '#64748B'}
+                  value={feedbackEmail}
+                  onChangeText={setFeedbackEmail}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                />
+                <TextInput
+                  style={[styles.feedbackInput, styles.feedbackTextArea, { color: theme.textPrimary, borderColor: theme.borderMid, backgroundColor: theme.inputBg || 'rgba(0,0,0,0.1)' }]}
+                  placeholder="What's on your mind? Found a bug?"
+                  placeholderTextColor={theme.textFaint || '#64748B'}
+                  value={feedbackText}
+                  onChangeText={setFeedbackText}
+                  multiline={true}
+                  textAlignVertical="top"
+                />
+                <TouchableOpacity
+                  style={[styles.submitBtn, { backgroundColor: theme.accentBg, borderColor: theme.accentBorder, opacity: (!feedbackText.trim() || !feedbackEmail.trim() || isSendingFeedback) ? 0.5 : 1 }]}
+                  onPress={handleFeedbackSubmit}
+                  disabled={!feedbackText.trim() || !feedbackEmail.trim() || isSendingFeedback}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.submitBtnText, { color: theme.accent }]}>
+                    {isSendingFeedback ? "SENDING..." : "SUBMIT FEEDBACK"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </SidebarSection>
 
             {/* ── About ──────────────────────────────────────────────────── */}
             <SidebarSection icon={Info} title="ABOUT" theme={theme}>
@@ -607,5 +670,35 @@ const styles = StyleSheet.create({
   discordArrowText: {
     fontSize: 16,
     fontWeight: '700',
+  },
+
+  // Feedback section
+  feedbackContainer: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 12,
+  },
+  feedbackInput: {
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 14,
+    marginBottom: 10,
+  },
+  feedbackTextArea: {
+    height: 80,
+  },
+  submitBtn: {
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  submitBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
 });

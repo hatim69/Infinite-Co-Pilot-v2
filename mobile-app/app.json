@@ -65,7 +65,15 @@
           "imageWidth": 200
         }
       ],
-      "./withNotifeeServiceType.js"
+      "./withNotifeeServiceType.js",
+      [
+        "@sentry/react-native/expo",
+        {
+          "url": "https://sentry.io/",
+          "project": "react-native",
+          "organization": "daksh-aggarwal"
+        }
+      ]
     ],
     "extra": {
       "eas": {

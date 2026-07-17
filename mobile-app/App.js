@@ -76,6 +76,21 @@ import SystemStatus from "./src/components/cards/SystemStatus";
 import FlightStrip from "./src/components/layout/FlightStrip";
 import CrewAssistant from "./src/components/assistant/CrewAssistant";
 import Sidebar from "./src/components/ui/Sidebar";
+import * as Sentry from '@sentry/react-native';
+
+Sentry.init({
+  dsn: 'https://66233b21396117323bd0f22ac62893bf@o4511750585450496.ingest.de.sentry.io/4511750588399696',
+
+  // Adds more context data to events (IP address, cookies, user, etc.)
+  // For more information, visit: https://docs.sentry.io/platforms/react-native/data-management/data-collected/
+  sendDefaultPii: true,
+
+  // Enable Logs
+  enableLogs: true,
+
+  // uncomment the line below to enable Spotlight (https://spotlightjs.com)
+  // spotlight: __DEV__,
+});
 
 // ─── Section Header ────────────────────────────────────────────────────────────
 const SectionHeader = ({ title, icon: Icon, color }) => {
@@ -329,10 +344,10 @@ function AppInner() {
       </View>
 
       <Text style={[styles.connectionTitle, { color: theme.textPrimary }]}>
-        {isConnecting 
-          ? "Connecting to Infinite Flight..." 
-          : discoveredDevices.length > 1 
-            ? "Multiple Clients Detected" 
+        {isConnecting
+          ? "Connecting to Infinite Flight..."
+          : discoveredDevices.length > 1
+            ? "Multiple Clients Detected"
             : "No Simulator Detected"}
       </Text>
       <Text style={[styles.connectionSubtitle, { color: theme.textMuted }]}>
@@ -412,154 +427,153 @@ function AppInner() {
     return (
       <View style={{ flex: 1 }}>
         <View style={[styles.pagerHeader, { backgroundColor: theme.pagerHeader, borderColor: theme.border }]}>
-          <TouchableOpacity 
-            style={styles.pagerBtn} 
+          <TouchableOpacity
+            style={styles.pagerBtn}
             onPress={() => setDashboardPage(p => p === 0 ? totalPages - 1 : p - 1)}
           >
             <ChevronLeft size={20} color={theme.textSlate} />
           </TouchableOpacity>
           <Text style={[styles.pagerTitle, { color: theme.textSecondary }]}>{pageTitles[dashboardPage]}</Text>
-          <TouchableOpacity 
-            style={styles.pagerBtn} 
+          <TouchableOpacity
+            style={styles.pagerBtn}
             onPress={() => setDashboardPage(p => p === totalPages - 1 ? 0 : p + 1)}
           >
             <ChevronRight size={20} color={theme.textSlate} />
           </TouchableOpacity>
         </View>
-        
         <FadeTransition key={dashboardPage}>
           {/* Page 0: Crew Assistant */}
           {dashboardPage === 0 && (
             <View style={{ flex: 1, paddingHorizontal: 16 }}>
-            <CrewAssistant telemetry={telemetry} isConnected={isConnected} />
-            <View style={[styles.card, { flex: 1, marginBottom: 20, backgroundColor: theme.surfaceMid, borderColor: theme.border }]}>
-              <TouchableOpacity style={styles.cardHeader} onPress={() => setShowLogs((v) => !v)} activeOpacity={0.8}>
-                <View style={styles.cardHeaderLeft}>
-                  <Radio size={14} color="#60A5FA" style={{ marginRight: 8 }} />
-                  <Text style={[styles.cardTitle, { color: theme.textDim }]}>Co-Pilot Speech Log</Text>
-                  {logs.length > 1 && (
-                    <View style={styles.logCountBadge}>
-                      <Text style={styles.logCountText}>{logs.length}</Text>
-                    </View>
-                  )}
-                </View>
-                {showLogs ? <ChevronUp size={16} color={theme.textMuted} /> : <ChevronDown size={16} color={theme.textMuted} />}
-              </TouchableOpacity>
-              {showLogs && (
-                <View style={[styles.logsContainer, { flex: 1, backgroundColor: theme.logsBg, borderColor: theme.logsBorder }]}>
-                  <ScrollView ref={logScrollRef} showsVerticalScrollIndicator={true} contentContainerStyle={{ flexGrow: 1 }}>
-                    {logs.map((log, index) => (
-                      <View key={index} style={styles.logEntry}>
-                        <Text style={[styles.logTime, { color: theme.textFaint }]}>{log.time}</Text>
-                        <Text style={[styles.logText, { color: theme.textLabel }]}>{log.text}</Text>
+              <CrewAssistant telemetry={telemetry} isConnected={isConnected} />
+              <View style={[styles.card, { flex: 1, marginBottom: 20, backgroundColor: theme.surfaceMid, borderColor: theme.border }]}>
+                <TouchableOpacity style={styles.cardHeader} onPress={() => setShowLogs((v) => !v)} activeOpacity={0.8}>
+                  <View style={styles.cardHeaderLeft}>
+                    <Radio size={14} color="#60A5FA" style={{ marginRight: 8 }} />
+                    <Text style={[styles.cardTitle, { color: theme.textDim }]}>Co-Pilot Speech Log</Text>
+                    {logs.length > 1 && (
+                      <View style={styles.logCountBadge}>
+                        <Text style={styles.logCountText}>{logs.length}</Text>
                       </View>
-                    ))}
-                  </ScrollView>
-                </View>
-              )}
-            </View>
+                    )}
+                  </View>
+                  {showLogs ? <ChevronUp size={16} color={theme.textMuted} /> : <ChevronDown size={16} color={theme.textMuted} />}
+                </TouchableOpacity>
+                {showLogs && (
+                  <View style={[styles.logsContainer, { flex: 1, backgroundColor: theme.logsBg, borderColor: theme.logsBorder }]}>
+                    <ScrollView ref={logScrollRef} showsVerticalScrollIndicator={true} contentContainerStyle={{ flexGrow: 1 }}>
+                      {logs.map((log, index) => (
+                        <View key={index} style={styles.logEntry}>
+                          <Text style={[styles.logTime, { color: theme.textFaint }]}>{log.time}</Text>
+                          <Text style={[styles.logText, { color: theme.textLabel }]}>{log.text}</Text>
+                        </View>
+                      ))}
+                    </ScrollView>
+                  </View>
+                )}
+              </View>
             </View>
           )}
 
           {/* Page 1: Flight Instruments */}
           {dashboardPage === 1 && (
             <View style={{ flex: 1, paddingHorizontal: 16 }}>
-            <ScrollView showsVerticalScrollIndicator={false}>
-              <View style={[styles.systemsCard, { backgroundColor: theme.surfaceCard, borderColor: theme.borderSoft }]}>
-                <SectionHeader title="Flight Instruments" icon={Activity} color="#34D399" />
-                <View style={styles.gridContainer}>
-                  <SystemStatus label="IAS" value={telemetry.ias !== null ? `${Math.round(telemetry.ias)} kts` : null} icon={Activity} />
-                  <SystemStatus label="GS" value={telemetry.gs !== null ? `${Math.round(telemetry.gs)} kts` : null} icon={Activity} />
-                  <SystemStatus label="VS" value={telemetry.vs !== null ? `${Math.round(telemetry.vs)} fpm` : null} icon={Activity} />
-                  <SystemStatus label="ALT" value={telemetry.msl !== null ? `${Math.round(telemetry.msl)} ft` : null} icon={Activity} />
-                  <SystemStatus label="AGL" value={telemetry.agl !== null ? `${Math.round(telemetry.agl)} ft` : null} icon={Activity} />
+              <ScrollView showsVerticalScrollIndicator={false}>
+                <View style={[styles.systemsCard, { backgroundColor: theme.surfaceCard, borderColor: theme.borderSoft }]}>
+                  <SectionHeader title="Flight Instruments" icon={Activity} color="#34D399" />
+                  <View style={styles.gridContainer}>
+                    <SystemStatus label="IAS" value={telemetry.ias !== null ? `${Math.round(telemetry.ias)} kts` : null} icon={Activity} />
+                    <SystemStatus label="GS" value={telemetry.gs !== null ? `${Math.round(telemetry.gs)} kts` : null} icon={Activity} />
+                    <SystemStatus label="VS" value={telemetry.vs !== null ? `${Math.round(telemetry.vs)} fpm` : null} icon={Activity} />
+                    <SystemStatus label="ALT" value={telemetry.msl !== null ? `${Math.round(telemetry.msl)} ft` : null} icon={Activity} />
+                    <SystemStatus label="AGL" value={telemetry.agl !== null ? `${Math.round(telemetry.agl)} ft` : null} icon={Activity} />
+                  </View>
                 </View>
-              </View>
-            </ScrollView>
+              </ScrollView>
             </View>
           )}
 
           {/* Page 2: Aircraft & Cabin */}
           {dashboardPage === 2 && (
             <View style={{ flex: 1, paddingHorizontal: 16 }}>
-            <ScrollView showsVerticalScrollIndicator={false}>
-              <View style={[styles.systemsCard, { backgroundColor: theme.surfaceCard, borderColor: theme.borderSoft }]}>
-                <SectionHeader title="Aircraft" icon={Plane} color="#60A5FA" />
-                <View style={styles.gridContainer}>
-                  <SystemStatus label="Aircraft" value={telemetry.name} icon={Plane} />
-                  <SystemStatus label="Livery" value={telemetry.livery} icon={Plane} />
-                  <SystemStatus label="Weight" value={telemetry.weight ? `${Math.round(telemetry.weight)} kg` : null} icon={Zap} />
+              <ScrollView showsVerticalScrollIndicator={false}>
+                <View style={[styles.systemsCard, { backgroundColor: theme.surfaceCard, borderColor: theme.borderSoft }]}>
+                  <SectionHeader title="Aircraft" icon={Plane} color="#60A5FA" />
+                  <View style={styles.gridContainer}>
+                    <SystemStatus label="Aircraft" value={telemetry.name} icon={Plane} />
+                    <SystemStatus label="Livery" value={telemetry.livery} icon={Plane} />
+                    <SystemStatus label="Weight" value={telemetry.weight ? `${Math.round(telemetry.weight)} kg` : null} icon={Zap} />
+                  </View>
+                  <SectionHeader title="Performance" icon={Activity} color="#34D399" />
+                  <View style={styles.gridContainer}>
+                    <SystemStatus label="V1" value={telemetry.performance ? `${telemetry.performance.v1} kts` : null} icon={Activity} />
+                    <SystemStatus label="VR" value={telemetry.performance ? `${telemetry.performance.vr} kts` : null} icon={Activity} />
+                    <SystemStatus label="V2" value={telemetry.performance ? `${telemetry.performance.v2} kts` : null} icon={Activity} />
+                    <SystemStatus label="VREF" value={telemetry.performance ? `${telemetry.performance.vref} kts` : null} icon={Activity} />
+                    <SystemStatus label="Trim" value={telemetry.performance ? `${telemetry.performance.trim}` : null} icon={Crosshair} />
+                    <SystemStatus label="T/O Flaps" value={telemetry.performance ? `${telemetry.performance.takeoffFlaps}` : null} icon={ShieldAlert} />
+                  </View>
+                  <SectionHeader title="Cabin & Crew" icon={Users} color="#C084FC" />
+                  <View style={styles.gridContainer}>
+                    <SystemStatus label="Seatbelt" value={telemetry.seatbelt === 1 ? "ON" : telemetry.seatbelt === 0 ? "OFF" : null} icon={User} />
+                    <SystemStatus label="No Smoking" value={telemetry.smoking === 1 ? "ON" : telemetry.smoking === 0 ? "OFF" : null} icon={Ban} />
+                    <SystemStatus label="Local Time" value={telemetry.time !== "---" ? telemetry.time : null} icon={Clock} />
+                    <SystemStatus label="Airport" value={telemetry.airport !== "---" ? telemetry.airport : null} icon={Plane} />
+                  </View>
                 </View>
-                <SectionHeader title="Performance" icon={Activity} color="#34D399" />
-                <View style={styles.gridContainer}>
-                  <SystemStatus label="V1" value={telemetry.performance ? `${telemetry.performance.v1} kts` : null} icon={Activity} />
-                  <SystemStatus label="VR" value={telemetry.performance ? `${telemetry.performance.vr} kts` : null} icon={Activity} />
-                  <SystemStatus label="V2" value={telemetry.performance ? `${telemetry.performance.v2} kts` : null} icon={Activity} />
-                  <SystemStatus label="VREF" value={telemetry.performance ? `${telemetry.performance.vref} kts` : null} icon={Activity} />
-                  <SystemStatus label="Trim" value={telemetry.performance ? `${telemetry.performance.trim}` : null} icon={Crosshair} />
-                  <SystemStatus label="T/O Flaps" value={telemetry.performance ? `${telemetry.performance.takeoffFlaps}` : null} icon={ShieldAlert} />
-                </View>
-                <SectionHeader title="Cabin & Crew" icon={Users} color="#C084FC" />
-                <View style={styles.gridContainer}>
-                  <SystemStatus label="Seatbelt" value={telemetry.seatbelt === 1 ? "ON" : telemetry.seatbelt === 0 ? "OFF" : null} icon={User} />
-                  <SystemStatus label="No Smoking" value={telemetry.smoking === 1 ? "ON" : telemetry.smoking === 0 ? "OFF" : null} icon={Ban} />
-                  <SystemStatus label="Local Time" value={telemetry.time !== "---" ? telemetry.time : null} icon={Clock} />
-                  <SystemStatus label="Airport" value={telemetry.airport !== "---" ? telemetry.airport : null} icon={Plane} />
-                </View>
-              </View>
-            </ScrollView>
+              </ScrollView>
             </View>
           )}
 
           {/* Page 3: Systems & Power */}
           {dashboardPage === 3 && (
             <View style={{ flex: 1, paddingHorizontal: 16 }}>
-            <ScrollView showsVerticalScrollIndicator={false}>
-              <View style={[styles.systemsCard, { backgroundColor: theme.surfaceCard, borderColor: theme.borderSoft }]}>
-                <SectionHeader title="Flight Systems" icon={Settings} color="#60A5FA" />
-                <View style={styles.gridContainer}>
-                  <SystemStatus label="Gear" value={telemetry.gear === 1 ? "DOWN" : telemetry.gear === 2 || telemetry.gear === 5 || telemetry.gear === 0 ? "UP" : telemetry.gear !== -1 && telemetry.gear !== null ? "MOVING" : null} icon={Crosshair} />
-                  <SystemStatus label="Flaps" value={getFlapString(telemetry.name, telemetry.flaps)} icon={ShieldAlert} />
-                  <SystemStatus label="Spoilers" value={telemetry.spoilers === 0 ? "OFF" : telemetry.spoilers === 1 ? "FLIGHT" : telemetry.spoilers === 2 ? "ARMED" : null} icon={Droplet} />
-                  <SystemStatus label="Brakes" value={telemetry.brakes === 1 ? "SET" : telemetry.brakes === 0 ? "REL" : null} icon={ShieldAlert} />
-                  <SystemStatus label="Autopilot" value={telemetry.autopilot === 1 ? "ON" : telemetry.autopilot === 0 ? "OFF" : null} icon={Zap} />
-                  <SystemStatus label="VNAV" value={telemetry.vnav === 1 ? "ON" : telemetry.vnav === 0 ? "OFF" : null} icon={Zap} />
+              <ScrollView showsVerticalScrollIndicator={false}>
+                <View style={[styles.systemsCard, { backgroundColor: theme.surfaceCard, borderColor: theme.borderSoft }]}>
+                  <SectionHeader title="Flight Systems" icon={Settings} color="#60A5FA" />
+                  <View style={styles.gridContainer}>
+                    <SystemStatus label="Gear" value={telemetry.gear === 1 ? "DOWN" : telemetry.gear === 2 || telemetry.gear === 5 || telemetry.gear === 0 ? "UP" : telemetry.gear !== -1 && telemetry.gear !== null ? "MOVING" : null} icon={Crosshair} />
+                    <SystemStatus label="Flaps" value={getFlapString(telemetry.name, telemetry.flaps)} icon={ShieldAlert} />
+                    <SystemStatus label="Spoilers" value={telemetry.spoilers === 0 ? "OFF" : telemetry.spoilers === 1 ? "FLIGHT" : telemetry.spoilers === 2 ? "ARMED" : null} icon={Droplet} />
+                    <SystemStatus label="Brakes" value={telemetry.brakes === 1 ? "SET" : telemetry.brakes === 0 ? "REL" : null} icon={ShieldAlert} />
+                    <SystemStatus label="Autopilot" value={telemetry.autopilot === 1 ? "ON" : telemetry.autopilot === 0 ? "OFF" : null} icon={Zap} />
+                    <SystemStatus label="VNAV" value={telemetry.vnav === 1 ? "ON" : telemetry.vnav === 0 ? "OFF" : null} icon={Zap} />
+                  </View>
+                  <SectionHeader title="Power & Engines" icon={Power} color="#FBBF24" />
+                  <View style={styles.gridContainer}>
+                    <SystemStatus label="Battery" value={telemetry.battery === 1 ? "ON" : telemetry.battery === 0 ? "OFF" : null} icon={Battery} />
+                    <SystemStatus label="APU" value={telemetry.apu === 0 ? "OFF" : telemetry.apu === 1 ? "STARTING" : telemetry.apu === 2 ? "ON" : null} icon={Zap} />
+                    <SystemStatus label="Engines" value={Object.values(telemetry.engines || {}).some((s) => s === 2) ? `ENG ${Object.entries(telemetry.engines).filter(([, s]) => s === 2).map(([n]) => n).join(",")} ON` : Object.keys(telemetry.engines || {}).length > 0 ? "OFF" : null} icon={Flame} />
+                    <SystemStatus label="Throttle" value={telemetry.throttle !== null ? `${Math.round(telemetry.throttle * 100)}%` : null} icon={Flame} />
+                  </View>
                 </View>
-                <SectionHeader title="Power & Engines" icon={Power} color="#FBBF24" />
-                <View style={styles.gridContainer}>
-                  <SystemStatus label="Battery" value={telemetry.battery === 1 ? "ON" : telemetry.battery === 0 ? "OFF" : null} icon={Battery} />
-                  <SystemStatus label="APU" value={telemetry.apu === 0 ? "OFF" : telemetry.apu === 1 ? "STARTING" : telemetry.apu === 2 ? "ON" : null} icon={Zap} />
-                  <SystemStatus label="Engines" value={Object.values(telemetry.engines || {}).some((s) => s === 2) ? `ENG ${Object.entries(telemetry.engines).filter(([, s]) => s === 2).map(([n]) => n).join(",")} ON` : Object.keys(telemetry.engines || {}).length > 0 ? "OFF" : null} icon={Flame} />
-                  <SystemStatus label="Throttle" value={telemetry.throttle !== null ? `${Math.round(telemetry.throttle * 100)}%` : null} icon={Flame} />
-                </View>
-              </View>
-            </ScrollView>
+              </ScrollView>
             </View>
           )}
 
           {/* Page 4: Ground Services */}
           {dashboardPage === 4 && (
             <View style={{ flex: 1, paddingHorizontal: 16 }}>
-            <ScrollView showsVerticalScrollIndicator={false}>
-              <View style={[styles.systemsCard, { backgroundColor: theme.surfaceCard, borderColor: theme.borderSoft }]}>
-                <SectionHeader title="Ground Services" icon={ArrowLeftRight} color="#FB923C" />
-                <View style={styles.gridContainer}>
-                  <SystemStatus label="Pushback" value={telemetry.pushback === 1 ? "ACTIVE" : telemetry.pushback === 0 ? "OFF" : null} icon={ArrowLeftRight} />
-                  <SystemStatus label="Belt Loader" value={telemetry.beltLoader === 1 ? "CONN" : telemetry.beltLoader === 0 ? "DISC" : null} icon={ArrowLeftRight} />
-                  <SystemStatus label="Catering" value={telemetry.catering === 1 ? "CONN" : telemetry.catering === 0 ? "DISC" : null} icon={ArrowLeftRight} />
-                  <SystemStatus label="GPU" value={telemetry.gpu === 1 ? "CONN" : telemetry.gpu === 0 ? "DISC" : null} icon={Zap} />
-                  <SystemStatus label="Pallet Loader" value={telemetry.palletLoader === 1 ? "CONN" : telemetry.palletLoader === 0 ? "DISC" : null} icon={ArrowLeftRight} />
-                  <SystemStatus label="Stairs" value={telemetry.stairs === 1 ? "CONN" : telemetry.stairs === 0 ? "DISC" : null} icon={ArrowLeftRight} />
+              <ScrollView showsVerticalScrollIndicator={false}>
+                <View style={[styles.systemsCard, { backgroundColor: theme.surfaceCard, borderColor: theme.borderSoft }]}>
+                  <SectionHeader title="Ground Services" icon={ArrowLeftRight} color="#FB923C" />
+                  <View style={styles.gridContainer}>
+                    <SystemStatus label="Pushback" value={telemetry.pushback === 1 ? "ACTIVE" : telemetry.pushback === 0 ? "OFF" : null} icon={ArrowLeftRight} />
+                    <SystemStatus label="Belt Loader" value={telemetry.beltLoader === 1 ? "CONN" : telemetry.beltLoader === 0 ? "DISC" : null} icon={ArrowLeftRight} />
+                    <SystemStatus label="Catering" value={telemetry.catering === 1 ? "CONN" : telemetry.catering === 0 ? "DISC" : null} icon={ArrowLeftRight} />
+                    <SystemStatus label="GPU" value={telemetry.gpu === 1 ? "CONN" : telemetry.gpu === 0 ? "DISC" : null} icon={Zap} />
+                    <SystemStatus label="Pallet Loader" value={telemetry.palletLoader === 1 ? "CONN" : telemetry.palletLoader === 0 ? "DISC" : null} icon={ArrowLeftRight} />
+                    <SystemStatus label="Stairs" value={telemetry.stairs === 1 ? "CONN" : telemetry.stairs === 0 ? "DISC" : null} icon={ArrowLeftRight} />
+                  </View>
+                  <SectionHeader title="External Lights" icon={SunDim} color="#FACC15" />
+                  <View style={styles.gridContainer}>
+                    <SystemStatus label="Beacon" value={telemetry.beacon === 1 ? "ON" : telemetry.beacon === 0 ? "OFF" : null} icon={SunDim} />
+                    <SystemStatus label="Strobe" value={telemetry.strobe === 1 ? "ON" : telemetry.strobe === 0 ? "OFF" : null} icon={SunDim} />
+                    <SystemStatus label="Nav" value={telemetry.nav === 1 ? "ON" : telemetry.nav === 0 ? "OFF" : null} icon={SunDim} />
+                    <SystemStatus label="Landing" value={telemetry.landing === 1 ? "ON" : telemetry.landing === 0 ? "OFF" : null} icon={SunDim} />
+                  </View>
                 </View>
-                <SectionHeader title="External Lights" icon={SunDim} color="#FACC15" />
-                <View style={styles.gridContainer}>
-                  <SystemStatus label="Beacon" value={telemetry.beacon === 1 ? "ON" : telemetry.beacon === 0 ? "OFF" : null} icon={SunDim} />
-                  <SystemStatus label="Strobe" value={telemetry.strobe === 1 ? "ON" : telemetry.strobe === 0 ? "OFF" : null} icon={SunDim} />
-                  <SystemStatus label="Nav" value={telemetry.nav === 1 ? "ON" : telemetry.nav === 0 ? "OFF" : null} icon={SunDim} />
-                  <SystemStatus label="Landing" value={telemetry.landing === 1 ? "ON" : telemetry.landing === 0 ? "OFF" : null} icon={SunDim} />
-                </View>
-              </View>
-            </ScrollView>
+              </ScrollView>
             </View>
           )}
         </FadeTransition>
@@ -589,7 +603,7 @@ function AppInner() {
             </TouchableOpacity>
 
             <TouchableOpacity onPress={toggleVoiceGender} style={[styles.iconBtn, { width: 'auto', paddingHorizontal: 10, backgroundColor: theme.iconBtn, borderColor: theme.iconBtnBorder }]} activeOpacity={0.7}>
-              <Text style={{color: theme.textSlate, fontSize: 11, fontWeight: 'bold'}}>{voicePreference === 'female' ? 'FEMALE' : 'MALE'}</Text>
+              <Text style={{ color: theme.textSlate, fontSize: 11, fontWeight: 'bold' }}>{voicePreference === 'female' ? 'FEMALE' : 'MALE'}</Text>
             </TouchableOpacity>
 
             <TouchableOpacity onPress={toggleVoice} style={[styles.iconBtn, { backgroundColor: theme.iconBtn, borderColor: theme.iconBtnBorder }]} activeOpacity={0.7}>
@@ -616,8 +630,8 @@ function AppInner() {
                 isConnected
                   ? { backgroundColor: theme.accentBg, borderWidth: 1, borderColor: theme.accent }
                   : isConnecting
-                  ? styles.statusConnecting
-                  : { backgroundColor: 'rgba(71, 85, 105, 0.3)', borderWidth: 1, borderColor: theme.border },
+                    ? styles.statusConnecting
+                    : { backgroundColor: 'rgba(71, 85, 105, 0.3)', borderWidth: 1, borderColor: theme.border },
               ]}
             >
               <PulseDot active={isConnected} />
@@ -641,9 +655,9 @@ function AppInner() {
       </View>
 
       {/* ── Sidebar ─────────────────────────────────────────────────── */}
-      <Sidebar 
-        visible={sidebarVisible} 
-        onClose={() => setSidebarVisible(false)} 
+      <Sidebar
+        visible={sidebarVisible}
+        onClose={() => setSidebarVisible(false)}
         isBackgroundMode={isBackgroundMode}
         setIsBackgroundMode={setIsBackgroundMode}
         disableAutoConnect={disableAutoConnect}
@@ -654,7 +668,7 @@ function AppInner() {
 }
 
 // ─── Root Export (wraps with ThemeProvider) ────────────────────────────────────
-export default function App() {
+export default Sentry.wrap(function App() {
   return (
     <SafeAreaProvider>
       <ThemeProvider>
@@ -662,7 +676,7 @@ export default function App() {
       </ThemeProvider>
     </SafeAreaProvider>
   );
-}
+});
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
