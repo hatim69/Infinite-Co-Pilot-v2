@@ -387,35 +387,35 @@ export function useTelemetry(disableAutoConnect = false) {
               crossedThreshold(prevMsl, data, threshold, ALTITUDE_CALLOUT_BUFFER_FT);
 
             if (alt(5000).ascending && !flags.alt5k) {
-              speak("Passing 5,000", "notice");
+              speak("Passing five thousand.", "notice");
               flags.alt5k = true;
             }
             if (alt(5000).descending && flags.alt5k) {
-              speak("Passing 5,000", "notice");
+              speak("Passing five thousand.", "notice");
               flags.alt5k = false;
             }
             if (alt(10000).ascending && !flags.alt10k) {
-              speak("Passing 10,000. Landing lights off.", "caution");
+              speak("Ten thousand. Landing lights off.", "caution");
               flags.alt10k = true;
             }
             if (alt(10000).descending && flags.alt10k) {
-              speak("Passing 10,000.", "notice");
+              speak("Ten thousand. Landing lights on.", "notice");
               flags.alt10k = false;
             }
             if (alt(15000).ascending && !flags.alt15k) {
-              speak("Passing 15,000.", "notice");
+              speak("Passing one-five thousand.", "notice");
               flags.alt15k = true;
             }
             if (alt(15000).descending && flags.alt15k) {
-              speak("Passing 15,000.", "notice");
+              speak("Passing one-five thousand.", "notice");
               flags.alt15k = false;
             }
             if (alt(24000).ascending && !flags.alt24k) {
-              speak("Passing 24,000.", "notice");
+              speak("Passing Flight Level two-four-zero.", "notice");
               flags.alt24k = true;
             }
             if (alt(24000).descending && flags.alt24k) {
-              speak("Passing 24,000.", "notice");
+              speak("Descending Flight Level two-four-zero.", "notice");
               flags.alt24k = false;
             }
           }

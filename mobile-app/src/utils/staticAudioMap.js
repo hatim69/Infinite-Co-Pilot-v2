@@ -15,21 +15,29 @@ export const staticAudioMap = {
     female: require("../../assets/audio/female_callout_gear_up.mp3"),
     male: require("../../assets/audio/male_callout_gear_up.mp3")
   },
-  "Passing 10,000. Landing lights off.": {
+  "Passing five thousand.": {
+    female: require("../../assets/audio/female_callout_passing_5000.mp3"),
+    male: require("../../assets/audio/male_callout_passing_5000.mp3")
+  },
+  "Ten thousand. Landing lights off.": {
     female: require("../../assets/audio/female_callout_passing_10000_landing_lights_off.mp3"),
     male: require("../../assets/audio/male_callout_passing_10000_landing_lights_off.mp3")
   },
-  "Passing 15,000.": {
+  "Ten thousand. Landing lights on.": {
+    female: require("../../assets/audio/female_callout_passing_10000_landing_lights_on.mp3"),
+    male: require("../../assets/audio/male_callout_passing_10000_landing_lights_on.mp3")
+  },
+  "Passing one-five thousand.": {
     female: require("../../assets/audio/female_callout_passing_15000.mp3"),
     male: require("../../assets/audio/male_callout_passing_15000.mp3")
   },
-  "Passing 24,000.": {
+  "Passing Flight Level two-four-zero.": {
     female: require("../../assets/audio/female_callout_passing_24000.mp3"),
     male: require("../../assets/audio/male_callout_passing_24000.mp3")
   },
-  "Passing 5,000": {
-    female: require("../../assets/audio/female_callout_passing_5000.mp3"),
-    male: require("../../assets/audio/male_callout_passing_5000.mp3")
+  "Descending Flight Level two-four-zero.": {
+    female: require("../../assets/audio/female_callout_descending_24000.mp3"),
+    male: require("../../assets/audio/male_callout_descending_24000.mp3")
   },
   "Positive rate. Gear up.": {
     female: require("../../assets/audio/female_callout_positive_rate_gear_up.mp3"),
@@ -250,6 +258,14 @@ export const staticAudioMap = {
   "Beacon lights on.": {
     female: require("../../assets/audio/female_system_beacon_lights_on.mp3"),
     male: require("../../assets/audio/male_system_beacon_lights_on.mp3")
+  },
+  "Battery on.": {
+    female: require("../../assets/audio/female_system_battery_on.mp3"),
+    male: require("../../assets/audio/male_system_battery_on.mp3")
+  },
+  "Battery off.": {
+    female: require("../../assets/audio/female_system_battery_off.mp3"),
+    male: require("../../assets/audio/male_system_battery_off.mp3")
   },
   "Engine 1 shutdown.": {
     female: require("../../assets/audio/female_system_engine_1_shutdown.mp3"),
