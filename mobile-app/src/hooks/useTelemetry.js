@@ -538,6 +538,8 @@ export function useTelemetry(disableAutoConnect = false) {
         }
 
         // ── Engine N1 ─────────────────────────────────────────────────────
+        // --- LEGACY N1 ENGINE STATE LOGIC (commented out per request) ---
+        /*
         const n1Match = command.match(/^aircraft\/0\/systems\/engines\/(\d+)\/n1$/);
         if (n1Match) {
           const engNum = parseInt(n1Match[1], 10) + 1;
@@ -580,6 +582,32 @@ export function useTelemetry(disableAutoConnect = false) {
 
           if (next.engines[engNum] !== nxt) {
             next.engines = { ...next.engines, [engNum]: nxt };
+            updated = true;
+          }
+        }
+        */
+
+        // ── Engine State ──────────────────────────────────────────────────
+        const engineStateMatch = command.match(/^aircraft\/0\/systems\/engines\/(\d+)\/state$/);
+        if (engineStateMatch) {
+          const engNum = parseInt(engineStateMatch[1], 10) + 1;
+          const currentState = state.engines[engNum];
+          const nextState = data; // 0=stopped, 1=starting, 2=running, 3=stopping
+
+          if (currentState !== undefined && currentState !== nextState) {
+            if (nextState === 1) {
+              speak(`Engine ${engNum} starting.`, "briefing");
+            } else if (nextState === 2) {
+              speak(`Engine ${engNum} started.`, "notice");
+            } else if (nextState === 3) {
+              speak(`Engine ${engNum} shutting down.`, "notice");
+            } else if (nextState === 0) {
+              speak(`Engine ${engNum} shutdown.`, "notice");
+            }
+          }
+
+          if (next.engines[engNum] !== nextState) {
+            next.engines = { ...next.engines, [engNum]: nextState };
             updated = true;
           }
         }
