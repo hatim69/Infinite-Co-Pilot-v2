@@ -327,12 +327,18 @@ function AppInner() {
       </View>
 
       <Text style={[styles.connectionTitle, { color: theme.textPrimary }]}>
-        {isConnecting ? "Connecting to Infinite Flight..." : "No Simulator Detected"}
+        {isConnecting 
+          ? "Connecting to Infinite Flight..." 
+          : discoveredDevices.length > 1 
+            ? "Multiple Clients Detected" 
+            : "No Simulator Detected"}
       </Text>
       <Text style={[styles.connectionSubtitle, { color: theme.textMuted }]}>
         {isConnecting
           ? `Reaching out to ${connectedIp}...`
-          : "Make sure Infinite Flight is running and your device is on the same WiFi network."}
+          : discoveredDevices.length > 1
+            ? "Please select a simulator manually from the list below."
+            : "Make sure Infinite Flight is running and your device is on the same WiFi network."}
       </Text>
 
       {/* Discovered Devices */}
