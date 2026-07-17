@@ -145,12 +145,17 @@ export default function Sidebar({ visible, onClose, isBackgroundMode, setIsBackg
     setIsSendingFeedback(true);
     try {
       const eventId = Sentry.captureMessage("User Feedback Submitted");
-      Sentry.captureFeedback({
-        message: feedbackText,
-        name: "Beta Tester",
-        email: feedbackEmail,
-      }, {
-        event_id: eventId 
+      Sentry.captureEvent({
+        type: 'feedback',
+        level: 'info',
+        contexts: {
+          feedback: {
+            message: feedbackText,
+            contact_email: feedbackEmail,
+            name: "Beta Tester",
+            associated_event_id: eventId,
+          }
+        }
       });
       setFeedbackText('');
       setFeedbackEmail('');
