@@ -19,7 +19,7 @@ const mappings = {
   "Spoilers off.": "callout_spoilers_off",
   "V1": "callout_v1",
   "V2": "callout_v2",
-  "Flaps 1+F.": "callout_flaps_1+F",
+  "Flaps 1+F.": "callout_flaps_1_plus_F",
   "Flaps 1.": "callout_flaps_1",
   "Flaps 2.": "callout_flaps_2",
   "Flaps 3.": "callout_flaps_3",

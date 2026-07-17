@@ -72,8 +72,8 @@ export const staticAudioMap = {
     male: require("../../assets/audio/male_callout_v2.mp3")
   },
   "Flaps 1+F.": {
-    female: require("../../assets/audio/female_callout_flaps_1+F.mp3"),
-    male: require("../../assets/audio/male_callout_flaps_1+F.mp3")
+    female: require("../../assets/audio/female_callout_flaps_1_plus_F.mp3"),
+    male: require("../../assets/audio/male_callout_flaps_1_plus_F.mp3")
   },
   "Flaps 1.": {
     female: require("../../assets/audio/female_callout_flaps_1.mp3"),

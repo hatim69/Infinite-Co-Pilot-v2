@@ -23,10 +23,18 @@ import { staticAudioMap } from "./staticAudioMap";
 // Must be your Mac's LAN IP when running locally (not 'localhost' on device).
 // e.g. EXPO_PUBLIC_POLLY_BACKEND_URL=http://192.168.1.10:3001
 const POLLY_BACKEND_URL = process.env.EXPO_PUBLIC_POLLY_BACKEND_URL || "";
+const PRECISION_CALLOUT_MAX_WAIT_MS = {
+  "80 knots": 1200,
+  V1: 700,
+  Rotate: 800,
+  V2: 700,
+};
+const DEFAULT_CALLOUT_MAX_WAIT_MS = 1600;
 
 class SpeechManager {
   constructor() {
     this.speechQueue = [];
+    this.calloutQueue = [];
     this.sirenPlaying = false;
     this.addLog = null;
     this.lastSpokenText = "";
@@ -47,8 +55,14 @@ class SpeechManager {
     this.boardingAnnouncePlayer = null;
     this.silentPlayer = null;
     this.pollyPlayer = null; // dedicated player for Polly audio
+    this.currentAnnouncementPlayer = null;
+    this.currentAnnouncementFinish = null;
+    this.currentCalloutPlayer = null;
+    this.currentCalloutFinish = null;
     this._audioConfigured = false;
     this.isProcessingQueue = false;
+    this.isProcessingCalloutQueue = false;
+    this.expoSpeechActive = false;
 
     // In-memory Polly response cache: Map<"text|voiceId", base64DataUri>
     // Avoids repeat network calls for identical text+voice combinations.
@@ -81,6 +95,24 @@ class SpeechManager {
     else this.speechQueue.splice(firstNormalIndex, 0, entry);
   }
 
+  _enqueueCallout(entry) {
+    this.calloutQueue.push(entry);
+    this.processCalloutQueue();
+  }
+
+  _getCalloutMaxWaitMs(spokenText) {
+    return PRECISION_CALLOUT_MAX_WAIT_MS[spokenText] || DEFAULT_CALLOUT_MAX_WAIT_MS;
+  }
+
+  _stopCurrentAnnouncement() {
+    if (this.currentAnnouncementFinish) {
+      this.currentAnnouncementFinish();
+      return;
+    }
+    this._disposePlayer(this.currentAnnouncementPlayer);
+    this.currentAnnouncementPlayer = null;
+  }
+
   async _playChimeNow() {
     if (!this.chimeEnabled) return false;
 
@@ -110,7 +142,7 @@ class SpeechManager {
     }
   }
 
-  _playStaticAudio(audioAsset, volume) {
+  _playStaticAudio(audioAsset, volume, { owner = "announcement", maxWaitMs = 10000 } = {}) {
     return new Promise((resolve) => {
       let player;
       let subscription;
@@ -129,13 +161,28 @@ class SpeechManager {
         if (this.currentAnnouncementPlayer === player) {
           this.currentAnnouncementPlayer = null;
         }
+        if (this.currentCalloutPlayer === player) {
+          this.currentCalloutPlayer = null;
+        }
+        if (this.currentAnnouncementFinish === finish) {
+          this.currentAnnouncementFinish = null;
+        }
+        if (this.currentCalloutFinish === finish) {
+          this.currentCalloutFinish = null;
+        }
         this._disposePlayer(player, { pause: false });
         resolve();
       };
 
       try {
         player = createAudioPlayer(audioAsset, { updateInterval: 100 });
-        this.currentAnnouncementPlayer = player;
+        if (owner === "callout") {
+          this.currentCalloutPlayer = player;
+          this.currentCalloutFinish = finish;
+        } else {
+          this.currentAnnouncementPlayer = player;
+          this.currentAnnouncementFinish = finish;
+        }
         player.volume = volume;
 
         subscription = player.addListener("playbackStatusUpdate", (status) => {
@@ -160,14 +207,48 @@ class SpeechManager {
           } catch (e) {
             finish();
           }
-        }, 250);
+        }, 100);
 
-        safetyTimer = setTimeout(finish, 10000);
+        safetyTimer = setTimeout(finish, maxWaitMs);
         player.play();
       } catch (e) {
         finish();
       }
     });
+  }
+
+  async processCalloutQueue() {
+    if (this.isProcessingCalloutQueue) return;
+    this.isProcessingCalloutQueue = true;
+
+    try {
+      while (this.calloutQueue.length > 0) {
+        const { spokenText, profile } = this.calloutQueue.shift();
+        const staticAudioEntry = staticAudioMap[spokenText];
+        if (!staticAudioEntry) continue;
+
+        try {
+          this._stopCurrentAnnouncement();
+          if (this.expoSpeechActive) {
+            Speech.stop();
+            this.expoSpeechActive = false;
+          }
+          const audioAsset = staticAudioEntry[this.voicePreference] || staticAudioEntry.female;
+          await this._playStaticAudio(
+            audioAsset,
+            profile.volume * this.masterVolume * this.coPilotVolume,
+            {
+              owner: "callout",
+              maxWaitMs: this._getCalloutMaxWaitMs(spokenText),
+            }
+          );
+        } catch (e) {
+          console.log("[Speech] Callout failed:", e);
+        }
+      }
+    } finally {
+      this.isProcessingCalloutQueue = false;
+    }
   }
 
   async init() {
@@ -247,11 +328,19 @@ class SpeechManager {
       if (this.boardingAnnouncePlayer) {
         try { this.boardingAnnouncePlayer.pause(); } catch (e) {}
       }
-      Speech.stop();
-      this._disposePlayer(this.currentAnnouncementPlayer);
+      if (this.expoSpeechActive) {
+        Speech.stop();
+        this.expoSpeechActive = false;
+      }
+      this._stopCurrentAnnouncement();
       this.currentAnnouncementPlayer = null;
+      if (this.currentCalloutFinish) this.currentCalloutFinish();
+      else this._disposePlayer(this.currentCalloutPlayer);
+      this.currentCalloutPlayer = null;
       this.speechQueue = [];
+      this.calloutQueue = [];
       this.isProcessingQueue = false;
+      this.isProcessingCalloutQueue = false;
     } else {
       if (this.boardingMusic) {
         try { this.boardingMusic.play(); } catch (e) {}
@@ -354,6 +443,11 @@ class SpeechManager {
     if (!this.voiceEnabled) return;
 
     const profile = this.getVoiceProfile(tone);
+
+    if (tone === "callout" && staticAudioMap[spokenText] && !options.forceQueue) {
+      this._enqueueCallout({ spokenText, profile });
+      return;
+    }
     
     this._enqueueSpeech({ spokenText, options, profile });
     this.processQueue();
@@ -423,14 +517,15 @@ class SpeechManager {
               }
 
               // Apply master + co-pilot volume from settings
+              this.expoSpeechActive = true;
               Speech.speak(spokenText, {
                 voice: voiceId,
                 rate: profile.rate,
                 pitch: finalPitch,
                 volume: profile.volume * this.masterVolume * this.coPilotVolume,
-                onDone: resolve,
-                onStopped: resolve,
-                onError: resolve,
+                onDone: () => { this.expoSpeechActive = false; resolve(); },
+                onStopped: () => { this.expoSpeechActive = false; resolve(); },
+                onError: () => { this.expoSpeechActive = false; resolve(); },
               });
             });
           }
@@ -595,14 +690,15 @@ class SpeechManager {
         }
       }
 
+      this.expoSpeechActive = true;
       Speech.speak(text, {
         voice: voiceId,
         rate: profile.rate,
         pitch: finalPitch,
         volume: profile.volume * this.masterVolume * this.coPilotVolume,
-        onDone: resolve,
-        onStopped: resolve,
-        onError: resolve,
+        onDone: () => { this.expoSpeechActive = false; resolve(); },
+        onStopped: () => { this.expoSpeechActive = false; resolve(); },
+        onError: () => { this.expoSpeechActive = false; resolve(); },
       });
     });
   }
@@ -654,6 +750,7 @@ class SpeechManager {
 
     const getFileName = (l) => {
       const lower = (l || "").toLowerCase();
+      if (lower.includes("aer lingus")) return "announcements/aer-lingus.mp3";
       if (lower.includes("air canada")) return "announcements/air-canada.mp3";
       if (lower.includes("air china")) return "announcements/air-china.mp3";
       if (lower.includes("air france")) return "announcements/air-france.mp3";
@@ -663,6 +760,7 @@ class SpeechManager {
       if (lower.includes("egyptair")) return "announcements/egyptair.mp3";
       if (lower.includes("emirates")) return "announcements/emirates.mp3";
       if (lower.includes("finnair")) return "announcements/finnair.mp3";
+      if (lower.includes("garuda indonesia")) return "announcements/garuda-indonesia.mp3";
       if (lower.includes("indigo")) return "announcements/indigo.mp3";
       if (lower.includes("japan airlines") || lower.includes("jal")) return "announcements/japan-airlines.mp3";
       if (lower.includes("lufthansa")) return "announcements/lufthansa.mp3";
@@ -817,10 +915,15 @@ class SpeechManager {
 
   stopAll() {
     this.speechQueue = [];
+    this.calloutQueue = [];
     this.isProcessingQueue = false;
+    this.isProcessingCalloutQueue = false;
     Speech.stop();
-    this._disposePlayer(this.currentAnnouncementPlayer);
+    this._stopCurrentAnnouncement();
     this.currentAnnouncementPlayer = null;
+    if (this.currentCalloutFinish) this.currentCalloutFinish();
+    else this._disposePlayer(this.currentCalloutPlayer);
+    this.currentCalloutPlayer = null;
     this.stopBoardingMusic();
     this.stopBoardingAnnouncement();
     if (this.chimePlayer) {
