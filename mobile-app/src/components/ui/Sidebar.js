@@ -336,7 +336,7 @@ export default function Sidebar({ visible, onClose, isBackgroundMode, setIsBackg
             </SidebarSection>
 
             {/* ── Testing ────────────────────────────────────────────────── */}
-            <SidebarSection icon={Volume2} title="TESTING" theme={theme}>
+            {/* <SidebarSection icon={Volume2} title="TESTING" theme={theme}>
               <TouchableOpacity
                 style={[styles.discordBtn, { backgroundColor: theme.accentBg, borderColor: theme.accentBorder }]}
                 onPress={() => {
@@ -354,7 +354,7 @@ export default function Sidebar({ visible, onClose, isBackgroundMode, setIsBackg
                   </Text>
                 </View>
               </TouchableOpacity>
-            </SidebarSection>
+            </SidebarSection> */}
 
             {/* ── About ──────────────────────────────────────────────────── */}
             <SidebarSection icon={Info} title="ABOUT" theme={theme}>

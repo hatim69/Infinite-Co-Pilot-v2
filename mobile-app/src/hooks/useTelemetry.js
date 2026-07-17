@@ -300,8 +300,8 @@ export function useTelemetry(disableAutoConnect = false) {
 
       // Gate announcements — suppress first 2.5 seconds after connect
       const speak = (msg, options = {}) => {
-        if (!flags.connectedAt || Date.now() - flags.connectedAt < 2500) return;
         const opts = typeof options === 'string' ? { tone: options } : { tone: "callout", ...options };
+        if (!opts.ignoreConnectGate && (!flags.connectedAt || Date.now() - flags.connectedAt < 2500)) return;
         speechManager.speak(msg, opts);
       };
 
@@ -820,7 +820,12 @@ export function useTelemetry(disableAutoConnect = false) {
               flags.boardingAnnouncementPlayed = true;
               speechManager.playBoardingAnnouncement(state.livery);
             } else {
-              speak(`Seatbelt signs ${on ? "on" : "off"}.`, { tone: "notice", withChime: true });
+              speak(`Seatbelt signs ${on ? "on" : "off"}.`, {
+                tone: "notice",
+                withChime: true,
+                priority: true,
+                ignoreConnectGate: true,
+              });
             }
           }
           updateNext("seatbelt", val);

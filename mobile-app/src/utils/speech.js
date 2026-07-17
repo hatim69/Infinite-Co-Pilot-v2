@@ -57,6 +57,119 @@ class SpeechManager {
     this.init();
   }
 
+  _disposePlayer(player, { pause = true } = {}) {
+    if (!player) return;
+    try {
+      if (pause && typeof player.pause === "function") player.pause();
+    } catch (e) {}
+    try {
+      if (typeof player.remove === "function") player.remove();
+      else if (typeof player.release === "function") player.release();
+    } catch (e) {}
+  }
+
+  _enqueueSpeech(entry) {
+    if (!entry.options?.priority) {
+      this.speechQueue.push(entry);
+      return;
+    }
+
+    const firstNormalIndex = this.speechQueue.findIndex(
+      (queued) => !queued.options?.priority
+    );
+    if (firstNormalIndex === -1) this.speechQueue.push(entry);
+    else this.speechQueue.splice(firstNormalIndex, 0, entry);
+  }
+
+  async _playChimeNow() {
+    if (!this.chimeEnabled) return false;
+
+    const play = async () => {
+      if (!this.chimePlayer) {
+        this.chimePlayer = createAudioPlayer(require("../../assets/chime.mp3"));
+      } else {
+        await this.chimePlayer.seekTo(0);
+      }
+      this.chimePlayer.volume = this.masterVolume;
+      this.chimePlayer.play();
+    };
+
+    try {
+      await play();
+      return true;
+    } catch (e) {
+      this._disposePlayer(this.chimePlayer);
+      this.chimePlayer = null;
+      try {
+        await play();
+        return true;
+      } catch (retryError) {
+        console.log("[Speech] Chime play failed:", retryError);
+        return false;
+      }
+    }
+  }
+
+  _playStaticAudio(audioAsset, volume) {
+    return new Promise((resolve) => {
+      let player;
+      let subscription;
+      let checkInterval;
+      let safetyTimer;
+      let isResolved = false;
+
+      const finish = () => {
+        if (isResolved) return;
+        isResolved = true;
+        if (subscription) {
+          try { subscription.remove(); } catch (e) {}
+        }
+        if (checkInterval) clearInterval(checkInterval);
+        if (safetyTimer) clearTimeout(safetyTimer);
+        if (this.currentAnnouncementPlayer === player) {
+          this.currentAnnouncementPlayer = null;
+        }
+        this._disposePlayer(player, { pause: false });
+        resolve();
+      };
+
+      try {
+        player = createAudioPlayer(audioAsset, { updateInterval: 100 });
+        this.currentAnnouncementPlayer = player;
+        player.volume = volume;
+
+        subscription = player.addListener("playbackStatusUpdate", (status) => {
+          if (
+            status.didJustFinish ||
+            (status.currentTime > 0 &&
+              status.duration > 0 &&
+              status.currentTime >= status.duration - 0.1) ||
+            (status.currentTime > 0 && status.playing === false && !status.isBuffering)
+          ) {
+            finish();
+          }
+        });
+
+        checkInterval = setInterval(() => {
+          try {
+            if (player.duration > 0 && player.currentTime >= player.duration - 0.1) {
+              finish();
+            } else if (!player.playing && player.currentTime > 0 && !player.isBuffering) {
+              finish();
+            }
+          } catch (e) {
+            finish();
+          }
+        }, 250);
+
+        safetyTimer = setTimeout(finish, 10000);
+        player.play();
+      } catch (e) {
+        finish();
+      }
+    });
+  }
+
   async init() {
     // Load saved voice preference and volumes
     try {
@@ -135,6 +248,8 @@ class SpeechManager {
         try { this.boardingAnnouncePlayer.pause(); } catch (e) {}
       }
       Speech.stop();
+      this._disposePlayer(this.currentAnnouncementPlayer);
+      this.currentAnnouncementPlayer = null;
       this.speechQueue = [];
       this.isProcessingQueue = false;
     } else {
@@ -240,7 +355,7 @@ class SpeechManager {
 
     const profile = this.getVoiceProfile(tone);
     
-    this.speechQueue.push({ spokenText, options, profile });
+    this._enqueueSpeech({ spokenText, options, profile });
     this.processQueue();
   }
 
@@ -248,123 +363,84 @@ class SpeechManager {
     if (this.isProcessingQueue) return;
     this.isProcessingQueue = true;
 
-    while (this.speechQueue.length > 0) {
-      const { spokenText, options, profile } = this.speechQueue.shift();
+    try {
+      while (this.speechQueue.length > 0) {
+        const { spokenText, options, profile } = this.speechQueue.shift();
 
-      if (options.withChime && this.chimeEnabled) {
         try {
-          if (!this.chimePlayer) {
-            this.chimePlayer = createAudioPlayer(require("../../assets/chime.mp3"));
-            this.chimePlayer.volume = this.masterVolume;
-            this.chimePlayer.play();
-          } else {
-            // Await the seek so play() always starts from position 0, not wherever
-            // the previous playback left off — this was causing the intermittent delay.
-            await this.chimePlayer.seekTo(0);
-            this.chimePlayer.play();
-          }
-        } catch (e) {}
-        await new Promise((resolve) => setTimeout(resolve, 1500));
-      }
-
-      // ── If there is a pre-recorded audio file for this exact text ────────
-      const staticAudioEntry = staticAudioMap[spokenText];
-      if (staticAudioEntry) {
-        await new Promise((resolve) => {
-          try {
-            const audioAsset = staticAudioEntry[this.voicePreference] || staticAudioEntry.female;
-            const player = createAudioPlayer(audioAsset);
-            player.volume = profile.volume * this.masterVolume * this.coPilotVolume;
-            player.play();
-            
-            let isResolved = false;
-            const finish = () => {
-              if (isResolved) return;
-              isResolved = true;
-              try { player.release(); } catch(e){}
-              resolve();
-            };
-
-            // Poll for completion since expo-audio API varies
-            const checkInterval = setInterval(() => {
-              try {
-                if (player.duration > 0 && player.currentTime >= player.duration - 0.1) {
-                  clearInterval(checkInterval);
-                  finish();
-                } else if (!player.playing && player.currentTime > 0) {
-                  clearInterval(checkInterval);
-                  finish();
-                }
-              } catch (e) {
-                clearInterval(checkInterval);
-                finish();
-              }
-            }, 250);
-
-            // Safety timeout (max 10 seconds for any static voice line)
-            setTimeout(() => {
-              clearInterval(checkInterval);
-              finish();
-            }, 10000);
-
-          } catch (e) {
-            resolve();
-          }
-        });
-      } 
-      // ── If this queue item was routed through Polly, use speakPolly ────────
-      else if (options._pollyVoiceId) {
-        await this.speakPolly(spokenText, options._pollyVoiceId, profile);
-      } else {
-        await new Promise((resolve) => {
-          let finalPitch = profile.pitch;
-          let voiceId = undefined;
-
-          if (this.voicePreference === "male") {
-            if (this.availableVoices) {
-              let maleVoice = this.availableVoices.find(
-                (v) => v.language.startsWith("en") && (v.name === "Aaron" || v.name === "Daniel" || v.name === "Arthur")
-              );
-              if (!maleVoice) {
-                maleVoice = this.availableVoices.find(
-                  (v) => v.language.startsWith("en") && (v.name.toLowerCase().includes("male") || v.identifier.toLowerCase().includes("male"))
-                );
-              }
-              if (!maleVoice) {
-                maleVoice = this.availableVoices.find(
-                  (v) => v.language.startsWith("en") && (v.identifier.includes("-iom") || v.identifier.includes("-tpd") || v.identifier.includes("-rjs") || v.identifier.includes("-gpl"))
-                );
-              }
-              if (!maleVoice) {
-                maleVoice = this.availableVoices.find(
-                  (v) => v.language.startsWith("en") && (v.name.includes("Alex") || v.name.includes("Fred"))
-                );
-              }
-              if (maleVoice) {
-                voiceId = maleVoice.identifier;
-              } else {
-                finalPitch = finalPitch * 0.9;
-              }
-            } else {
-              finalPitch = finalPitch * 0.9;
+          if (options.withChime) {
+            const playedChime = await this._playChimeNow();
+            if (playedChime) {
+              await new Promise((resolve) => setTimeout(resolve, 1500));
             }
           }
 
-          // Apply master + co-pilot volume from settings
-          Speech.speak(spokenText, {
-            voice: voiceId,
-            rate: profile.rate,
-            pitch: finalPitch,
-            volume: profile.volume * this.masterVolume * this.coPilotVolume,
-            onDone: resolve,
-            onStopped: resolve,
-            onError: resolve,
-          });
-        });
-      }
-    }
+          // ── If there is a pre-recorded audio file for this exact text ────────
+          const staticAudioEntry = staticAudioMap[spokenText];
+          if (staticAudioEntry) {
+            const audioAsset = staticAudioEntry[this.voicePreference] || staticAudioEntry.female;
+            await this._playStaticAudio(
+              audioAsset,
+              profile.volume * this.masterVolume * this.coPilotVolume
+            );
+          } 
+          // ── If this queue item was routed through Polly, use speakPolly ────────
+          else if (options._pollyVoiceId) {
+            await this.speakPolly(spokenText, options._pollyVoiceId, profile);
+          } else {
+            await new Promise((resolve) => {
+              let finalPitch = profile.pitch;
+              let voiceId = undefined;
 
-    this.isProcessingQueue = false;
+              if (this.voicePreference === "male") {
+                if (this.availableVoices) {
+                  let maleVoice = this.availableVoices.find(
+                    (v) => v.language.startsWith("en") && (v.name === "Aaron" || v.name === "Daniel" || v.name === "Arthur")
+                  );
+                  if (!maleVoice) {
+                    maleVoice = this.availableVoices.find(
+                      (v) => v.language.startsWith("en") && (v.name.toLowerCase().includes("male") || v.identifier.toLowerCase().includes("male"))
+                    );
+                  }
+                  if (!maleVoice) {
+                    maleVoice = this.availableVoices.find(
+                      (v) => v.language.startsWith("en") && (v.identifier.includes("-iom") || v.identifier.includes("-tpd") || v.identifier.includes("-rjs") || v.identifier.includes("-gpl"))
+                    );
+                  }
+                  if (!maleVoice) {
+                    maleVoice = this.availableVoices.find(
+                      (v) => v.language.startsWith("en") && (v.name.includes("Alex") || v.name.includes("Fred"))
+                    );
+                  }
+                  if (maleVoice) {
+                    voiceId = maleVoice.identifier;
+                  } else {
+                    finalPitch = finalPitch * 0.9;
+                  }
+                } else {
+                  finalPitch = finalPitch * 0.9;
+                }
+              }
+
+              // Apply master + co-pilot volume from settings
+              Speech.speak(spokenText, {
+                voice: voiceId,
+                rate: profile.rate,
+                pitch: finalPitch,
+                volume: profile.volume * this.masterVolume * this.coPilotVolume,
+                onDone: resolve,
+                onStopped: resolve,
+                onError: resolve,
+              });
+            });
+          }
+        } catch (e) {
+          console.log("[Speech] Queue item failed:", e);
+        }
+      }
+    } finally {
+      this.isProcessingQueue = false;
+    }
   }
 
   // ─── Amazon Polly TTS ─────────────────────────────────────────────────────
@@ -444,10 +520,8 @@ class SpeechManager {
     return new Promise((resolve) => {
       try {
         // Release any previous Polly player
-        if (this.pollyPlayer) {
-          try { this.pollyPlayer.pause(); this.pollyPlayer.release(); } catch (_) {}
-          this.pollyPlayer = null;
-        }
+        this._disposePlayer(this.pollyPlayer);
+        this.pollyPlayer = null;
 
         const player = createAudioPlayer({ uri: dataUri });
         player.volume = profile.volume * this.masterVolume * this.coPilotVolume;
@@ -557,25 +631,12 @@ class SpeechManager {
     const profile = this.getVoiceProfile(tone);
 
     // Use polly-aware queue entry
-    this.speechQueue.push({ spokenText, options: { ...options, _pollyVoiceId: voiceId }, profile });
+    this._enqueueSpeech({ spokenText, options: { ...options, _pollyVoiceId: voiceId }, profile });
     this.processQueue();
   }
 
   async playChime() {
-    if (!this.chimeEnabled) return;
-    try {
-      if (!this.chimePlayer) {
-        this.chimePlayer = createAudioPlayer(require("../../assets/chime.mp3"));
-        this.chimePlayer.volume = this.masterVolume;
-        this.chimePlayer.play();
-      } else {
-        // Await seek so the chime always starts from the top with no delay
-        await this.chimePlayer.seekTo(0);
-        this.chimePlayer.play();
-      }
-    } catch (e) {
-      console.log("[Speech] Chime play failed:", e);
-    }
+    await this._playChimeNow();
   }
 
   async playBoardingAnnouncement(livery) {
@@ -624,7 +685,7 @@ class SpeechManager {
       }
 
       if (this.boardingAnnouncePlayer) {
-        try { this.boardingAnnouncePlayer.release(); } catch (e) {}
+        this._disposePlayer(this.boardingAnnouncePlayer);
       }
       this.boardingAnnouncePlayer = createAudioPlayer(audioUri);
       this.boardingAnnouncePlayer.volume = this.masterVolume * this.safetyBriefingVolume;
@@ -650,10 +711,7 @@ class SpeechManager {
   stopBoardingAnnouncement() {
     this._boardingAnnounceRequestId = null;
     if (this.boardingAnnouncePlayer) {
-      try {
-        this.boardingAnnouncePlayer.pause();
-        this.boardingAnnouncePlayer.release();
-      } catch (e) {}
+      this._disposePlayer(this.boardingAnnouncePlayer);
       this.boardingAnnouncePlayer = null;
     }
   }
@@ -731,7 +789,7 @@ class SpeechManager {
       }
 
       if (this.boardingMusic) {
-        try { this.boardingMusic.release(); } catch (e) {}
+        this._disposePlayer(this.boardingMusic);
       }
       this.boardingMusic = createAudioPlayer(audioUri);
       this.boardingMusic.loop = true;
@@ -752,10 +810,7 @@ class SpeechManager {
   stopBoardingMusic() {
     this._boardingMusicRequestId = null;
     if (this.boardingMusic) {
-      try {
-        this.boardingMusic.pause();
-        this.boardingMusic.release();
-      } catch (e) {}
+      this._disposePlayer(this.boardingMusic);
       this.boardingMusic = null;
     }
   }
@@ -764,18 +819,20 @@ class SpeechManager {
     this.speechQueue = [];
     this.isProcessingQueue = false;
     Speech.stop();
+    this._disposePlayer(this.currentAnnouncementPlayer);
+    this.currentAnnouncementPlayer = null;
     this.stopBoardingMusic();
     this.stopBoardingAnnouncement();
     if (this.chimePlayer) {
-      try { this.chimePlayer.pause(); this.chimePlayer.release(); } catch (e) {}
+      this._disposePlayer(this.chimePlayer);
       this.chimePlayer = null;
     }
     if (this.sirenPlayer) {
-      try { this.sirenPlayer.pause(); this.sirenPlayer.release(); } catch (e) {}
+      this._disposePlayer(this.sirenPlayer);
       this.sirenPlayer = null;
     }
     if (this.pollyPlayer) {
-      try { this.pollyPlayer.pause(); this.pollyPlayer.release(); } catch (e) {}
+      this._disposePlayer(this.pollyPlayer);
       this.pollyPlayer = null;
     }
   }
