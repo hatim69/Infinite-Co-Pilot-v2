@@ -4,6 +4,7 @@ import { ArrowRight, CheckSquare, ShieldCheck, Square } from 'lucide-react-nativ
 import { useTheme } from '../../context/ThemeContext';
 
 const PHASE_META = {
+  syncing: { title: "Detecting Phase", next: null, fallbackNextTitle: "First Confirmed Phase" },
   preflight: { title: "Standing By", next: "boarding" },
   boarding: { title: "Boarding", next: "pushback" },
   pushback: { title: "Pushback", next: "taxi_out" },
@@ -67,6 +68,7 @@ const getConditions = (phase, telemetry) => {
       met: engines.anyRunning || engines.anyStarting,
     },
     taxiSpeed: { label: "Taxi speed", met: taxiSpeed },
+    runway: { label: "Runway detected", met: telemetry.onRunway === true },
     takeoffPower: { label: "Takeoff power", met: takeoffPower },
     climbRate: { label: "Positive climb", met: vs > 250 },
     lowClimb: { label: "Below 5,000 AGL", met: agl < 5000 },
@@ -86,6 +88,10 @@ const getConditions = (phase, telemetry) => {
   };
 
   const byPhase = {
+    syncing: [
+      { label: "Receiving core telemetry", met: true },
+      { label: "Waiting for stable phase lock", met: false },
+    ],
     preflight: [common.parked, common.enginesOff],
     boarding: [common.onGround, common.parked, common.enginesOff],
     pushback: [
@@ -96,17 +102,17 @@ const getConditions = (phase, telemetry) => {
     taxi_out: [
       common.onGround,
       { label: "Boarding complete", met: true },
-      common.enginesReady,
-      { label: "Below takeoff speed", met: gs < 35 },
+      telemetry.onRunway === true ? common.runway : common.enginesReady,
+      { label: telemetry.onRunway === true ? "Holding below takeoff roll" : "Below takeoff speed", met: gs < 35 },
     ],
-    takeoff: [common.onGround, { label: "Accelerating", met: gs >= 35 }, common.takeoffPower],
+    takeoff: [common.onGround, common.runway, { label: "Accelerating", met: gs >= 20 }, common.takeoffPower],
     initial_climb: [common.airborne, common.lowClimb, { label: "Positive rate", met: vs > 100 }],
     climb: [common.airborne, common.aboveFive, common.climbRate],
     cruise: [common.airborne, common.aboveFive, common.levelFlight],
     descent: [common.airborne, common.descentRate, { label: "Descent intent verified", met: phase === "descent" }],
     approach: [common.airborne, common.destination30, { label: "Descent/terminal profile", met: phase === "approach" }],
-    final_approach: [common.airborne, common.final, { label: "Landing configuration", met: telemetry.gear === 1 || phase === "final_approach" }],
-    landing: [common.onGround, common.touchdown, { label: "Arrival sequence active", met: true }],
+    final_approach: [common.airborne, common.final, common.runway, { label: "Landing configuration", met: telemetry.gear === 1 || phase === "final_approach" }],
+    landing: [common.onGround, common.touchdown, common.runway, { label: "Arrival sequence active", met: true }],
     taxi_in: [common.onGround, common.taxiSpeed, { label: "After landing", met: true }],
     deboarding: [common.onGround, common.parked, common.enginesOff, common.brakesSet],
   };
@@ -147,7 +153,7 @@ const CrewAssistant = ({ telemetry, isConnected }) => {
         <View style={styles.phaseBlock}>
           <Text style={[styles.microLabel, { color: theme.textDim }]}>Next Phase</Text>
           <Text style={[styles.nextPhaseTitle, { color: nextDetails ? theme.accentText : theme.textMuted }]}>
-            {nextDetails ? nextDetails.title : "Complete"}
+            {nextDetails ? nextDetails.title : details.fallbackNextTitle || "Complete"}
           </Text>
         </View>
       </View>

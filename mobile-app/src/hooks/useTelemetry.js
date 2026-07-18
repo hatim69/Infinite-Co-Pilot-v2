@@ -60,9 +60,33 @@ const FLAP_CALLOUT_PHASES = new Set([
 ]);
 
 const isPhaseActive = (telemetry, phaseTracker, phases) =>
-  phases.has(telemetry.phase) ||
-  phases.has(phaseTracker.currentPhase) ||
-  phases.has(phaseTracker.candidatePhase);
+  phaseTracker.phaseReady &&
+  phases.has(telemetry.phase) &&
+  phases.has(phaseTracker.currentPhase);
+
+const PHASE_SYNCING = "syncing";
+const PHASE_SYNC_MIN_MS = 2500;
+const POSITIVE_RATE_MIN_AGL_FT = 50;
+const POSITIVE_RATE_MAX_AGL_FT = 1500;
+const POSITIVE_RATE_MIN_VS_FPM = 150;
+const PHASE_READY_COMMANDS = [
+  "infiniteflight/app_state",
+  "aircraft/0/is_on_ground",
+  "aircraft/0/groundspeed",
+  "aircraft/0/vertical_speed",
+  "aircraft/0/altitude_msl",
+  "aircraft/0/altitude_agl",
+  "aircraft/0/is_on_runway",
+];
+
+const createPhaseSyncState = () => ({
+  connectedAt: 0,
+  phaseReady: false,
+  seenCommands: new Set(),
+});
+
+const arePhaseCommandsReady = (seenCommands) =>
+  PHASE_READY_COMMANDS.every((command) => seenCommands.has(command));
 
 /** All IF Connect API parameters to poll */
 const POLL_COMMANDS = [
@@ -172,7 +196,7 @@ const INITIAL_TELEMETRY = {
   turbulence: 0,
   performance: null,
   appState: -1,
-  phase: "preflight",
+  phase: PHASE_SYNCING,
 };
 
 export function useTelemetry(disableAutoConnect = false) {
@@ -194,6 +218,7 @@ export function useTelemetry(disableAutoConnect = false) {
   const discoveredDevicesRef = useRef([]);
   const autoConnectTimerRef = useRef(null);
   const phaseTrackerRef = useRef(createPhaseTracker());
+  const phaseSyncRef = useRef(createPhaseSyncState());
 
   const flagsRef = useRef({
     eightyKnots: false,
@@ -292,16 +317,29 @@ export function useTelemetry(disableAutoConnect = false) {
       console.log("[Discovery] UDP socket creation/bind error (likely unsupported environment or hot-reload):", e);
     }
 
+    const resetPhaseState = (connectedAt = 0) => {
+      phaseTrackerRef.current = createPhaseTracker();
+      phaseSyncRef.current = createPhaseSyncState();
+      phaseSyncRef.current.connectedAt = connectedAt;
+      phaseTrackerRef.current.phaseReady = false;
+    };
+
     // ─── 2. IF Connect client data handler ────────────────────────────────
 
     const dataHandler = ({ command, data }) => {
       const state = stateRef.current;
       const flags = flagsRef.current;
+      const now = Date.now();
+      const phaseSync = phaseSyncRef.current;
+
+      if (PHASE_READY_COMMANDS.includes(command)) {
+        phaseSync.seenCommands.add(command);
+      }
 
       // Gate announcements — suppress first 2.5 seconds after connect
       const speak = (msg, options = {}) => {
         const opts = typeof options === 'string' ? { tone: options } : { tone: "callout", ...options };
-        if (!opts.ignoreConnectGate && (!flags.connectedAt || Date.now() - flags.connectedAt < 2500)) return;
+        if (!opts.ignoreConnectGate && (!flags.connectedAt || now - flags.connectedAt < 2500)) return;
         speechManager.speak(msg, opts);
       };
 
@@ -326,7 +364,7 @@ export function useTelemetry(disableAutoConnect = false) {
               ifConnect.close(() => {});
               setConnectionStatus("AWAITING SIMULATOR LINK...");
               setConnectedIp("");
-              phaseTrackerRef.current = createPhaseTracker();
+              resetPhaseState();
               setTelemetry({ ...INITIAL_TELEMETRY });
               if (flagsRef.current.isManualConnection) {
                 Alert.alert(
@@ -366,21 +404,21 @@ export function useTelemetry(disableAutoConnect = false) {
             const inTakeoffRoll = state.onGround && isPhaseActive(state, phaseTrackerRef.current, TAKEOFF_ROLL_PHASES);
             const crossing = crossedThreshold(prevKts, kts, 80);
             if (inTakeoffRoll && crossing.ascending && !flags.eightyKnots) {
-              speak("80 knots", "callout");
+              speak("80 knots", { tone: "callout", ignoreConnectGate: true });
               flags.eightyKnots = true;
             }
 
             if (inTakeoffRoll && state.performance) {
               if (kts >= state.performance.v1 && !flags.v1Announced) {
-                speak("V1", "callout");
+                speak("V1", { tone: "callout", ignoreConnectGate: true });
                 flags.v1Announced = true;
               }
               if (kts >= state.performance.vr && !flags.vrAnnounced) {
-                speak("Rotate", "callout");
+                speak("Rotate", { tone: "callout", ignoreConnectGate: true });
                 flags.vrAnnounced = true;
               }
               if (kts >= state.performance.v2 && !flags.v2Announced) {
-                speak("V2", "callout");
+                speak("V2", { tone: "callout", ignoreConnectGate: true });
                 flags.v2Announced = true;
               }
             }
@@ -396,8 +434,7 @@ export function useTelemetry(disableAutoConnect = false) {
             state.onGround &&
             gs < 30 &&
             !flags.welcome &&
-            isPhaseActive(state, phaseTrackerRef.current, ARRIVAL_GROUND_PHASES) &&
-            (flags.hasFlown || phaseTrackerRef.current.totalAirborneMs >= 120000)
+            isPhaseActive(state, phaseTrackerRef.current, ARRIVAL_GROUND_PHASES)
           ) {
             const cityName = airportNames[state.airport] || state.airport || "your destination";
             const liveryName = state.livery || "";
@@ -484,17 +521,15 @@ export function useTelemetry(disableAutoConnect = false) {
           updateNext("agl", agl);
 
           if (prevAgl !== null) {
-            const perf = calculatePerformance(state.name, state.weight);
-            const flySpeed = perf.v2 > 60 ? perf.v2 : 130;
             if (
               !state.onGround &&
-              state.vs > 300 &&
-              agl >= 300 &&
-              state.ias >= flySpeed &&
+              state.vs > POSITIVE_RATE_MIN_VS_FPM &&
+              agl >= POSITIVE_RATE_MIN_AGL_FT &&
+              agl <= POSITIVE_RATE_MAX_AGL_FT &&
               isPhaseActive(state, phaseTrackerRef.current, TAKEOFF_SEQUENCE_PHASES) &&
               !flags.positiveRate
             ) {
-              speak("Positive rate. Gear up.", "callout");
+              speak("Positive rate. Gear up.", { tone: "callout", ignoreConnectGate: true });
               flags.positiveRate = true;
             }
           }
@@ -896,6 +931,7 @@ export function useTelemetry(disableAutoConnect = false) {
 
         // ── Welcome message (triggered when we have enough data) ──────────
         if (
+          phaseSyncRef.current.phaseReady &&
           !flags.welcomeMessagePlayed &&
           next.name !== "" &&
           next.weight > 0 &&
@@ -919,7 +955,21 @@ export function useTelemetry(disableAutoConnect = false) {
         // ── Phase derivation ──────────────────────────────────────────────
         // Runs on every poll packet so time-hysteresis can mature even when
         // the simulator is holding perfectly steady values.
-        updateNext("phase", deriveFlightPhase(next, phaseTrackerRef.current, flags, Date.now()));
+        const syncStartedAt = phaseSync.connectedAt || flags.connectedAt;
+        const phaseReady =
+          arePhaseCommandsReady(phaseSync.seenCommands) &&
+          syncStartedAt &&
+          now - syncStartedAt >= PHASE_SYNC_MIN_MS;
+
+        phaseSync.phaseReady = Boolean(phaseReady);
+        phaseTrackerRef.current.phaseReady = phaseSync.phaseReady;
+
+        updateNext(
+          "phase",
+          phaseSync.phaseReady
+            ? deriveFlightPhase(next, phaseTrackerRef.current, flags, now)
+            : PHASE_SYNCING
+        );
 
         return updated ? next : prev;
       });
@@ -934,13 +984,10 @@ export function useTelemetry(disableAutoConnect = false) {
       setConnectionStatus("CONNECTING...");
       setConnectedIp(ip);
 
-      // Reset displayed telemetry, but preserve phase memory so a reconnect
-      // into an active flight does not look like a brand-new preflight.
+      // Reset displayed telemetry and phase memory. A short sync gate below
+      // prevents stale phases from leaking into a fresh flight.
       setTelemetry({ ...INITIAL_TELEMETRY });
-      phaseTrackerRef.current.candidatePhase = null;
-      phaseTrackerRef.current.candidateSince = 0;
-      phaseTrackerRef.current.lastTickAt = 0;
-      phaseTrackerRef.current.hasBootstrapped = false;
+      resetPhaseState();
       const flags = flagsRef.current;
       Object.keys(flags).forEach((k) => {
         if (typeof flags[k] === "boolean") flags[k] = false;
@@ -955,6 +1002,7 @@ export function useTelemetry(disableAutoConnect = false) {
             // Success — register all poll commands, but stay in VERIFYING until app_state or aircraft name is received
             setConnectionStatus("VERIFYING STATE...");
             flags.connectedAt = Date.now();
+            phaseSyncRef.current.connectedAt = flags.connectedAt;
             speechManager.stopBoardingMusic();
 
             POLL_COMMANDS.forEach((cmd) => {
@@ -973,6 +1021,7 @@ export function useTelemetry(disableAutoConnect = false) {
       console.log("[useTelemetry] Connection error:", err.message);
       setConnectionStatus("AWAITING SIMULATOR LINK...");
       setConnectedIp("");
+      resetPhaseState();
       setTelemetry({ ...INITIAL_TELEMETRY });
       isConnectedRef.current = false;
       ifConnect.close(() => {});
@@ -983,6 +1032,7 @@ export function useTelemetry(disableAutoConnect = false) {
     const disconnectHandler = () => {
       setConnectionStatus("AWAITING SIMULATOR LINK...");
       setConnectedIp("");
+      resetPhaseState();
       setTelemetry({ ...INITIAL_TELEMETRY });
       isConnectedRef.current = false;
       ifConnect.close(() => {});
@@ -993,6 +1043,8 @@ export function useTelemetry(disableAutoConnect = false) {
     const reconnectHandler = () => {
       setConnectionStatus("VERIFYING STATE...");
       flagsRef.current.connectedAt = Date.now();
+      resetPhaseState(flagsRef.current.connectedAt);
+      setTelemetry({ ...INITIAL_TELEMETRY });
     };
 
     ifConnect.on("error", errorHandler);
@@ -1066,6 +1118,8 @@ export function useTelemetry(disableAutoConnect = false) {
           ifConnect.close(() => {});
           setConnectionStatus("AWAITING SIMULATOR LINK...");
           setConnectedIp("");
+          phaseTrackerRef.current = createPhaseTracker();
+          phaseSyncRef.current = createPhaseSyncState();
           setTelemetry({ ...INITIAL_TELEMETRY });
         }
       }, 5000);
@@ -1099,6 +1153,8 @@ export function useTelemetry(disableAutoConnect = false) {
     ifConnect.close(() => {});
     setConnectionStatus("AWAITING SIMULATOR LINK...");
     setConnectedIp("");
+    phaseTrackerRef.current = createPhaseTracker();
+    phaseSyncRef.current = createPhaseSyncState();
     setTelemetry({ ...INITIAL_TELEMETRY });
     speechManager.stopAll();
     speechManager.speak("Client disconnected.", { tone: "notice" });

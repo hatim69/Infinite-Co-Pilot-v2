@@ -116,29 +116,19 @@ class SpeechManager {
   async _playChimeNow() {
     if (!this.chimeEnabled) return false;
 
-    const play = async () => {
-      if (!this.chimePlayer) {
-        this.chimePlayer = createAudioPlayer(require("../../assets/chime.mp3"));
-      } else {
-        await this.chimePlayer.seekTo(0);
+    try {
+      if (this.chimePlayer) {
+        this._disposePlayer(this.chimePlayer, { pause: true });
+        this.chimePlayer = null;
       }
+      
+      this.chimePlayer = createAudioPlayer(require("../../assets/chime.mp3"));
       this.chimePlayer.volume = this.masterVolume;
       this.chimePlayer.play();
-    };
-
-    try {
-      await play();
       return true;
     } catch (e) {
-      this._disposePlayer(this.chimePlayer);
-      this.chimePlayer = null;
-      try {
-        await play();
-        return true;
-      } catch (retryError) {
-        console.log("[Speech] Chime play failed:", retryError);
-        return false;
-      }
+      console.log("[Speech] Chime play failed:", e);
+      return false;
     }
   }
 
@@ -170,7 +160,7 @@ class SpeechManager {
         if (this.currentCalloutFinish === finish) {
           this.currentCalloutFinish = null;
         }
-        this._disposePlayer(player, { pause: false });
+        this._disposePlayer(player, { pause: true });
         resolve();
       };
 
@@ -229,12 +219,17 @@ class SpeechManager {
 
         try {
           this._stopCurrentAnnouncement();
+          if (this.currentCalloutFinish) {
+            this.currentCalloutFinish(); // Interrupt previous callout to prevent backlog delays
+          }
           if (this.expoSpeechActive) {
             Speech.stop();
             this.expoSpeechActive = false;
           }
           const audioAsset = staticAudioEntry[this.voicePreference] || staticAudioEntry.female;
-          await this._playStaticAudio(
+          
+          // Fire and forget (don't await) to let rapid callouts play instantly
+          this._playStaticAudio(
             audioAsset,
             profile.volume * this.masterVolume * this.coPilotVolume,
             {
@@ -400,7 +395,8 @@ class SpeechManager {
     if (tone === "callout") {
       return text
         .replace(/,\s*/g, ". ")
-        .replace(/\b(Gear up|Flaps up|Landing gear up)\b/g, "$1.")
+        .replace(/\b(Gear up|Flaps up|Landing gear up)\b/ig, "$1.")
+        .replace(/\.\.+/g, ".")
         .trim();
     }
     if (tone === "caution") {
