@@ -512,7 +512,7 @@ class IFConnectClient {
     this._reconnectTimer = setTimeout(() => {
       if (!this._isConnected) return;
       console.log('[IFConnect] Attempting reconnect...');
-      this._emit('disconnect', { message: 'Connection lost, reconnecting...' });
+      this._emit('reconnecting', { message: 'Connection lost, reconnecting...' });
       this._receiveBuffer = null;
       this._isPollWaiting = false;
 

@@ -11,7 +11,7 @@
  */
 
 import { useState, useEffect, useRef } from "react";
-import { Alert } from "react-native";
+import { Alert, AppState } from "react-native";
 import dgram from "react-native-udp";
 import ifConnect from "../utils/ifConnectClient";
 import { speechManager } from "../utils/speech";
@@ -66,6 +66,8 @@ const isPhaseActive = (telemetry, phaseTracker, phases) =>
 
 const PHASE_SYNCING = "syncing";
 const PHASE_SYNC_MIN_MS = 2500;
+const CLIMB_CALLOUT_MIN_VS_FPM = 150;
+const DESCENT_CALLOUT_MAX_VS_FPM = -150;
 const POSITIVE_RATE_MIN_AGL_FT = 50;
 const POSITIVE_RATE_MAX_AGL_FT = 1500;
 const POSITIVE_RATE_MIN_VS_FPM = 150;
@@ -87,6 +89,21 @@ const createPhaseSyncState = () => ({
 
 const arePhaseCommandsReady = (seenCommands) =>
   PHASE_READY_COMMANDS.every((command) => seenCommands.has(command));
+
+const isActiveStateValue = (value) =>
+  value === true ||
+  value === 1 ||
+  (typeof value === "number" && value > 0);
+
+const isClimbingForCallout = (telemetry) =>
+  telemetry.onGround === false &&
+  typeof telemetry.vs === "number" &&
+  telemetry.vs > CLIMB_CALLOUT_MIN_VS_FPM;
+
+const isDescendingForCallout = (telemetry) =>
+  telemetry.onGround === false &&
+  typeof telemetry.vs === "number" &&
+  telemetry.vs < DESCENT_CALLOUT_MAX_VS_FPM;
 
 /** All IF Connect API parameters to poll */
 const POLL_COMMANDS = [
@@ -171,7 +188,9 @@ const INITIAL_TELEMETRY = {
   batteryAmp: 0,
   batteryVolts: 0,
   apu: -1,
-  pushback: -1,
+  pushback: 0,
+  pushbackTug: false,
+  isPushing: false,
   beltLoader: -1,
   catering: -1,
   gpu: -1,
@@ -217,8 +236,10 @@ export function useTelemetry(disableAutoConnect = false) {
   const disconnectDeviceRef = useRef(null);
   const discoveredDevicesRef = useRef([]);
   const autoConnectTimerRef = useRef(null);
+  const appStateRef = useRef(AppState.currentState || "active");
   const phaseTrackerRef = useRef(createPhaseTracker());
   const phaseSyncRef = useRef(createPhaseSyncState());
+  const boardingMusicPrefetchLiveryRef = useRef("");
 
   const flagsRef = useRef({
     eightyKnots: false,
@@ -234,6 +255,8 @@ export function useTelemetry(disableAutoConnect = false) {
     boardingMusicStarted: false,
     boardingMusicStopped: false,
     welcomeMessagePlayed: false,
+    pendingAnnouncements: [],
+    seatbeltHydrated: false,
     v1Announced: false,
     vrAnnounced: false,
     v2Announced: false,
@@ -247,6 +270,13 @@ export function useTelemetry(disableAutoConnect = false) {
   useEffect(() => {
     stateRef.current = telemetry;
   }, [telemetry]);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      appStateRef.current = state;
+    });
+    return () => sub.remove();
+  }, []);
 
   useEffect(() => {
     // ─── 1. UDP Auto-Discovery ──────────────────────────────────────────────
@@ -285,13 +315,26 @@ export function useTelemetry(disableAutoConnect = false) {
             setDiscoveredDevices([...discoveredDevicesRef.current]);
           }
 
-          // If State is not 1 (or "Playing"), we assume it's in the menu
-          const stateStr = String(data.State || data.state || data.AppState || data.appState);
+          // Extract state. Be careful with falsy values like 0.
+          const stateVal = data.State ?? data.state ?? data.AppState ?? data.appState;
+          const stateStr = stateVal !== undefined ? String(stateVal) : undefined;
           const isReady = stateStr === "1" || stateStr === "Playing";
+          const isMenu = stateStr === "0" || stateStr === "Menu";
 
           // Auto-connect after 1.5s only if there's exactly 1 device discovered
           if (!isConnectedRef.current && connectToIFRef.current && isReady) {
-            if (!autoConnectTimerRef.current && !disableAutoConnectRef.current) {
+            const shouldConnectImmediately =
+              appStateRef.current !== "active" &&
+              discoveredDevicesRef.current.length === 1 &&
+              !disableAutoConnectRef.current;
+
+            if (shouldConnectImmediately) {
+              if (autoConnectTimerRef.current) {
+                clearTimeout(autoConnectTimerRef.current);
+                autoConnectTimerRef.current = null;
+              }
+              connectToIFRef.current(discoveredDevicesRef.current[0].ip, false);
+            } else if (!autoConnectTimerRef.current && !disableAutoConnectRef.current) {
               autoConnectTimerRef.current = setTimeout(() => {
                 if (discoveredDevicesRef.current.length === 1 && !isConnectedRef.current && connectToIFRef.current && !disableAutoConnectRef.current) {
                   connectToIFRef.current(discoveredDevicesRef.current[0].ip, false);
@@ -299,8 +342,8 @@ export function useTelemetry(disableAutoConnect = false) {
                 autoConnectTimerRef.current = null;
               }, 1500);
             }
-          } else if (isConnectedRef.current && !isReady) {
-            // Simulator broadcasted that it's in the menu! Instant disconnect.
+          } else if (isConnectedRef.current && isMenu) {
+            // Simulator explicitly broadcasted that it's in the menu! Instant disconnect.
             if (disconnectDeviceRef.current) {
               disconnectDeviceRef.current();
             }
@@ -324,10 +367,21 @@ export function useTelemetry(disableAutoConnect = false) {
       phaseTrackerRef.current.phaseReady = false;
     };
 
+    const resetAnnouncementState = ({ isManualConnection } = {}) => {
+      const flags = flagsRef.current;
+      const manualState = isManualConnection ?? flags.isManualConnection;
+      Object.keys(flags).forEach((k) => {
+        if (typeof flags[k] === "boolean") flags[k] = false;
+        if (typeof flags[k] === "number") flags[k] = 0;
+      });
+      flags.pendingAnnouncements = [];
+      flags.isManualConnection = manualState;
+      return flags;
+    };
+
     // ─── 2. IF Connect client data handler ────────────────────────────────
 
     const dataHandler = ({ command, data }) => {
-      const state = stateRef.current;
       const flags = flagsRef.current;
       const now = Date.now();
       const phaseSync = phaseSyncRef.current;
@@ -340,10 +394,23 @@ export function useTelemetry(disableAutoConnect = false) {
       const speak = (msg, options = {}) => {
         const opts = typeof options === 'string' ? { tone: options } : { tone: "callout", ...options };
         if (!opts.ignoreConnectGate && (!flags.connectedAt || now - flags.connectedAt < 2500)) return;
+        if (!flags.welcomeMessagePlayed && !opts.allowBeforeWelcome) {
+          flags.pendingAnnouncements.push({ msg, options: opts });
+          return;
+        }
         speechManager.speak(msg, opts);
       };
 
+      const flushPendingAnnouncements = () => {
+        const pending = flags.pendingAnnouncements;
+        flags.pendingAnnouncements = [];
+        pending.forEach(({ msg, options }) => {
+          speechManager.speak(msg, options);
+        });
+      };
+
       setTelemetry((prev) => {
+        const state = prev;
         const next = { ...prev };
         let updated = false;
 
@@ -478,36 +545,40 @@ export function useTelemetry(disableAutoConnect = false) {
 
             const inClimbAnnouncementPhase = isPhaseActive(state, phaseTrackerRef.current, CLIMB_ANNOUNCEMENT_PHASES);
             const inDescentAnnouncementPhase = isPhaseActive(state, phaseTrackerRef.current, DESCENT_ANNOUNCEMENT_PHASES);
+            const allowClimbAltitudeCallout =
+              inClimbAnnouncementPhase || (phaseTrackerRef.current.phaseReady && isClimbingForCallout(state));
+            const allowDescentAltitudeCallout =
+              inDescentAnnouncementPhase || (phaseTrackerRef.current.phaseReady && isDescendingForCallout(state));
 
-            if (inClimbAnnouncementPhase && alt(5000).ascending && !flags.alt5k) {
+            if (allowClimbAltitudeCallout && alt(5000).ascending && !flags.alt5k) {
               speak("Passing five thousand.", "notice");
               flags.alt5k = true;
             }
-            if (inDescentAnnouncementPhase && alt(5000).descending && flags.alt5k) {
+            if (allowDescentAltitudeCallout && alt(5000).descending && flags.alt5k) {
               speak("Passing five thousand.", "notice");
               flags.alt5k = false;
             }
-            if (inClimbAnnouncementPhase && alt(10000).ascending && !flags.alt10k) {
-              speak("Ten thousand. Landing lights off.", "caution");
+            if (allowClimbAltitudeCallout && alt(10000).ascending && !flags.alt10k) {
+              speak("Ten thousand. Landing lights off.", { tone: "caution", priority: true });
               flags.alt10k = true;
             }
-            if (inDescentAnnouncementPhase && alt(10000).descending && flags.alt10k) {
-              speak("Ten thousand. Landing lights on.", "notice");
+            if (allowDescentAltitudeCallout && alt(10000).descending && flags.alt10k) {
+              speak("Ten thousand. Landing lights on.", { tone: "notice", priority: true });
               flags.alt10k = false;
             }
-            if (inClimbAnnouncementPhase && alt(15000).ascending && !flags.alt15k) {
+            if (allowClimbAltitudeCallout && alt(15000).ascending && !flags.alt15k) {
               speak("Passing one-five thousand.", "notice");
               flags.alt15k = true;
             }
-            if (inDescentAnnouncementPhase && alt(15000).descending && flags.alt15k) {
+            if (allowDescentAltitudeCallout && alt(15000).descending && flags.alt15k) {
               speak("Passing one-five thousand.", "notice");
               flags.alt15k = false;
             }
-            if (inClimbAnnouncementPhase && alt(24000).ascending && !flags.alt24k) {
+            if (allowClimbAltitudeCallout && alt(24000).ascending && !flags.alt24k) {
               speak("Passing Flight Level two-four-zero.", "notice");
               flags.alt24k = true;
             }
-            if (inDescentAnnouncementPhase && alt(24000).descending && flags.alt24k) {
+            if (allowDescentAltitudeCallout && alt(24000).descending && flags.alt24k) {
               speak("Descending Flight Level two-four-zero.", "notice");
               flags.alt24k = false;
             }
@@ -728,14 +799,22 @@ export function useTelemetry(disableAutoConnect = false) {
 
 
         // ── Pushback ─────────────────────────────────────────────────────
-        if (
-          command === "aircraft/0/is_pushback_active" ||
-          command === "aircraft/0/ground_services/pushback/state"
-        ) {
-          const on = data === 1 || data === true;
-          if (state.pushback === 0 && on) speak("Pushback started.", "notice");
-          else if (state.pushback === 1 && !on) speak("Pushback ended.", "notice");
-          updateNext("pushback", on ? 1 : 0);
+        if (command === "aircraft/0/ground_services/pushback/state") {
+          updateNext("pushbackTug", isActiveStateValue(data));
+        } else if (command === "aircraft/0/is_pushback_active") {
+          updateNext("isPushing", isActiveStateValue(data));
+        }
+
+        const pushbackEngaged = next.pushbackTug || next.isPushing;
+        if (next.isPushing && !state.isPushing) {
+          speak("Pushback started.", "notice");
+        }
+
+        if (pushbackEngaged && state.pushback === 0) {
+          updateNext("pushback", 1);
+        } else if (!pushbackEngaged && state.pushback === 1) {
+          speak("Pushback ended.", "notice");
+          updateNext("pushback", 0);
         }
 
         // ── Runway / Destination ───────────────────────────────────────
@@ -839,30 +918,47 @@ export function useTelemetry(disableAutoConnect = false) {
         if (command === "aircraft/0/systems/signs/seatbelt") {
           const on = data === 1 || data === true;
           const val = on ? 1 : 0;
+          const seatbeltChanged =
+            flags.seatbeltHydrated &&
+            state.seatbelt !== -1 &&
+            val !== state.seatbelt;
+          const inBoardingAnnouncementPhase =
+            isPhaseActive(state, phaseTrackerRef.current, BOARDING_ANNOUNCEMENT_PHASES) ||
+            (flags.boardingMusicStarted && !flags.boardingMusicStopped);
+          const shouldPlayBoardingAnnouncement =
+            on &&
+            state.onGround &&
+            inBoardingAnnouncementPhase &&
+            !flags.boardingAnnouncementPlayed;
 
           if (on && flags.boardingMusicStarted && !flags.boardingMusicStopped) {
             flags.boardingMusicStopped = true;
-            speechManager.stopBoardingMusic();
+            if (!shouldPlayBoardingAnnouncement) {
+              speechManager.stopBoardingMusic({ fade: true });
+            }
           }
 
-          if (state.seatbelt !== -1 && val !== state.seatbelt) {
-            if (
-              on &&
-              state.onGround &&
-              isPhaseActive(state, phaseTrackerRef.current, BOARDING_ANNOUNCEMENT_PHASES) &&
-              !flags.boardingAnnouncementPlayed
-            ) {
+          if (seatbeltChanged) {
+            if (shouldPlayBoardingAnnouncement) {
               flags.boardingAnnouncementPlayed = true;
-              speechManager.playBoardingAnnouncement(state.livery);
+              speak("Seatbelt signs on.", {
+                tone: "notice",
+                withChime: true,
+                priority: true,
+                afterSpeech: () =>
+                  speechManager.playBoardingAnnouncement(state.livery, {
+                    fadeBoardingMusic: true,
+                  }),
+              });
             } else {
               speak(`Seatbelt signs ${on ? "on" : "off"}.`, {
                 tone: "notice",
                 withChime: true,
                 priority: true,
-                ignoreConnectGate: true,
               });
             }
           }
+          flags.seatbeltHydrated = true;
           updateNext("seatbelt", val);
         }
 
@@ -931,20 +1027,21 @@ export function useTelemetry(disableAutoConnect = false) {
 
         // ── Welcome message (triggered when we have enough data) ──────────
         if (
-          phaseSyncRef.current.phaseReady &&
           !flags.welcomeMessagePlayed &&
           next.name !== "" &&
           next.weight > 0 &&
-          next.onGround !== undefined &&
-          next.time !== "---"
+          next.onGround !== undefined
+          // next.time !== "---"
         ) {
           flags.welcomeMessagePlayed = true;
+          speechManager.stopAll();
           speechManager.speak(
             next.onGround
               ? "Welcome to the flight Captain."
               : "Welcome back to the flight Captain.",
-            { tone: "briefing" }
+            { tone: "briefing", priority: true, allowBeforeWelcome: true }
           );
+          flushPendingAnnouncements();
         }
 
         // ── Recalculate performance if aircraft/weight changed ────────────
@@ -988,12 +1085,7 @@ export function useTelemetry(disableAutoConnect = false) {
       // prevents stale phases from leaking into a fresh flight.
       setTelemetry({ ...INITIAL_TELEMETRY });
       resetPhaseState();
-      const flags = flagsRef.current;
-      Object.keys(flags).forEach((k) => {
-        if (typeof flags[k] === "boolean") flags[k] = false;
-        if (typeof flags[k] === "number") flags[k] = 0;
-      });
-      flags.isManualConnection = isManual;
+      const flags = resetAnnouncementState({ isManualConnection: isManual });
 
       // Close any existing connection, then connect fresh
       ifConnect.close(() => {
@@ -1025,6 +1117,7 @@ export function useTelemetry(disableAutoConnect = false) {
       setTelemetry({ ...INITIAL_TELEMETRY });
       isConnectedRef.current = false;
       ifConnect.close(() => {});
+      resetAnnouncementState({ isManualConnection: false });
       speechManager.stopAll();
       speechManager.speak("Client disconnected.", { tone: "notice" });
     };
@@ -1036,19 +1129,26 @@ export function useTelemetry(disableAutoConnect = false) {
       setTelemetry({ ...INITIAL_TELEMETRY });
       isConnectedRef.current = false;
       ifConnect.close(() => {});
+      resetAnnouncementState({ isManualConnection: false });
       speechManager.stopAll();
       speechManager.speak("Client disconnected.", { tone: "notice" });
     };
 
     const reconnectHandler = () => {
       setConnectionStatus("VERIFYING STATE...");
-      flagsRef.current.connectedAt = Date.now();
-      resetPhaseState(flagsRef.current.connectedAt);
-      setTelemetry({ ...INITIAL_TELEMETRY });
+      const now = Date.now();
+      flagsRef.current.connectedAt = now;
+      resetPhaseState(now);
+      setTelemetry((prev) => ({ ...prev, phase: PHASE_SYNCING }));
+    };
+
+    const reconnectingHandler = () => {
+      setConnectionStatus("RECONNECTING...");
     };
 
     ifConnect.on("error", errorHandler);
     ifConnect.on("disconnect", disconnectHandler);
+    ifConnect.on("reconnecting", reconnectingHandler);
     ifConnect.on("connect", reconnectHandler);
 
     // ─── 5. Cleanup ───────────────────────────────────────────────────────
@@ -1059,6 +1159,7 @@ export function useTelemetry(disableAutoConnect = false) {
       ifConnect.off("data", dataHandler);
       ifConnect.off("error", errorHandler);
       ifConnect.off("disconnect", disconnectHandler);
+      ifConnect.off("reconnecting", reconnectingHandler);
       ifConnect.off("connect", reconnectHandler);
       ifConnect.close(() => {});
     };
@@ -1071,12 +1172,23 @@ export function useTelemetry(disableAutoConnect = false) {
     const anyEngineRunning = Object.values(telemetry.engines || {}).some((s) => s > 0);
     const hasPower = telemetry.battery === 1 || telemetry.apu === 2 || telemetry.gpu === 1;
 
+    if (
+      telemetry.onGround &&
+      hasPower &&
+      telemetry.livery &&
+      boardingMusicPrefetchLiveryRef.current !== telemetry.livery
+    ) {
+      boardingMusicPrefetchLiveryRef.current = telemetry.livery;
+      speechManager.preloadBoardingMusic(telemetry.livery);
+    }
+
     const canStartBoardingMusic =
       telemetry.onGround &&
       !anyEngineRunning &&
       telemetry.beacon === 0 &&
       hasPower &&
       telemetry.livery && // Ensure livery has arrived
+      telemetry.seatbelt !== 1 &&
       !flagsRef.current.boardingMusicStopped;
 
     if (canStartBoardingMusic && !flagsRef.current.boardingMusicStarted) {
@@ -1098,6 +1210,7 @@ export function useTelemetry(disableAutoConnect = false) {
     telemetry.gpu,
     telemetry.name,
     telemetry.livery,
+    telemetry.seatbelt,
   ]);
 
   // ─── Siren logic (brake + throttle + engines) ──────────────────────────────

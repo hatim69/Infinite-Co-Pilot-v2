@@ -14,6 +14,7 @@
  */
 
 import * as Speech from "expo-speech";
+import { Asset } from "expo-asset";
 import { createAudioPlayer, setAudioModeAsync, preload } from "expo-audio";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getCachedAudioUri } from "./audioCache";
@@ -24,12 +25,29 @@ import { staticAudioMap } from "./staticAudioMap";
 // e.g. EXPO_PUBLIC_POLLY_BACKEND_URL=http://192.168.1.10:3001
 const POLLY_BACKEND_URL = process.env.EXPO_PUBLIC_POLLY_BACKEND_URL || "";
 const PRECISION_CALLOUT_MAX_WAIT_MS = {
-  "80 knots": 1200,
-  V1: 700,
-  Rotate: 800,
-  V2: 700,
+  "80 knots": 2500,
+  V1: 2000,
+  Rotate: 2200,
+  V2: 2000,
 };
-const DEFAULT_CALLOUT_MAX_WAIT_MS = 1600;
+const DEFAULT_CALLOUT_MAX_WAIT_MS = 5000;
+const EXPO_SPEECH_MIN_TIMEOUT_MS = 3500;
+const EXPO_SPEECH_MAX_TIMEOUT_MS = 45000;
+const EXPO_SPEECH_MS_PER_WORD = 520;
+const QUEUE_ACTION_TIMEOUT_MS = 15000;
+const STATIC_AUDIO_START_OFFSET_SEC = 0.035;
+const BOARDING_MUSIC_FADE_MS = 1400;
+const CHIME_AUDIO_ASSET = require("../../assets/chime.mp3");
+const BACKGROUND_AUDIO_ASSET = require("../../assets/silent.m4a");
+const LOCK_SCREEN_ARTWORK_ASSET = require("../../assets/images/icon.png");
+
+const normalizeSpeechOptions = (options, defaultTone = "default") => {
+  if (typeof options === "string") return { tone: options };
+  return { tone: defaultTone, ...(options || {}) };
+};
+
+const hasUriScheme = (value) =>
+  typeof value === "string" && /^[a-z][a-z0-9+.-]*:/i.test(value);
 
 class SpeechManager {
   constructor() {
@@ -59,6 +77,13 @@ class SpeechManager {
     this.currentAnnouncementFinish = null;
     this.currentCalloutPlayer = null;
     this.currentCalloutFinish = null;
+    this._boardingMusicFadeTimer = null;
+    this._lockScreenArtworkUrl = null;
+    this._backgroundSessionState = { active: false, connectedIp: "" };
+    this._backgroundMediaRefreshTimers = new Set();
+    this._backgroundAnchorResumeTimer = null;
+    this._backgroundAnchorStatusSubscription = null;
+    this._boardingMusicPrefetches = new Map();
     this._audioConfigured = false;
     this.isProcessingQueue = false;
     this.isProcessingCalloutQueue = false;
@@ -68,7 +93,7 @@ class SpeechManager {
     // Avoids repeat network calls for identical text+voice combinations.
     this.pollyCache = new Map();
 
-    this.init();
+    this.ready = this.init();
   }
 
   _disposePlayer(player, { pause = true } = {}) {
@@ -95,13 +120,228 @@ class SpeechManager {
     else this.speechQueue.splice(firstNormalIndex, 0, entry);
   }
 
+  _enqueueAction(action, options = {}) {
+    this._enqueueSpeech({ action, options });
+    this.processQueue();
+  }
+
+  async _runQueueAction(action) {
+    let timeoutId;
+    try {
+      await Promise.race([
+        Promise.resolve().then(action),
+        new Promise((resolve) => {
+          timeoutId = setTimeout(() => {
+            console.warn("[Speech] Queue action timed out; continuing queue.");
+            resolve();
+          }, QUEUE_ACTION_TIMEOUT_MS);
+        }),
+      ]);
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
+  }
+
   _enqueueCallout(entry) {
-    this.calloutQueue.push(entry);
-    this.processCalloutQueue();
+    this._enqueueSpeech({
+      ...entry,
+      options: { ...(entry.options || {}), priority: true, _staticOwner: "callout" },
+    });
+    this.processQueue();
   }
 
   _getCalloutMaxWaitMs(spokenText) {
     return PRECISION_CALLOUT_MAX_WAIT_MS[spokenText] || DEFAULT_CALLOUT_MAX_WAIT_MS;
+  }
+
+  _getExpoSpeechTimeoutMs(text) {
+    const wordCount = String(text || "").trim().split(/\s+/).filter(Boolean).length;
+    return Math.min(
+      EXPO_SPEECH_MAX_TIMEOUT_MS,
+      Math.max(EXPO_SPEECH_MIN_TIMEOUT_MS, wordCount * EXPO_SPEECH_MS_PER_WORD)
+    );
+  }
+
+  _getExpoSpeechVoice(profile) {
+    let finalPitch = profile.pitch;
+    let voiceId = undefined;
+
+    if (this.voicePreference === "male") {
+      if (this.availableVoices) {
+        let maleVoice = this.availableVoices.find(
+          (v) => v.language.startsWith("en") && (v.name === "Aaron" || v.name === "Daniel" || v.name === "Arthur")
+        );
+        if (!maleVoice) {
+          maleVoice = this.availableVoices.find(
+            (v) => v.language.startsWith("en") && (v.name.toLowerCase().includes("male") || v.identifier.toLowerCase().includes("male"))
+          );
+        }
+        if (!maleVoice) {
+          maleVoice = this.availableVoices.find(
+            (v) => v.language.startsWith("en") && (v.identifier.includes("-iom") || v.identifier.includes("-tpd") || v.identifier.includes("-rjs") || v.identifier.includes("-gpl"))
+          );
+        }
+        if (!maleVoice) {
+          maleVoice = this.availableVoices.find(
+            (v) => v.language.startsWith("en") && (v.name.includes("Alex") || v.name.includes("Fred"))
+          );
+        }
+        if (maleVoice) {
+          voiceId = maleVoice.identifier;
+        } else {
+          finalPitch = finalPitch * 0.9;
+        }
+      } else {
+        finalPitch = finalPitch * 0.9;
+      }
+    }
+
+    return { voiceId, pitch: finalPitch };
+  }
+
+  _logSpeech(spokenText, options = {}) {
+    if (!options.skipLog && this.addLog) {
+      this.addLog(spokenText);
+    }
+  }
+
+  _interruptCurrentNonCalloutAudio() {
+    if (this.expoSpeechActive) {
+      try { Speech.stop(); } catch (e) {}
+      this.expoSpeechActive = false;
+    }
+    this._stopCurrentAnnouncement();
+  }
+
+  _speakWithExpoSpeech(text, profile) {
+    return new Promise((resolve) => {
+      const { voiceId, pitch } = this._getExpoSpeechVoice(profile);
+      let resolved = false;
+      let safetyTimer;
+
+      const finish = () => {
+        if (resolved) return;
+        resolved = true;
+        if (safetyTimer) clearTimeout(safetyTimer);
+        this.expoSpeechActive = false;
+        this._scheduleBackgroundMediaRefresh();
+        resolve();
+      };
+
+      try {
+        this.expoSpeechActive = true;
+        safetyTimer = setTimeout(() => {
+          console.warn("[Speech] Expo Speech callback timed out; continuing queue.");
+          try { Speech.stop(); } catch (e) {}
+          finish();
+        }, this._getExpoSpeechTimeoutMs(text));
+
+        Speech.speak(text, {
+          voice: voiceId,
+          rate: profile.rate,
+          pitch,
+          volume: profile.volume * this.masterVolume * this.coPilotVolume,
+          onDone: finish,
+          onStopped: finish,
+          onError: finish,
+        });
+      } catch (e) {
+        finish();
+      }
+    });
+  }
+
+  async _getLockScreenArtworkUrl() {
+    if (this._lockScreenArtworkUrl) return this._lockScreenArtworkUrl;
+
+    const asset = Asset.fromModule(LOCK_SCREEN_ARTWORK_ASSET);
+    await asset.downloadAsync();
+    const assetUri = asset.localUri || asset.uri || null;
+    this._lockScreenArtworkUrl = hasUriScheme(assetUri) ? assetUri : null;
+    return this._lockScreenArtworkUrl;
+  }
+
+  async _getBackgroundSessionMetadata() {
+    const { active, connectedIp } = this._backgroundSessionState;
+    const artworkUrl = await this._getLockScreenArtworkUrl();
+    const metadata = {
+      title: "Infinite Co-Pilot",
+      artist: active ? "Monitoring Infinite Flight" : "Standing by for Infinite Flight",
+      albumTitle: connectedIp ? `Crew Assistant - ${connectedIp}` : "Crew Assistant",
+    };
+    if (artworkUrl) metadata.artworkUrl = artworkUrl;
+    return metadata;
+  }
+
+  async _activateBackgroundMediaSession() {
+    if (!this.silentPlayer || typeof this.silentPlayer.setActiveForLockScreen !== "function") {
+      return;
+    }
+
+    try {
+      if (!this.silentPlayer.playing && typeof this.silentPlayer.play === "function") {
+        this.silentPlayer.play();
+      }
+      this.silentPlayer.setActiveForLockScreen(
+        true,
+        await this._getBackgroundSessionMetadata(),
+        {
+          isLiveStream: true,
+          showSeekBackward: false,
+          showSeekForward: false,
+        }
+      );
+    } catch (e) {
+      console.log("[Speech] Background media session failed:", e?.message || e);
+    }
+  }
+
+  _scheduleBackgroundMediaRefresh(delays = [0, 250, 1000]) {
+    if (!this.silentPlayer) return;
+
+    delays.forEach((delay) => {
+      const timer = setTimeout(() => {
+        this._backgroundMediaRefreshTimers.delete(timer);
+        this._activateBackgroundMediaSession();
+      }, delay);
+      this._backgroundMediaRefreshTimers.add(timer);
+    });
+  }
+
+  _installBackgroundAnchorResumeGuard() {
+    if (!this.silentPlayer || this._backgroundAnchorStatusSubscription) return;
+
+    try {
+      this._backgroundAnchorStatusSubscription = this.silentPlayer.addListener(
+        "playbackStatusUpdate",
+        (status) => {
+          if (status.playing || status.isBuffering) return;
+          if (this._backgroundAnchorResumeTimer) return;
+
+          this._backgroundAnchorResumeTimer = setTimeout(() => {
+            this._backgroundAnchorResumeTimer = null;
+            this._scheduleBackgroundMediaRefresh([0, 300]);
+          }, 300);
+        }
+      );
+    } catch (e) {
+      console.log("[Speech] Background media guard failed:", e?.message || e);
+    }
+  }
+
+  async _updateBackgroundMediaMetadata() {
+    if (!this.silentPlayer) return;
+
+    try {
+      const metadata = await this._getBackgroundSessionMetadata();
+      if (typeof this.silentPlayer.updateLockScreenMetadata === "function") {
+        this.silentPlayer.updateLockScreenMetadata(metadata);
+      } else {
+        await this._activateBackgroundMediaSession();
+      }
+    } catch (e) {
+      console.log("[Speech] Background media metadata update failed:", e?.message || e);
+    }
   }
 
   _stopCurrentAnnouncement() {
@@ -122,9 +362,10 @@ class SpeechManager {
         this.chimePlayer = null;
       }
       
-      this.chimePlayer = createAudioPlayer(require("../../assets/chime.mp3"));
+      this.chimePlayer = createAudioPlayer(CHIME_AUDIO_ASSET);
       this.chimePlayer.volume = this.masterVolume;
       this.chimePlayer.play();
+      this._scheduleBackgroundMediaRefresh([0, 400]);
       return true;
     } catch (e) {
       console.log("[Speech] Chime play failed:", e);
@@ -132,13 +373,22 @@ class SpeechManager {
     }
   }
 
-  _playStaticAudio(audioAsset, volume, { owner = "announcement", maxWaitMs = 10000 } = {}) {
+  _playStaticAudio(
+    audioAsset,
+    volume,
+    {
+      owner = "announcement",
+      maxWaitMs = 10000,
+      startAtSeconds = STATIC_AUDIO_START_OFFSET_SEC,
+    } = {}
+  ) {
     return new Promise((resolve) => {
       let player;
       let subscription;
       let checkInterval;
       let safetyTimer;
       let isResolved = false;
+      let hasStartedPlayback = false;
 
       const finish = () => {
         if (isResolved) return;
@@ -161,7 +411,8 @@ class SpeechManager {
           this.currentCalloutFinish = null;
         }
         this._disposePlayer(player, { pause: true });
-        resolve();
+        this._scheduleBackgroundMediaRefresh();
+        resolve(hasStartedPlayback);
       };
 
       try {
@@ -181,7 +432,10 @@ class SpeechManager {
             (status.currentTime > 0 &&
               status.duration > 0 &&
               status.currentTime >= status.duration - 0.1) ||
-            (status.currentTime > 0 && status.playing === false && !status.isBuffering)
+            (hasStartedPlayback &&
+              status.currentTime > 0 &&
+              status.playing === false &&
+              !status.isBuffering)
           ) {
             finish();
           }
@@ -191,7 +445,12 @@ class SpeechManager {
           try {
             if (player.duration > 0 && player.currentTime >= player.duration - 0.1) {
               finish();
-            } else if (!player.playing && player.currentTime > 0 && !player.isBuffering) {
+            } else if (
+              hasStartedPlayback &&
+              !player.playing &&
+              player.currentTime > 0 &&
+              !player.isBuffering
+            ) {
               finish();
             }
           } catch (e) {
@@ -200,7 +459,19 @@ class SpeechManager {
         }, 100);
 
         safetyTimer = setTimeout(finish, maxWaitMs);
-        player.play();
+        Promise.resolve()
+          .then(() => {
+            if (startAtSeconds > 0 && typeof player.seekTo === "function") {
+              return player.seekTo(startAtSeconds, 0, 0);
+            }
+            return undefined;
+          })
+          .then(() => {
+            player.play();
+            hasStartedPlayback = true;
+            this._scheduleBackgroundMediaRefresh([0, 350]);
+          })
+          .catch(finish);
       } catch (e) {
         finish();
       }
@@ -218,18 +489,9 @@ class SpeechManager {
         if (!staticAudioEntry) continue;
 
         try {
-          this._stopCurrentAnnouncement();
-          if (this.currentCalloutFinish) {
-            this.currentCalloutFinish(); // Interrupt previous callout to prevent backlog delays
-          }
-          if (this.expoSpeechActive) {
-            Speech.stop();
-            this.expoSpeechActive = false;
-          }
           const audioAsset = staticAudioEntry[this.voicePreference] || staticAudioEntry.female;
           
-          // Fire and forget (don't await) to let rapid callouts play instantly
-          this._playStaticAudio(
+          const startedStaticPlayback = await this._playStaticAudio(
             audioAsset,
             profile.volume * this.masterVolume * this.coPilotVolume,
             {
@@ -237,6 +499,9 @@ class SpeechManager {
               maxWaitMs: this._getCalloutMaxWaitMs(spokenText),
             }
           );
+          if (!startedStaticPlayback) {
+            await this._speakWithExpoSpeech(spokenText, profile);
+          }
         } catch (e) {
           console.log("[Speech] Callout failed:", e);
         }
@@ -274,18 +539,21 @@ class SpeechManager {
 
     // Preload chime for instant zero-latency playback
     try {
-      this.chimePlayer = createAudioPlayer(require("../../assets/chime.mp3"));
+      this.chimePlayer = createAudioPlayer(CHIME_AUDIO_ASSET);
     } catch (e) {}
 
-    // Initialize silent looping audio to keep iOS alive indefinitely
+    // Keep an audio session open so Android continues running JS/audio while the game is foregrounded.
     try {
-      // Using a 10-minute silent .m4a file
-      // This prevents the MediaToolbox spam since it only loops once every 10 minutes
-      this.silentPlayer = createAudioPlayer(require("../../assets/silent.m4a"));
-      this.silentPlayer.volume = 1; // Real silence doesn't need to be 0 volume
+      this.silentPlayer = createAudioPlayer(BACKGROUND_AUDIO_ASSET);
+      this.silentPlayer.volume = 1;
       this.silentPlayer.loop = true;
+      await this._activateBackgroundMediaSession();
+      this._installBackgroundAnchorResumeGuard();
       this.silentPlayer.play();
-    } catch (e) {}
+      this._scheduleBackgroundMediaRefresh([250, 1000, 2500]);
+    } catch (e) {
+      console.log("[Speech] Background media anchor failed:", e?.message || e);
+    }
 
     // Preload all static audio files to completely eliminate the slight playback gap
     try {
@@ -298,13 +566,23 @@ class SpeechManager {
     }
   }
 
+  async whenReady() {
+    return this.ready;
+  }
+
+  setBackgroundSessionState({ active = false, connectedIp = "" } = {}) {
+    this._backgroundSessionState = { active, connectedIp };
+    this._updateBackgroundMediaMetadata();
+    this._scheduleBackgroundMediaRefresh([150, 750]);
+  }
+
   async _configureAudioSession() {
     if (this._audioConfigured) return;
     try {
       await setAudioModeAsync({
         playsInSilentMode: true,          // Play even when iPhone is on silent
         shouldPlayInBackground: true,     // Keep audio session alive in background
-        interruptionMode: 'duckOthers',   // Lower other apps' audio (e.g. the game)
+        interruptionMode: "duckOthers",   // Lower other apps' audio (e.g. the game)
         allowsRecording: false,
       });
       this._audioConfigured = true;
@@ -338,10 +616,16 @@ class SpeechManager {
       this.isProcessingCalloutQueue = false;
     } else {
       if (this.boardingMusic) {
-        try { this.boardingMusic.play(); } catch (e) {}
+        try {
+          this.boardingMusic.play();
+          this._scheduleBackgroundMediaRefresh([0, 500]);
+        } catch (e) {}
       }
       if (this.boardingAnnouncePlayer) {
-        try { this.boardingAnnouncePlayer.play(); } catch (e) {}
+        try {
+          this.boardingAnnouncePlayer.play();
+          this._scheduleBackgroundMediaRefresh([0, 500]);
+        } catch (e) {}
       }
     }
     return this.voiceEnabled;
@@ -421,6 +705,7 @@ class SpeechManager {
     // Ensure audio session is configured (lazy init in case init() hasn't resolved yet)
     if (!this._audioConfigured) await this._configureAudioSession();
 
+    options = normalizeSpeechOptions(options);
     const tone = options.tone || "default";
     const now = Date.now();
     const spokenText = this.formatText(text, tone);
@@ -431,21 +716,29 @@ class SpeechManager {
     this.lastSpokenText = spokenText;
     this.lastSpokenAt = now;
 
-    // Add to log
-    if (this.addLog) {
-      this.addLog(spokenText);
-    }
-
     if (!this.voiceEnabled) return;
 
     const profile = this.getVoiceProfile(tone);
 
+    if (tone === "callout" || options.priority) {
+      this._interruptCurrentNonCalloutAudio();
+    }
+
     if (tone === "callout" && staticAudioMap[spokenText] && !options.forceQueue) {
-      this._enqueueCallout({ spokenText, profile });
+      this._enqueueSpeech({
+        spokenText,
+        options: { ...options, priority: true, _staticOwner: "callout" },
+        profile,
+      });
+      this.processQueue();
       return;
     }
     
     this._enqueueSpeech({ spokenText, options, profile });
+    if (typeof options.afterSpeech === "function") {
+      this._enqueueAction(options.afterSpeech, { priority: options.priority });
+      return;
+    }
     this.processQueue();
   }
 
@@ -455,9 +748,14 @@ class SpeechManager {
 
     try {
       while (this.speechQueue.length > 0) {
-        const { spokenText, options, profile } = this.speechQueue.shift();
+        const { spokenText, options = {}, profile, action } = this.speechQueue.shift();
 
         try {
+          if (typeof action === "function") {
+            await this._runQueueAction(action);
+            continue;
+          }
+
           if (options.withChime) {
             const playedChime = await this._playChimeNow();
             if (playedChime) {
@@ -465,65 +763,32 @@ class SpeechManager {
             }
           }
 
+          this._logSpeech(spokenText, options);
+
           // ── If there is a pre-recorded audio file for this exact text ────────
           const staticAudioEntry = staticAudioMap[spokenText];
           if (staticAudioEntry) {
             const audioAsset = staticAudioEntry[this.voicePreference] || staticAudioEntry.female;
-            await this._playStaticAudio(
+            const startedStaticPlayback = await this._playStaticAudio(
               audioAsset,
-              profile.volume * this.masterVolume * this.coPilotVolume
+              profile.volume * this.masterVolume * this.coPilotVolume,
+              {
+                owner: options._staticOwner || "announcement",
+                maxWaitMs:
+                  options._staticOwner === "callout"
+                    ? this._getCalloutMaxWaitMs(spokenText)
+                    : 10000,
+              }
             );
+            if (!startedStaticPlayback) {
+              await this._speakWithExpoSpeech(spokenText, profile);
+            }
           } 
           // ── If this queue item was routed through Polly, use speakPolly ────────
           else if (options._pollyVoiceId) {
             await this.speakPolly(spokenText, options._pollyVoiceId, profile);
           } else {
-            await new Promise((resolve) => {
-              let finalPitch = profile.pitch;
-              let voiceId = undefined;
-
-              if (this.voicePreference === "male") {
-                if (this.availableVoices) {
-                  let maleVoice = this.availableVoices.find(
-                    (v) => v.language.startsWith("en") && (v.name === "Aaron" || v.name === "Daniel" || v.name === "Arthur")
-                  );
-                  if (!maleVoice) {
-                    maleVoice = this.availableVoices.find(
-                      (v) => v.language.startsWith("en") && (v.name.toLowerCase().includes("male") || v.identifier.toLowerCase().includes("male"))
-                    );
-                  }
-                  if (!maleVoice) {
-                    maleVoice = this.availableVoices.find(
-                      (v) => v.language.startsWith("en") && (v.identifier.includes("-iom") || v.identifier.includes("-tpd") || v.identifier.includes("-rjs") || v.identifier.includes("-gpl"))
-                    );
-                  }
-                  if (!maleVoice) {
-                    maleVoice = this.availableVoices.find(
-                      (v) => v.language.startsWith("en") && (v.name.includes("Alex") || v.name.includes("Fred"))
-                    );
-                  }
-                  if (maleVoice) {
-                    voiceId = maleVoice.identifier;
-                  } else {
-                    finalPitch = finalPitch * 0.9;
-                  }
-                } else {
-                  finalPitch = finalPitch * 0.9;
-                }
-              }
-
-              // Apply master + co-pilot volume from settings
-              this.expoSpeechActive = true;
-              Speech.speak(spokenText, {
-                voice: voiceId,
-                rate: profile.rate,
-                pitch: finalPitch,
-                volume: profile.volume * this.masterVolume * this.coPilotVolume,
-                onDone: () => { this.expoSpeechActive = false; resolve(); },
-                onStopped: () => { this.expoSpeechActive = false; resolve(); },
-                onError: () => { this.expoSpeechActive = false; resolve(); },
-              });
-            });
+            await this._speakWithExpoSpeech(spokenText, profile);
           }
         } catch (e) {
           console.log("[Speech] Queue item failed:", e);
@@ -633,11 +898,13 @@ class SpeechManager {
         }, 60000);
 
         player.play();
+        this._scheduleBackgroundMediaRefresh([0, 350, 1200]);
 
         // Override resolve to also clear safetyTimer
         const originalResolve = resolve;
         resolve = () => {
           clearTimeout(safetyTimer);
+          this._scheduleBackgroundMediaRefresh();
           originalResolve();
         };
       } catch (err) {
@@ -652,51 +919,7 @@ class SpeechManager {
    * @private
    */
   _speakExpofallback(text, profile) {
-    return new Promise((resolve) => {
-      let finalPitch = profile.pitch;
-      let voiceId = undefined;
-
-      if (this.voicePreference === "male") {
-        if (this.availableVoices) {
-          let maleVoice = this.availableVoices.find(
-            (v) => v.language.startsWith("en") && (v.name === "Aaron" || v.name === "Daniel" || v.name === "Arthur")
-          );
-          if (!maleVoice) {
-            maleVoice = this.availableVoices.find(
-              (v) => v.language.startsWith("en") && (v.name.toLowerCase().includes("male") || v.identifier.toLowerCase().includes("male"))
-            );
-          }
-          if (!maleVoice) {
-            maleVoice = this.availableVoices.find(
-              (v) => v.language.startsWith("en") && (v.identifier.includes("-iom") || v.identifier.includes("-tpd") || v.identifier.includes("-rjs") || v.identifier.includes("-gpl"))
-            );
-          }
-          if (!maleVoice) {
-            maleVoice = this.availableVoices.find(
-              (v) => v.language.startsWith("en") && (v.name.includes("Alex") || v.name.includes("Fred"))
-            );
-          }
-          if (maleVoice) {
-            voiceId = maleVoice.identifier;
-          } else {
-            finalPitch = finalPitch * 0.9;
-          }
-        } else {
-          finalPitch = finalPitch * 0.9;
-        }
-      }
-
-      this.expoSpeechActive = true;
-      Speech.speak(text, {
-        voice: voiceId,
-        rate: profile.rate,
-        pitch: finalPitch,
-        volume: profile.volume * this.masterVolume * this.coPilotVolume,
-        onDone: () => { this.expoSpeechActive = false; resolve(); },
-        onStopped: () => { this.expoSpeechActive = false; resolve(); },
-        onError: () => { this.expoSpeechActive = false; resolve(); },
-      });
-    });
+    return this._speakWithExpoSpeech(text, profile);
   }
 
   /**
@@ -708,6 +931,7 @@ class SpeechManager {
    * @param {object} options  - Same options object passed to speak().
    */
   async speakWithPollyFallback(text, voiceId, options = {}) {
+    options = normalizeSpeechOptions(options);
     const tone = options.tone || "default";
     const now = Date.now();
     const spokenText = this.formatText(text, tone);
@@ -717,7 +941,6 @@ class SpeechManager {
     this.lastSpokenText = spokenText;
     this.lastSpokenAt = now;
 
-    if (this.addLog) this.addLog(spokenText);
     if (!this.voiceEnabled) return;
 
     const profile = this.getVoiceProfile(tone);
@@ -731,8 +954,8 @@ class SpeechManager {
     await this._playChimeNow();
   }
 
-  async playBoardingAnnouncement(livery) {
-    this.stopBoardingMusic();
+  async playBoardingAnnouncement(livery, { fadeBoardingMusic = true } = {}) {
+    this.stopBoardingMusic({ fade: fadeBoardingMusic });
     
     if (this.boardingAnnouncePlayer) return;
     if (this._isFetchingBoardingAnnounce && this._fetchingBoardingAnnounceFor === livery) return;
@@ -786,6 +1009,7 @@ class SpeechManager {
       
       if (this.voiceEnabled) {
         this.boardingAnnouncePlayer.play();
+        this._scheduleBackgroundMediaRefresh([0, 500, 1500]);
       }
       
       setTimeout(() => {
@@ -807,6 +1031,7 @@ class SpeechManager {
     if (this.boardingAnnouncePlayer) {
       this._disposePlayer(this.boardingAnnouncePlayer);
       this.boardingAnnouncePlayer = null;
+      this._scheduleBackgroundMediaRefresh();
     }
   }
 
@@ -817,6 +1042,67 @@ class SpeechManager {
     setTimeout(() => {
       this.sirenPlaying = false;
     }, 3000);
+  }
+
+  _getBoardingMusicFileName(livery) {
+    const lower = (livery || "").toLowerCase();
+    if (lower.includes("american")) return "music/american-airlines.mp3";
+    if (lower.includes("cathay")) return "music/cathay-pacific.mp3";
+    if (lower.includes("emirates")) return "music/emirates.mp3";
+    if (lower.includes("indigo")) return "music/indigo.mp3";
+    if (lower.includes("lufthansa")) return "music/lufthansa.mp3";
+    if (lower.includes("turkish")) return "music/turkish-airlines.mp3";
+    if (lower.includes("aer lingus")) return "music/aer-lingus.mp3";
+    if (lower.includes("air canada")) return "music/air-canada.mp3";
+    if (lower.includes("air china")) return "music/air-china.mp3";
+    if (lower.includes("air france")) return "music/air-france.mp3";
+    if (lower.includes("air india")) return "music/air-india.mp3";
+    if (lower.includes("air japan")) return "music/air-japan.mp3";
+    if (lower.includes("air new zealand") || lower.includes("air nz")) return "music/air-new-zealand.mp3";
+    if (lower.includes("air portugal") || lower.includes("tap")) return "music/air-portugal.mp3";
+    if (lower.includes("ana") || lower.includes("all nippon")) return "music/ana.mp3";
+    if (lower.includes("british airways")) return "music/british-airways.mp3";
+    if (lower.includes("brussels")) return "music/brussels-airlines.mp3";
+    if (lower.includes("delta")) return "music/delta-air-lines.mp3";
+    if (lower.includes("egyptair")) return "music/egyptair.mp3";
+    if (lower.includes("ethiopian")) return "music/ethiopian-airlines.mp3";
+    if (lower.includes("finnair")) return "music/finnair.mp3";
+    if (lower.includes("gulf air")) return "music/gulf-air.mp3";
+    if (lower.includes("iran air")) return "music/iran-air.mp3";
+    if (lower.includes("klm")) return "music/klm.mp3";
+    if (lower.includes("malaysia")) return "music/malaysia-airlines.mp3";
+    if (lower.includes("qantas")) return "music/qantas.mp3";
+    if (lower.includes("qatar")) return "music/qatar-airways.mp3";
+    if (lower.includes("singapore")) return "music/singapore-airlines.mp3";
+    if (lower.includes("swiss")) return "music/swiss.mp3";
+    if (lower.includes("vietnam")) return "music/vietnam-airlines.mp3";
+    if (lower.includes("virgin atlantic")) return "music/virgin-atlantic.mp3";
+    if (lower.includes("westjet")) return "music/westjet.mp3";
+    return "music/american-airlines.mp3";
+  }
+
+  _getBoardingMusicUri(livery) {
+    const remoteFileName = this._getBoardingMusicFileName(livery);
+    if (this._boardingMusicPrefetches.has(remoteFileName)) {
+      return this._boardingMusicPrefetches.get(remoteFileName);
+    }
+
+    const request = getCachedAudioUri(remoteFileName, "music/american-airlines.mp3")
+      .catch((error) => {
+        console.warn("[Speech] Boarding music prefetch failed:", error?.message || error);
+        return null;
+      })
+      .finally(() => {
+        this._boardingMusicPrefetches.delete(remoteFileName);
+      });
+
+    this._boardingMusicPrefetches.set(remoteFileName, request);
+    return request;
+  }
+
+  preloadBoardingMusic(livery) {
+    if (!livery) return;
+    this._getBoardingMusicUri(livery);
   }
 
   async playBoardingMusic(livery) {
@@ -830,49 +1116,8 @@ class SpeechManager {
     const playRequestId = this._requestCounter;
     this._boardingMusicRequestId = playRequestId;
 
-    const getFileName = (l) => {
-      const lower = (l || "").toLowerCase();
-      if (lower.includes("american")) return "music/american-airlines.mp3";
-      if (lower.includes("cathay")) return "music/cathay-pacific.mp3";
-      if (lower.includes("emirates")) return "music/emirates.mp3";
-      if (lower.includes("indigo")) return "music/indigo.mp3";
-      if (lower.includes("lufthansa")) return "music/lufthansa.mp3";
-      if (lower.includes("turkish")) return "music/turkish-airlines.mp3";
-      
-      // New airlines added
-      if (lower.includes("aer lingus")) return "music/aer-lingus.mp3";
-      if (lower.includes("air canada")) return "music/air-canada.mp3";
-      if (lower.includes("air china")) return "music/air-china.mp3";
-      if (lower.includes("air france")) return "music/air-france.mp3";
-      if (lower.includes("air india")) return "music/air-india.mp3";
-      if (lower.includes("air japan")) return "music/air-japan.mp3";
-      if (lower.includes("air new zealand") || lower.includes("air nz")) return "music/air-new-zealand.mp3";
-      if (lower.includes("air portugal") || lower.includes("tap")) return "music/air-portugal.mp3";
-      if (lower.includes("ana") || lower.includes("all nippon")) return "music/ana.mp3";
-      if (lower.includes("british airways")) return "music/british-airways.mp3";
-      if (lower.includes("brussels")) return "music/brussels-airlines.mp3";
-      if (lower.includes("delta")) return "music/delta-air-lines.mp3";
-      if (lower.includes("egyptair")) return "music/egyptair.mp3";
-      if (lower.includes("ethiopian")) return "music/ethiopian-airlines.mp3";
-      if (lower.includes("finnair")) return "music/finnair.mp3";
-      if (lower.includes("gulf air")) return "music/gulf-air.mp3";
-      if (lower.includes("iran air")) return "music/iran-air.mp3";
-      if (lower.includes("klm")) return "music/klm.mp3";
-      if (lower.includes("malaysia")) return "music/malaysia-airlines.mp3";
-      if (lower.includes("qantas")) return "music/qantas.mp3";
-      if (lower.includes("qatar")) return "music/qatar-airways.mp3";
-      if (lower.includes("singapore")) return "music/singapore-airlines.mp3";
-      if (lower.includes("swiss")) return "music/swiss.mp3";
-      if (lower.includes("vietnam")) return "music/vietnam-airlines.mp3";
-      if (lower.includes("virgin atlantic")) return "music/virgin-atlantic.mp3";
-      if (lower.includes("westjet")) return "music/westjet.mp3";
-
-      return "music/american-airlines.mp3"; // Fallback
-    };
-
     try {
-      const remoteFileName = getFileName(livery);
-      const audioUri = await getCachedAudioUri(remoteFileName, "music/american-airlines.mp3");
+      const audioUri = await this._getBoardingMusicUri(livery);
       
       // If stopped or disconnected while downloading, abort
       if (this._boardingMusicRequestId !== playRequestId) return;
@@ -885,12 +1130,17 @@ class SpeechManager {
       if (this.boardingMusic) {
         this._disposePlayer(this.boardingMusic);
       }
+      if (this._boardingMusicFadeTimer) {
+        clearInterval(this._boardingMusicFadeTimer);
+        this._boardingMusicFadeTimer = null;
+      }
       this.boardingMusic = createAudioPlayer(audioUri);
       this.boardingMusic.loop = true;
       this.boardingMusic.volume = this.masterVolume * this.boardingMusicVolume;
       
       if (this.voiceEnabled) {
         this.boardingMusic.play();
+        this._scheduleBackgroundMediaRefresh([0, 500, 1500]);
       }
     } catch (e) {
       console.log("[Speech] Boarding music failed:", e);
@@ -901,11 +1151,49 @@ class SpeechManager {
     }
   }
 
-  stopBoardingMusic() {
+  stopBoardingMusic({ fade = false, durationMs = BOARDING_MUSIC_FADE_MS } = {}) {
     this._boardingMusicRequestId = null;
-    if (this.boardingMusic) {
-      this._disposePlayer(this.boardingMusic);
-      this.boardingMusic = null;
+    const player = this.boardingMusic;
+    if (!player) return;
+
+    if (this._boardingMusicFadeTimer) {
+      clearInterval(this._boardingMusicFadeTimer);
+      this._boardingMusicFadeTimer = null;
+    }
+
+    const cleanup = () => {
+      if (this._boardingMusicFadeTimer) {
+        clearInterval(this._boardingMusicFadeTimer);
+        this._boardingMusicFadeTimer = null;
+      }
+      if (this.boardingMusic === player) {
+        this.boardingMusic = null;
+      }
+      this._disposePlayer(player);
+      this._scheduleBackgroundMediaRefresh();
+    };
+
+    if (fade && this.voiceEnabled) {
+      const steps = 14;
+      const intervalMs = Math.max(50, Math.round(durationMs / steps));
+      const startVolume =
+        typeof player.volume === "number"
+          ? player.volume
+          : this.masterVolume * this.boardingMusicVolume;
+      let step = 0;
+
+      this._boardingMusicFadeTimer = setInterval(() => {
+        step += 1;
+        try {
+          player.volume = Math.max(0, startVolume * (1 - step / steps));
+        } catch (e) {
+          cleanup();
+          return;
+        }
+        if (step >= steps) cleanup();
+      }, intervalMs);
+    } else {
+      cleanup();
     }
   }
 

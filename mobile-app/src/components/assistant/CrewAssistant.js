@@ -48,6 +48,7 @@ const getConditions = (phase, telemetry) => {
   const throttle = pct(telemetry.throttle);
   const destNm = telemetry.destDist;
   const engines = getEngineSummary(telemetry);
+  const pushbackAttached = telemetry.pushback === 1 || telemetry.pushbackTug === true || telemetry.isPushing === true;
   const parked = telemetry.onGround && gs < 1;
   const taxiSpeed = telemetry.onGround && gs >= 1 && gs < 35;
   const takeoffPower = throttle > 70 || n1 > 70;
@@ -69,6 +70,8 @@ const getConditions = (phase, telemetry) => {
     },
     taxiSpeed: { label: "Taxi speed", met: taxiSpeed },
     runway: { label: "Runway detected", met: telemetry.onRunway === true },
+    pushbackAttached: { label: "Pushback connected", met: pushbackAttached },
+    pushbackDisconnected: { label: "Pushback disconnected", met: !pushbackAttached },
     takeoffPower: { label: "Takeoff power", met: takeoffPower },
     climbRate: { label: "Positive climb", met: vs > 250 },
     lowClimb: { label: "Below 5,000 AGL", met: agl < 5000 },
@@ -96,13 +99,13 @@ const getConditions = (phase, telemetry) => {
     boarding: [common.onGround, common.parked, common.enginesOff],
     pushback: [
       common.onGround,
-      { label: "Pushback active", met: telemetry.pushback === 1 },
-      { label: "Departure sequence started", met: true },
+      common.pushbackAttached,
+      { label: "Engines not required yet", met: true },
     ],
     taxi_out: [
       common.onGround,
-      { label: "Boarding complete", met: true },
-      telemetry.onRunway === true ? common.runway : common.enginesReady,
+      common.enginesReady,
+      common.pushbackDisconnected,
       { label: telemetry.onRunway === true ? "Holding below takeoff roll" : "Below takeoff speed", met: gs < 35 },
     ],
     takeoff: [common.onGround, common.runway, { label: "Accelerating", met: gs >= 20 }, common.takeoffPower],
@@ -160,7 +163,7 @@ const CrewAssistant = ({ telemetry, isConnected }) => {
 
       {isConnected && conditions.length > 0 && (
         <View style={[styles.conditions, { borderTopColor: theme.borderMid }]}>
-          <Text style={[styles.microLabel, { color: theme.textDim }]}>Conditions</Text>
+          <Text style={[styles.microLabel, { color: theme.textDim }]}>Checklist</Text>
           <View style={styles.conditionGrid}>
             {conditions.map((item) => {
               const Icon = item.met ? CheckSquare : Square;

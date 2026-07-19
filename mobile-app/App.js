@@ -27,17 +27,16 @@ import {
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import notifee, { AndroidForegroundServiceType, AndroidImportance } from "@notifee/react-native";
 
-import notifee, { AndroidImportance, AndroidColor, AndroidForegroundServiceType } from '@notifee/react-native';
-
-if (Platform.OS === 'android' && notifee && notifee.registerForegroundService) {
-  notifee.registerForegroundService((notification) => {
+if (Platform.OS === "android" && notifee?.registerForegroundService) {
+  notifee.registerForegroundService(() => {
     return new Promise(() => {
-      // The service will keep running as long as this promise is unresolved,
-      // which keeps our socket polling and speech synthesis alive in the background.
+      // Keep the JS runtime alive while Android treats the app as a foreground service.
     });
   });
 }
+
 import {
   Settings,
   Droplet,
@@ -77,6 +76,9 @@ import FlightStrip from "./src/components/layout/FlightStrip";
 import CrewAssistant from "./src/components/assistant/CrewAssistant";
 import Sidebar from "./src/components/ui/Sidebar";
 import * as Sentry from '@sentry/react-native';
+
+const FLIGHT_DECK_MIN_PREP_MS = 900;
+const FLIGHT_DECK_PREP_TIMEOUT_MS = 6000;
 
 Sentry.init({
   dsn: 'https://66233b21396117323bd0f22ac62893bf@o4511750585450496.ingest.de.sentry.io/4511750588399696',
@@ -189,10 +191,20 @@ function AppInner() {
   const [isSplashVisible, setIsSplashVisible] = useState(true);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setIsSplashVisible(false);
-    }, 2500);
-    return () => clearTimeout(timer);
+    let isMounted = true;
+    const minimumPrep = new Promise((resolve) => setTimeout(resolve, FLIGHT_DECK_MIN_PREP_MS));
+    const audioReady = Promise.race([
+      speechManager.whenReady().catch(() => undefined),
+      new Promise((resolve) => setTimeout(resolve, FLIGHT_DECK_PREP_TIMEOUT_MS)),
+    ]);
+
+    Promise.all([minimumPrep, audioReady]).finally(() => {
+      if (isMounted) setIsSplashVisible(false);
+    });
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -201,16 +213,41 @@ function AppInner() {
       setVoicePreferenceState(speechManager.voicePreference);
     }, 500);
 
-    // Request permissions on first open (Android 13+ & iOS)
-    async function requestPermissions() {
+    async function startBackgroundService() {
+      if (Platform.OS !== "android" || !notifee) return;
+
       try {
-        if (!notifee) return;
+        const channelId = await notifee.createChannel({
+          id: "flight_link",
+          name: "Flight Link Status",
+          importance: AndroidImportance.LOW,
+        });
+
+        await notifee.displayNotification({
+          id: "flight_link",
+          title: "Infinite Co-Pilot Active",
+          body: "Ready to monitor Infinite Flight in the background.",
+          android: {
+            channelId,
+            asForegroundService: true,
+            foregroundServiceTypes: [
+              AndroidForegroundServiceType.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
+            ],
+            color: "#0D9488",
+            ongoing: true,
+            pressAction: {
+              id: "default",
+            },
+          },
+        });
+
         await notifee.requestPermission();
       } catch (e) {
-        console.log("Permission request failed:", e);
+        console.log("[ForegroundService] Start failed:", e?.message || e);
       }
     }
-    requestPermissions();
+
+    startBackgroundService();
   }, []);
 
   const scrollViewRef = useRef(null);
@@ -240,46 +277,11 @@ function AppInner() {
   }, []);
 
   useEffect(() => {
-    async function manageForegroundService() {
-      if (!notifee) return;
-      if (isConnected) {
-        if (Platform.OS === 'android') {
-          const channelId = await notifee.createChannel({
-            id: 'flight_link',
-            name: 'Flight Link Status',
-            importance: AndroidImportance.LOW,
-          });
-
-          await notifee.displayNotification({
-            title: 'Infinite Co-Pilot Active',
-            body: 'Monitoring flight telemetry in the background.',
-            android: {
-              channelId,
-              asForegroundService: true,
-              foregroundServiceTypes: [AndroidForegroundServiceType.FOREGROUND_SERVICE_TYPE_DATA_SYNC],
-              color: notifee.AndroidColor?.AQUA || '#0D9488',
-              ongoing: true,
-            },
-          });
-        } else if (Platform.OS === 'ios') {
-          // On iOS, we use a standard local notification since foreground services don't exist
-          await notifee.requestPermission();
-          await notifee.displayNotification({
-            id: 'flight_link_ios',
-            title: 'Infinite Co-Pilot Active',
-            body: 'Monitoring flight telemetry in the background.',
-          });
-        }
-      } else {
-        if (Platform.OS === 'android') {
-          await notifee.stopForegroundService();
-        } else if (Platform.OS === 'ios') {
-          await notifee.cancelNotification('flight_link_ios');
-        }
-      }
-    }
-    manageForegroundService();
-  }, [isConnected]);
+    speechManager.setBackgroundSessionState({
+      active: isConnected,
+      connectedIp,
+    });
+  }, [connectedIp, isConnected]);
 
   // Auto-scroll log to bottom
   useEffect(() => {
