@@ -37,6 +37,18 @@ const EXPO_SPEECH_MS_PER_WORD = 520;
 const QUEUE_ACTION_TIMEOUT_MS = 15000;
 const STATIC_AUDIO_START_OFFSET_SEC = 0.035;
 const BOARDING_MUSIC_FADE_MS = 1400;
+const BACKGROUND_KEEP_ALIVE_INTERVAL_MS = 45000;
+const BACKGROUND_AUDIO_PLAYER_OPTIONS = {
+  updateInterval: 1000,
+  keepAudioSessionActive: true,
+};
+const EFFECT_AUDIO_PLAYER_OPTIONS = {
+  keepAudioSessionActive: true,
+};
+const STATIC_AUDIO_PLAYER_OPTIONS = {
+  updateInterval: 100,
+  keepAudioSessionActive: true,
+};
 const CHIME_AUDIO_ASSET = require("../../assets/chime.mp3");
 const BACKGROUND_AUDIO_ASSET = require("../../assets/silent.m4a");
 const LOCK_SCREEN_ARTWORK_ASSET = require("../../assets/images/icon.png");
@@ -83,6 +95,8 @@ class SpeechManager {
     this._backgroundMediaRefreshTimers = new Set();
     this._backgroundAnchorResumeTimer = null;
     this._backgroundAnchorStatusSubscription = null;
+    this._backgroundKeepAliveTimer = null;
+    this._backgroundAnchorPromise = null;
     this._boardingMusicPrefetches = new Map();
     this._audioConfigured = false;
     this.isProcessingQueue = false;
@@ -205,6 +219,21 @@ class SpeechManager {
     }
   }
 
+  _getWordCount(text) {
+    return String(text || "").trim().split(/\s+/).filter(Boolean).length;
+  }
+
+  _getStaticAudioMaxWaitMs(spokenText, tone) {
+    if (tone === "callout") return this._getCalloutMaxWaitMs(spokenText);
+    if (tone === "briefing") return 45000;
+
+    const wordCount = this._getWordCount(spokenText);
+    if (wordCount <= 4) return 2500;
+    if (wordCount <= 8) return 3500;
+    if (wordCount <= 14) return 5000;
+    return Math.min(15000, this._getExpoSpeechTimeoutMs(spokenText));
+  }
+
   _interruptCurrentNonCalloutAudio() {
     if (this.expoSpeechActive) {
       try { Speech.stop(); } catch (e) {}
@@ -229,22 +258,26 @@ class SpeechManager {
       };
 
       try {
-        this.expoSpeechActive = true;
-        safetyTimer = setTimeout(() => {
-          console.warn("[Speech] Expo Speech callback timed out; continuing queue.");
-          try { Speech.stop(); } catch (e) {}
-          finish();
-        }, this._getExpoSpeechTimeoutMs(text));
+        Promise.resolve(this._ensureBackgroundAnchor())
+          .then(() => {
+            this.expoSpeechActive = true;
+            safetyTimer = setTimeout(() => {
+              console.warn("[Speech] Expo Speech callback timed out; continuing queue.");
+              try { Speech.stop(); } catch (e) {}
+              finish();
+            }, this._getExpoSpeechTimeoutMs(text));
 
-        Speech.speak(text, {
-          voice: voiceId,
-          rate: profile.rate,
-          pitch,
-          volume: profile.volume * this.masterVolume * this.coPilotVolume,
-          onDone: finish,
-          onStopped: finish,
-          onError: finish,
-        });
+            Speech.speak(text, {
+              voice: voiceId,
+              rate: profile.rate,
+              pitch,
+              volume: profile.volume * this.masterVolume * this.coPilotVolume,
+              onDone: finish,
+              onStopped: finish,
+              onError: finish,
+            });
+          })
+          .catch(finish);
       } catch (e) {
         finish();
       }
@@ -294,6 +327,63 @@ class SpeechManager {
     } catch (e) {
       console.log("[Speech] Background media session failed:", e?.message || e);
     }
+  }
+
+  async _ensureBackgroundAnchor({ force = false } = {}) {
+    if (this._backgroundAnchorPromise && !force) {
+      return this._backgroundAnchorPromise;
+    }
+
+    const ensurePromise = this._ensureBackgroundAnchorNow({ force });
+    this._backgroundAnchorPromise = ensurePromise;
+    try {
+      return await ensurePromise;
+    } finally {
+      if (this._backgroundAnchorPromise === ensurePromise) {
+        this._backgroundAnchorPromise = null;
+      }
+    }
+  }
+
+  async _ensureBackgroundAnchorNow({ force = false } = {}) {
+    await this._configureAudioSession();
+
+    if (!this.silentPlayer) {
+      this.silentPlayer = createAudioPlayer(
+        BACKGROUND_AUDIO_ASSET,
+        BACKGROUND_AUDIO_PLAYER_OPTIONS
+      );
+      this.silentPlayer.volume = 1;
+      this.silentPlayer.loop = true;
+      this._installBackgroundAnchorResumeGuard();
+    }
+
+    try {
+      if (force && typeof this.silentPlayer.seekTo === "function") {
+        await this.silentPlayer.seekTo(0, 0, 0);
+      }
+    } catch (e) {}
+
+    try {
+      if (!this.silentPlayer.playing && typeof this.silentPlayer.play === "function") {
+        this.silentPlayer.play();
+      }
+    } catch (e) {
+      console.log("[Speech] Background anchor play failed:", e?.message || e);
+    }
+
+    await this._activateBackgroundMediaSession();
+    this._startBackgroundKeepAlive();
+  }
+
+  _startBackgroundKeepAlive() {
+    if (this._backgroundKeepAliveTimer) return;
+
+    this._backgroundKeepAliveTimer = setInterval(() => {
+      this._ensureBackgroundAnchor({ force: true }).catch((e) => {
+        console.log("[Speech] Background keep-alive failed:", e?.message || e);
+      });
+    }, BACKGROUND_KEEP_ALIVE_INTERVAL_MS);
   }
 
   _scheduleBackgroundMediaRefresh(delays = [0, 250, 1000]) {
@@ -357,12 +447,13 @@ class SpeechManager {
     if (!this.chimeEnabled) return false;
 
     try {
+      await this._ensureBackgroundAnchor();
       if (this.chimePlayer) {
         this._disposePlayer(this.chimePlayer, { pause: true });
         this.chimePlayer = null;
       }
       
-      this.chimePlayer = createAudioPlayer(CHIME_AUDIO_ASSET);
+      this.chimePlayer = createAudioPlayer(CHIME_AUDIO_ASSET, EFFECT_AUDIO_PLAYER_OPTIONS);
       this.chimePlayer.volume = this.masterVolume;
       this.chimePlayer.play();
       this._scheduleBackgroundMediaRefresh([0, 400]);
@@ -416,7 +507,8 @@ class SpeechManager {
       };
 
       try {
-        player = createAudioPlayer(audioAsset, { updateInterval: 100 });
+        this._ensureBackgroundAnchor().catch(() => {});
+        player = createAudioPlayer(audioAsset, STATIC_AUDIO_PLAYER_OPTIONS);
         if (owner === "callout") {
           this.currentCalloutPlayer = player;
           this.currentCalloutFinish = finish;
@@ -539,17 +631,12 @@ class SpeechManager {
 
     // Preload chime for instant zero-latency playback
     try {
-      this.chimePlayer = createAudioPlayer(CHIME_AUDIO_ASSET);
+      this.chimePlayer = createAudioPlayer(CHIME_AUDIO_ASSET, EFFECT_AUDIO_PLAYER_OPTIONS);
     } catch (e) {}
 
     // Keep an audio session open so Android continues running JS/audio while the game is foregrounded.
     try {
-      this.silentPlayer = createAudioPlayer(BACKGROUND_AUDIO_ASSET);
-      this.silentPlayer.volume = 1;
-      this.silentPlayer.loop = true;
-      await this._activateBackgroundMediaSession();
-      this._installBackgroundAnchorResumeGuard();
-      this.silentPlayer.play();
+      await this._ensureBackgroundAnchor({ force: true });
       this._scheduleBackgroundMediaRefresh([250, 1000, 2500]);
     } catch (e) {
       console.log("[Speech] Background media anchor failed:", e?.message || e);
@@ -572,8 +659,15 @@ class SpeechManager {
 
   setBackgroundSessionState({ active = false, connectedIp = "" } = {}) {
     this._backgroundSessionState = { active, connectedIp };
+    this._ensureBackgroundAnchor().catch(() => {});
     this._updateBackgroundMediaMetadata();
     this._scheduleBackgroundMediaRefresh([150, 750]);
+  }
+
+  handleAppStateChange(state) {
+    const isBackgrounded = state === "background" || state === "inactive";
+    this._ensureBackgroundAnchor({ force: isBackgrounded }).catch(() => {});
+    this._scheduleBackgroundMediaRefresh(isBackgrounded ? [0, 500, 2000] : [0, 250]);
   }
 
   async _configureAudioSession() {
@@ -582,7 +676,7 @@ class SpeechManager {
       await setAudioModeAsync({
         playsInSilentMode: true,          // Play even when iPhone is on silent
         shouldPlayInBackground: true,     // Keep audio session alive in background
-        interruptionMode: "duckOthers",   // Lower other apps' audio (e.g. the game)
+        interruptionMode: "doNotMix",     // Required by Expo v57 for lock-screen controls
         allowsRecording: false,
       });
       this._audioConfigured = true;
@@ -703,7 +797,7 @@ class SpeechManager {
 
   async speak(text, options = {}) {
     // Ensure audio session is configured (lazy init in case init() hasn't resolved yet)
-    if (!this._audioConfigured) await this._configureAudioSession();
+    await this._ensureBackgroundAnchor();
 
     options = normalizeSpeechOptions(options);
     const tone = options.tone || "default";
@@ -777,7 +871,7 @@ class SpeechManager {
                 maxWaitMs:
                   options._staticOwner === "callout"
                     ? this._getCalloutMaxWaitMs(spokenText)
-                    : 10000,
+                    : this._getStaticAudioMaxWaitMs(spokenText, options.tone),
               }
             );
             if (!startedStaticPlayback) {
@@ -875,11 +969,12 @@ class SpeechManager {
   async _playPollyAudio(dataUri, profile) {
     return new Promise((resolve) => {
       try {
+        this._ensureBackgroundAnchor().catch(() => {});
         // Release any previous Polly player
         this._disposePlayer(this.pollyPlayer);
         this.pollyPlayer = null;
 
-        const player = createAudioPlayer({ uri: dataUri });
+        const player = createAudioPlayer({ uri: dataUri }, EFFECT_AUDIO_PLAYER_OPTIONS);
         player.volume = profile.volume * this.masterVolume * this.coPilotVolume;
         this.pollyPlayer = player;
 
@@ -931,6 +1026,8 @@ class SpeechManager {
    * @param {object} options  - Same options object passed to speak().
    */
   async speakWithPollyFallback(text, voiceId, options = {}) {
+    await this._ensureBackgroundAnchor();
+
     options = normalizeSpeechOptions(options);
     const tone = options.tone || "default";
     const now = Date.now();
@@ -1004,10 +1101,11 @@ class SpeechManager {
       if (this.boardingAnnouncePlayer) {
         this._disposePlayer(this.boardingAnnouncePlayer);
       }
-      this.boardingAnnouncePlayer = createAudioPlayer(audioUri);
+      this.boardingAnnouncePlayer = createAudioPlayer(audioUri, EFFECT_AUDIO_PLAYER_OPTIONS);
       this.boardingAnnouncePlayer.volume = this.masterVolume * this.safetyBriefingVolume;
       
       if (this.voiceEnabled) {
+        await this._ensureBackgroundAnchor();
         this.boardingAnnouncePlayer.play();
         this._scheduleBackgroundMediaRefresh([0, 500, 1500]);
       }
@@ -1134,11 +1232,12 @@ class SpeechManager {
         clearInterval(this._boardingMusicFadeTimer);
         this._boardingMusicFadeTimer = null;
       }
-      this.boardingMusic = createAudioPlayer(audioUri);
+      this.boardingMusic = createAudioPlayer(audioUri, EFFECT_AUDIO_PLAYER_OPTIONS);
       this.boardingMusic.loop = true;
       this.boardingMusic.volume = this.masterVolume * this.boardingMusicVolume;
       
       if (this.voiceEnabled) {
+        await this._ensureBackgroundAnchor();
         this.boardingMusic.play();
         this._scheduleBackgroundMediaRefresh([0, 500, 1500]);
       }

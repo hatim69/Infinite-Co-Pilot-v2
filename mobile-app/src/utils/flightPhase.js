@@ -21,6 +21,8 @@ const CRUISE_AP_CAPTURE_MS = 4000;
 const CRUISE_LEVEL_CAPTURE_MS = 12000;
 const CLIMB_VS_MIN_FPM = 300;
 const DESCENT_VS_MAX_FPM = -300;
+const ARRIVAL_NEGATIVE_VS_MAX_FPM = 0;
+const MIN_ARRIVAL_FLIGHT_TIME_SECONDS = 120;
 const POSITIVE_VS_MIN_FPM = 100;
 const TAKEOFF_GS_MIN_KTS = 35;
 const TAXI_GS_MIN_KTS = 1;
@@ -66,6 +68,8 @@ const getGroundSpeed = (telemetry) => telemetry.gs ?? 0;
 const getVerticalSpeed = (telemetry) => telemetry.vs ?? 0;
 const getAgl = (telemetry) => telemetry.agl ?? 0;
 const getDestinationNm = (telemetry) => telemetry.destDist;
+const getAirframeFlightTimeSeconds = (telemetry) =>
+  isFiniteNumber(telemetry.airframeFlightTime) ? telemetry.airframeFlightTime : 0;
 const isOnRunway = (telemetry) => telemetry.onRunway === true;
 const isPushbackAttached = (telemetry) =>
   telemetry.pushback === 1 ||
@@ -162,8 +166,21 @@ const isClimb = (telemetry) =>
   getAgl(telemetry) >= 5000 &&
   getVerticalSpeed(telemetry) > CLIMB_VS_MIN_FPM;
 
+const isArrivalPhasePossible = (telemetry) =>
+  getAirframeFlightTimeSeconds(telemetry) > MIN_ARRIVAL_FLIGHT_TIME_SECONDS;
+
+const isArrivalDescentProfile = (telemetry) =>
+  isArrivalPhasePossible(telemetry) &&
+  telemetry.onGround === false &&
+  getVerticalSpeed(telemetry) < ARRIVAL_NEGATIVE_VS_MAX_FPM;
+
 const isCruiseCaptured = (telemetry, tracker, now) => {
   if (telemetry.onGround) {
+    tracker.levelSince = null;
+    return false;
+  }
+
+  if (Math.abs(getVerticalSpeed(telemetry)) > CRUISE_LEVEL_VS_FPM) {
     tracker.levelSince = null;
     return false;
   }
@@ -173,7 +190,7 @@ const isCruiseCaptured = (telemetry, tracker, now) => {
     return now - tracker.levelSince >= CRUISE_AP_CAPTURE_MS;
   }
 
-  if (getAgl(telemetry) < 5000 || Math.abs(getVerticalSpeed(telemetry)) > CRUISE_LEVEL_VS_FPM) {
+  if (getAgl(telemetry) < 5000) {
     tracker.levelSince = null;
     return false;
   }
@@ -193,36 +210,43 @@ const isDestinationDecreasing = (telemetry, tracker) =>
   telemetry.destDist < tracker.previousDestDist - 0.01;
 
 const isDescent = (telemetry, tracker) =>
-  tracker.reachedCruise &&
-  getVerticalSpeed(telemetry) < DESCENT_VS_MAX_FPM &&
+  isArrivalDescentProfile(telemetry) &&
+  (tracker.reachedCruise || getAgl(telemetry) >= 5000) &&
   tracker.altitudeDescentSamples >= 3 &&
   (!isFiniteNumber(getDestinationNm(telemetry)) || tracker.destinationDescentSamples >= 1);
 
 const isApproach = (telemetry) =>
+  isArrivalDescentProfile(telemetry) &&
   isFiniteNumber(getDestinationNm(telemetry)) &&
   getDestinationNm(telemetry) <= 30 &&
-  getAgl(telemetry) < 10000 &&
-  getVerticalSpeed(telemetry) < DESCENT_VS_MAX_FPM;
+  getAgl(telemetry) < 10000;
 
 const isFinalApproach = (telemetry) =>
+  isArrivalDescentProfile(telemetry) &&
   isFiniteNumber(getDestinationNm(telemetry)) &&
   getDestinationNm(telemetry) <= 5 &&
   telemetry.gear === 1 &&
-  getAgl(telemetry) < 2000 &&
-  getVerticalSpeed(telemetry) < DESCENT_VS_MAX_FPM;
+  getAgl(telemetry) < 2000;
 
 const isLandingRollout = (telemetry) =>
-  telemetry.onGround === true && getGroundSpeed(telemetry) > TAKEOFF_GS_MIN_KTS;
+  isArrivalPhasePossible(telemetry) &&
+  telemetry.onGround === true &&
+  getGroundSpeed(telemetry) > TAKEOFF_GS_MIN_KTS;
 
-const isTaxiIn = (telemetry) => telemetry.onGround === true && isTaxiSpeed(telemetry);
+const isTaxiIn = (telemetry) =>
+  isArrivalPhasePossible(telemetry) &&
+  telemetry.onGround === true &&
+  isTaxiSpeed(telemetry);
 
 const isDeboarding = (telemetry) =>
+  isArrivalPhasePossible(telemetry) &&
   telemetry.onGround === true &&
   getGroundSpeed(telemetry) < TAXI_GS_MIN_KTS &&
   telemetry.brakes === 1 &&
   areEnginesOff(telemetry);
 
 const getArrivalGroundPhase = (telemetry) => {
+  if (!isArrivalPhasePossible(telemetry)) return null;
   if (isDeboarding(telemetry)) return "deboarding";
   if (isTaxiIn(telemetry)) return "taxi_in";
   return "landing";
@@ -234,16 +258,16 @@ const chooseLaterPhase = (currentPhase, nextPhase) =>
   getPhaseIndex(nextPhase) > getPhaseIndex(currentPhase) ? nextPhase : currentPhase;
 
 const isAllowedBackwardCorrection = (currentPhase, nextPhase) =>
-  (currentPhase === "taxi_out" && (nextPhase === "pushback" || nextPhase === "boarding")) ||
-  (currentPhase === "pushback" && nextPhase === "boarding") ||
-  (currentPhase === "cruise" && nextPhase === "climb") ||
-  (currentPhase === "approach" && nextPhase === "descent");
+  currentPhase === "cruise" && nextPhase === "climb";
 
 const inferInitialPhase = (telemetry, tracker, now, flags) => {
   if (!isAppInFlight(telemetry)) return "preflight";
 
   if (telemetry.onGround === true) {
-    if (flags?.hasFlown) return getArrivalGroundPhase(telemetry);
+    if (flags?.hasFlown) {
+      const arrivalGroundPhase = getArrivalGroundPhase(telemetry);
+      if (arrivalGroundPhase) return arrivalGroundPhase;
+    }
     if (isPushbackAttached(telemetry)) return "pushback";
     if (isTakeoffRoll(telemetry)) return "takeoff";
     if (isRunwayReadyForDeparture(telemetry) || isTaxiOut(telemetry)) return "taxi_out";
@@ -256,9 +280,7 @@ const inferInitialPhase = (telemetry, tracker, now, flags) => {
 
   if (isFinalApproach(telemetry)) return "final_approach";
   if (isApproach(telemetry)) return "approach";
-  if (getVerticalSpeed(telemetry) < DESCENT_VS_MAX_FPM && isFiniteNumber(getDestinationNm(telemetry))) {
-    return "descent";
-  }
+  if (isArrivalDescentProfile(telemetry)) return "descent";
   if (isInitialClimb(telemetry)) return "initial_climb";
   if (isCruiseCaptured(telemetry, tracker, now)) return "cruise";
   if (isClimb(telemetry)) return "climb";
@@ -304,7 +326,7 @@ const updateFlightMemory = (telemetry, tracker, now) => {
 };
 
 const markPhaseMemory = (phase, telemetry, tracker) => {
-  if (getPhaseIndex(phase) >= getPhaseIndex("taxi_out")) {
+  if (getPhaseIndex(phase) >= getPhaseIndex("pushback")) {
     tracker.departureStarted = true;
   }
 
@@ -332,13 +354,10 @@ const nextPhaseFrom = (phase, telemetry, tracker, now) => {
       if (telemetry.onGround === false) return "initial_climb";
       if (isPushbackAttached(telemetry)) return phase;
       if (isRunwayReadyForDeparture(telemetry) || isTaxiOut(telemetry)) return "taxi_out";
-      if (isBoarding(telemetry, tracker)) return "boarding";
       return phase;
 
     case "taxi_out":
       if (telemetry.onGround === false) return "initial_climb";
-      if (isPushbackAttached(telemetry)) return "pushback";
-      if (isParked(telemetry) && areEnginesOff(telemetry)) return "boarding";
       return isTakeoffRoll(telemetry) ? "takeoff" : phase;
 
     case "takeoff":
@@ -348,24 +367,25 @@ const nextPhaseFrom = (phase, telemetry, tracker, now) => {
       return getAgl(telemetry) >= 5000 ? "climb" : phase;
 
     case "climb":
+      if (isDescent(telemetry, tracker)) return "descent";
       return isCruiseCaptured(telemetry, tracker, now) ? "cruise" : phase;
 
     case "cruise":
-      if (telemetry.onGround === true) return getArrivalGroundPhase(telemetry);
+      if (telemetry.onGround === true) return getArrivalGroundPhase(telemetry) || phase;
       if (isClimb(telemetry)) return "climb";
       return isDescent(telemetry, tracker) ? "descent" : phase;
 
     case "descent":
-      if (telemetry.onGround === true) return getArrivalGroundPhase(telemetry);
+      if (telemetry.onGround === true) return getArrivalGroundPhase(telemetry) || phase;
       return isApproach(telemetry) ? "approach" : phase;
 
     case "approach":
-      if (telemetry.onGround === true) return getArrivalGroundPhase(telemetry);
-      if (getVerticalSpeed(telemetry) > CLIMB_VS_MIN_FPM) return "descent";
+      if (telemetry.onGround === true) return getArrivalGroundPhase(telemetry) || phase;
+      if (!isArrivalDescentProfile(telemetry)) return phase;
       return isFinalApproach(telemetry) ? "final_approach" : phase;
 
     case "final_approach":
-      if (telemetry.onGround === true) return getArrivalGroundPhase(telemetry);
+      if (telemetry.onGround === true) return getArrivalGroundPhase(telemetry) || phase;
       return isLandingRollout(telemetry) ? "landing" : phase;
 
     case "landing":

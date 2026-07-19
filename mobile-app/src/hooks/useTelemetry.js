@@ -76,6 +76,7 @@ const PHASE_READY_COMMANDS = [
   "aircraft/0/is_on_ground",
   "aircraft/0/groundspeed",
   "aircraft/0/vertical_speed",
+  "aircraft/0/airframe_flight_time",
   "aircraft/0/altitude_msl",
   "aircraft/0/altitude_agl",
   "aircraft/0/is_on_runway",
@@ -111,6 +112,7 @@ const POLL_COMMANDS = [
   "aircraft/0/indicated_airspeed",
   "aircraft/0/groundspeed",
   "aircraft/0/vertical_speed",
+  "aircraft/0/airframe_flight_time",
   "aircraft/0/altitude_msl",
   "aircraft/0/altitude_agl",
   "aircraft/0/systems/landing_gear/state",
@@ -172,6 +174,7 @@ const INITIAL_TELEMETRY = {
   ias: null,
   gs: null,
   vs: null,
+  airframeFlightTime: 0,
   msl: null,
   agl: null,
   throttle: 0,
@@ -532,6 +535,10 @@ export function useTelemetry(disableAutoConnect = false) {
         // ── Vertical speed ───────────────────────────────────────────────
         if (command === "aircraft/0/vertical_speed") {
           updateNext("vs", data * 196.85);
+        }
+
+        if (command === "aircraft/0/airframe_flight_time") {
+          updateNext("airframeFlightTime", typeof data === "number" ? data : 0);
         }
 
         // ── Altitude MSL ─────────────────────────────────────────────────

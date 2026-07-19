@@ -31,6 +31,7 @@ function withNotifeeManifest(config) {
 
     ensurePermission(androidManifest, "android.permission.FOREGROUND_SERVICE");
     ensurePermission(androidManifest, "android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE");
+    ensurePermission(androidManifest, "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK");
     ensurePermission(androidManifest, "android.permission.POST_NOTIFICATIONS");
 
     application.service = application.service || [];
@@ -40,7 +41,7 @@ function withNotifeeManifest(config) {
     application.service.push({
       $: {
         "android:name": "app.notifee.core.ForegroundService",
-        "android:foregroundServiceType": "connectedDevice",
+        "android:foregroundServiceType": "connectedDevice|mediaPlayback",
         "tools:replace": "android:foregroundServiceType",
       },
     });

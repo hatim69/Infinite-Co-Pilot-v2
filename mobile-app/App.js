@@ -152,7 +152,7 @@ const FadeTransition = ({ children }) => {
 
 // ─── Inner App (uses ThemeContext) ────────────────────────────────────────────
 function AppInner() {
-  useKeepAwake();
+  useKeepAwake(undefined, { suppressDeactivateWarnings: true });
   const { theme } = useTheme();
 
   const [disableAutoConnect, setDisableAutoConnectState] = useState(false);
@@ -232,6 +232,7 @@ function AppInner() {
             asForegroundService: true,
             foregroundServiceTypes: [
               AndroidForegroundServiceType.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
+              AndroidForegroundServiceType.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK,
             ],
             color: "#0D9488",
             ongoing: true,
@@ -272,6 +273,7 @@ function AppInner() {
   useEffect(() => {
     const sub = AppState.addEventListener("change", (state) => {
       setIsInBackground(state === "background" || state === "inactive");
+      speechManager.handleAppStateChange(state);
     });
     return () => sub.remove();
   }, []);
