@@ -35,6 +35,9 @@ const EXPO_SPEECH_MIN_TIMEOUT_MS = 3500;
 const EXPO_SPEECH_MAX_TIMEOUT_MS = 45000;
 const EXPO_SPEECH_MS_PER_WORD = 520;
 const QUEUE_ACTION_TIMEOUT_MS = 15000;
+const QUEUE_DRAIN_WAIT_TIMEOUT_MS = 20000;
+const MAX_SPEECH_QUEUE_LENGTH = 40;
+const MAX_CALLOUT_QUEUE_LENGTH = 10;
 const STATIC_AUDIO_START_OFFSET_SEC = 0.035;
 const BOARDING_MUSIC_FADE_MS = 1400;
 const BACKGROUND_KEEP_ALIVE_INTERVAL_MS = 45000;
@@ -60,6 +63,12 @@ const normalizeSpeechOptions = (options, defaultTone = "default") => {
 
 const hasUriScheme = (value) =>
   typeof value === "string" && /^[a-z][a-z0-9+.-]*:/i.test(value);
+
+const isPrecisionCallout = (spokenText) =>
+  Object.prototype.hasOwnProperty.call(PRECISION_CALLOUT_MAX_WAIT_MS, spokenText);
+
+const isCoalescableCallout = (spokenText) =>
+  /^(Flaps|Spoilers|Landing gear|Gears down)/i.test(String(spokenText || ""));
 
 class SpeechManager {
   constructor() {
@@ -97,6 +106,7 @@ class SpeechManager {
     this._backgroundAnchorStatusSubscription = null;
     this._backgroundKeepAliveTimer = null;
     this._backgroundAnchorPromise = null;
+    this._calloutDrainWaiters = new Set();
     this._boardingMusicPrefetches = new Map();
     this._audioConfigured = false;
     this.isProcessingQueue = false;
@@ -122,8 +132,18 @@ class SpeechManager {
   }
 
   _enqueueSpeech(entry) {
+    if (entry.spokenText) {
+      const duplicateIndex = this.speechQueue.findIndex(
+        (queued) =>
+          queued.spokenText === entry.spokenText &&
+          Boolean(queued.options?.priority) === Boolean(entry.options?.priority)
+      );
+      if (duplicateIndex !== -1) this.speechQueue.splice(duplicateIndex, 1);
+    }
+
     if (!entry.options?.priority) {
       this.speechQueue.push(entry);
+      this._trimSpeechQueue();
       return;
     }
 
@@ -132,6 +152,15 @@ class SpeechManager {
     );
     if (firstNormalIndex === -1) this.speechQueue.push(entry);
     else this.speechQueue.splice(firstNormalIndex, 0, entry);
+    this._trimSpeechQueue();
+  }
+
+  _trimSpeechQueue() {
+    while (this.speechQueue.length > MAX_SPEECH_QUEUE_LENGTH) {
+      const dropIndex = this.speechQueue.findIndex((queued) => !queued.options?.priority);
+      this.speechQueue.splice(dropIndex === -1 ? 0 : dropIndex, 1);
+      console.warn("[Speech] Speech queue overflow; dropped the oldest queued announcement.");
+    }
   }
 
   _enqueueAction(action, options = {}) {
@@ -157,11 +186,63 @@ class SpeechManager {
   }
 
   _enqueueCallout(entry) {
-    this._enqueueSpeech({
+    const calloutEntry = {
       ...entry,
       options: { ...(entry.options || {}), priority: true, _staticOwner: "callout" },
+    };
+
+    if (isCoalescableCallout(calloutEntry.spokenText)) {
+      const duplicateIndex = this.calloutQueue.findIndex(
+        (queued) =>
+          isCoalescableCallout(queued.spokenText) &&
+          String(queued.spokenText).split(" ")[0] ===
+            String(calloutEntry.spokenText).split(" ")[0]
+      );
+      if (duplicateIndex !== -1) this.calloutQueue.splice(duplicateIndex, 1);
+    }
+
+    this.calloutQueue.push(calloutEntry);
+    this._trimCalloutQueue();
+    this.processCalloutQueue();
+  }
+
+  _trimCalloutQueue() {
+    while (this.calloutQueue.length > MAX_CALLOUT_QUEUE_LENGTH) {
+      const dropIndex = this.calloutQueue.findIndex(
+        (queued) => !isPrecisionCallout(queued.spokenText)
+      );
+      this.calloutQueue.splice(dropIndex === -1 ? 0 : dropIndex, 1);
+      console.warn("[Speech] Callout queue overflow; dropped the oldest non-precision callout.");
+    }
+  }
+
+  _isCalloutLaneBusy() {
+    return (
+      this.isProcessingCalloutQueue ||
+      this.calloutQueue.length > 0 ||
+      Boolean(this.currentCalloutPlayer || this.currentCalloutFinish)
+    );
+  }
+
+  _notifyCalloutLaneDrained() {
+    if (this._isCalloutLaneBusy()) return;
+    this._calloutDrainWaiters.forEach((resolve) => resolve());
+    this._calloutDrainWaiters.clear();
+  }
+
+  _waitForCalloutLane() {
+    if (!this._isCalloutLaneBusy()) return Promise.resolve();
+
+    return new Promise((resolve) => {
+      let timeoutId;
+      const finish = () => {
+        if (timeoutId) clearTimeout(timeoutId);
+        this._calloutDrainWaiters.delete(finish);
+        resolve();
+      };
+      timeoutId = setTimeout(finish, QUEUE_DRAIN_WAIT_TIMEOUT_MS);
+      this._calloutDrainWaiters.add(finish);
     });
-    this.processQueue();
   }
 
   _getCalloutMaxWaitMs(spokenText) {
@@ -520,6 +601,7 @@ class SpeechManager {
 
         subscription = player.addListener("playbackStatusUpdate", (status) => {
           if (
+            status.error ||
             status.didJustFinish ||
             (status.currentTime > 0 &&
               status.duration > 0 &&
@@ -600,6 +682,7 @@ class SpeechManager {
       }
     } finally {
       this.isProcessingCalloutQueue = false;
+      this._notifyCalloutLaneDrained();
     }
   }
 
@@ -708,6 +791,7 @@ class SpeechManager {
       this.calloutQueue = [];
       this.isProcessingQueue = false;
       this.isProcessingCalloutQueue = false;
+      this._notifyCalloutLaneDrained();
     } else {
       if (this.boardingMusic) {
         try {
@@ -819,12 +903,11 @@ class SpeechManager {
     }
 
     if (tone === "callout" && staticAudioMap[spokenText] && !options.forceQueue) {
-      this._enqueueSpeech({
+      this._enqueueCallout({
         spokenText,
-        options: { ...options, priority: true, _staticOwner: "callout" },
+        options,
         profile,
       });
-      this.processQueue();
       return;
     }
     
@@ -848,6 +931,10 @@ class SpeechManager {
           if (typeof action === "function") {
             await this._runQueueAction(action);
             continue;
+          }
+
+          if (options._staticOwner !== "callout") {
+            await this._waitForCalloutLane();
           }
 
           if (options.withChime) {
@@ -968,43 +1055,47 @@ class SpeechManager {
    */
   async _playPollyAudio(dataUri, profile) {
     return new Promise((resolve) => {
+      let player;
+      let cleanup;
+      let safetyTimer;
+      let resolved = false;
+
+      const finish = () => {
+        if (resolved) return;
+        resolved = true;
+        if (cleanup) {
+          try { cleanup.remove(); } catch (_) {}
+        }
+        if (safetyTimer) clearTimeout(safetyTimer);
+        if (this.pollyPlayer === player) {
+          this.pollyPlayer = null;
+        }
+        this._disposePlayer(player, { pause: true });
+        this._scheduleBackgroundMediaRefresh();
+        resolve();
+      };
+
       try {
         this._ensureBackgroundAnchor().catch(() => {});
         // Release any previous Polly player
         this._disposePlayer(this.pollyPlayer);
         this.pollyPlayer = null;
 
-        const player = createAudioPlayer({ uri: dataUri }, EFFECT_AUDIO_PLAYER_OPTIONS);
+        player = createAudioPlayer({ uri: dataUri }, EFFECT_AUDIO_PLAYER_OPTIONS);
         player.volume = profile.volume * this.masterVolume * this.coPilotVolume;
         this.pollyPlayer = player;
 
-        // Resolve when playback ends (or on error)
-        const cleanup = player.addListener("playbackStatusUpdate", (status) => {
-          if (status.didJustFinish || status.isLoaded === false) {
-            try { cleanup.remove(); } catch (_) {}
-            resolve();
-          }
+        cleanup = player.addListener("playbackStatusUpdate", (status) => {
+          if (status.error || status.didJustFinish) finish();
         });
 
-        // Safety-net resolve after reasonable max time (60s)
-        const safetyTimer = setTimeout(() => {
-          try { cleanup.remove(); } catch (_) {}
-          resolve();
-        }, 60000);
+        safetyTimer = setTimeout(finish, 60000);
 
         player.play();
         this._scheduleBackgroundMediaRefresh([0, 350, 1200]);
-
-        // Override resolve to also clear safetyTimer
-        const originalResolve = resolve;
-        resolve = () => {
-          clearTimeout(safetyTimer);
-          this._scheduleBackgroundMediaRefresh();
-          originalResolve();
-        };
       } catch (err) {
         console.warn("[Polly] Audio playback failed:", err.message);
-        resolve();
+        finish();
       }
     });
   }
@@ -1307,6 +1398,7 @@ class SpeechManager {
     if (this.currentCalloutFinish) this.currentCalloutFinish();
     else this._disposePlayer(this.currentCalloutPlayer);
     this.currentCalloutPlayer = null;
+    this._notifyCalloutLaneDrained();
     this.stopBoardingMusic();
     this.stopBoardingAnnouncement();
     if (this.chimePlayer) {

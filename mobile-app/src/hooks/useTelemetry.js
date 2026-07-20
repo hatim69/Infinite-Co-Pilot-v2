@@ -45,6 +45,7 @@ const PRE_TAKEOFF_PHASES = new Set(["taxi_out", "takeoff"]);
 const GEAR_UP_PHASES = new Set(["takeoff", "initial_climb", "climb"]);
 const GEAR_DOWN_PHASES = new Set(["descent", "approach", "final_approach", "landing"]);
 const BOARDING_ANNOUNCEMENT_PHASES = new Set(["preflight", "boarding"]);
+const TURBULENCE_ANNOUNCEMENT_PHASES = new Set(["cruise"]);
 const FLAP_CALLOUT_PHASES = new Set([
   "preflight",
   "boarding",
@@ -53,6 +54,7 @@ const FLAP_CALLOUT_PHASES = new Set([
   "takeoff",
   "initial_climb",
   "climb",
+  "cruise",
   "descent",
   "approach",
   "final_approach",
@@ -105,6 +107,11 @@ const isDescendingForCallout = (telemetry) =>
   telemetry.onGround === false &&
   typeof telemetry.vs === "number" &&
   telemetry.vs < DESCENT_CALLOUT_MAX_VS_FPM;
+
+const POST_TURBULENCE_ANNOUNCEMENT =
+  "Ladies and gentlemen, we've now returned to smooth air and the seat belt sign has been switched off. " +
+  "You are free to move around the cabin if needed, though we recommend keeping your seat belt fastened whenever you're seated. " +
+  "Thank you.";
 
 /** All IF Connect API parameters to poll */
 const POLL_COMMANDS = [
@@ -267,6 +274,7 @@ export function useTelemetry(disableAutoConnect = false) {
     isManualConnection: false,
     moderateTurbulenceAnnounced: false,
     severeTurbulenceAnnounced: false,
+    suppressNextAutoSeatbeltOff: false,
   });
 
   // Keep stateRef in sync with latest telemetry
@@ -633,8 +641,11 @@ export function useTelemetry(disableAutoConnect = false) {
 
           const isSevere   = factor >= 0.50;
           const isModerate = factor >= 0.25;
+          const canAnnounceTurbulence =
+            state.onGround === false &&
+            isPhaseActive(state, phaseTrackerRef.current, TURBULENCE_ANNOUNCEMENT_PHASES);
 
-          if (isSevere && !flags.severeTurbulenceAnnounced) {
+          if (canAnnounceTurbulence && isSevere && !flags.severeTurbulenceAnnounced) {
             // ── Severe turbulence announcement ────────────────────────────
             flags.severeTurbulenceAnnounced = true;
             flags.moderateTurbulenceAnnounced = true; // absorb the moderate flag too
@@ -655,7 +666,7 @@ export function useTelemetry(disableAutoConnect = false) {
 
             speak(announcement, { tone: "briefing", withChime: true });
 
-          } else if (isModerate && !flags.moderateTurbulenceAnnounced) {
+          } else if (canAnnounceTurbulence && isModerate && !flags.moderateTurbulenceAnnounced) {
             // ── Moderate turbulence announcement ──────────────────────────
             flags.moderateTurbulenceAnnounced = true;
 
@@ -678,6 +689,13 @@ export function useTelemetry(disableAutoConnect = false) {
           } else if (factor < 0.10) {
             // Turbulence has cleared — reset flags so the next bout can be announced
             if (flags.moderateTurbulenceAnnounced || flags.severeTurbulenceAnnounced) {
+              if (canAnnounceTurbulence) {
+                if (state.seatbelt !== 0) {
+                  flags.suppressNextAutoSeatbeltOff = true;
+                  ifConnect.set("aircraft/0/systems/signs/seatbelt", false);
+                }
+                speak(POST_TURBULENCE_ANNOUNCEMENT, { tone: "briefing", withChime: true });
+              }
               flags.moderateTurbulenceAnnounced = false;
               flags.severeTurbulenceAnnounced = false;
               console.log("[Turbulence] Factor dropped below 0.10 — announcement flags reset.");
@@ -946,7 +964,9 @@ export function useTelemetry(disableAutoConnect = false) {
           }
 
           if (seatbeltChanged) {
-            if (shouldPlayBoardingAnnouncement) {
+            if (!on && flags.suppressNextAutoSeatbeltOff) {
+              flags.suppressNextAutoSeatbeltOff = false;
+            } else if (shouldPlayBoardingAnnouncement) {
               flags.boardingAnnouncementPlayed = true;
               speak("Seatbelt signs on.", {
                 tone: "notice",

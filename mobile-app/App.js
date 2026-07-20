@@ -75,6 +75,8 @@ import SystemStatus from "./src/components/cards/SystemStatus";
 import FlightStrip from "./src/components/layout/FlightStrip";
 import CrewAssistant from "./src/components/assistant/CrewAssistant";
 import Sidebar from "./src/components/ui/Sidebar";
+import Gatekeeper from "./src/components/ui/Gatekeeper";
+import { BETA_EXPIRY_DATE, SUPABASE_URL } from "./src/utils/beta";
 import * as Sentry from '@sentry/react-native';
 
 const FLIGHT_DECK_MIN_PREP_MS = 900;
@@ -168,16 +170,6 @@ function AppInner() {
     await AsyncStorage.setItem('disableAutoConnect', val.toString());
   };
 
-  const {
-    connectionStatus,
-    connectedIp,
-    telemetry,
-    manualConnect,
-    discoveredDevices,
-    selectDevice,
-    disconnectDevice,
-  } = useTelemetry(disableAutoConnect);
-
   const [logs, setLogs] = useState([
     { time: new Date().toLocaleTimeString(), text: "System initialized. Awaiting simulator..." },
   ]);
@@ -189,6 +181,19 @@ function AppInner() {
   const [isBackgroundMode, setIsBackgroundMode] = useState(false);
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const [isSplashVisible, setIsSplashVisible] = useState(true);
+  const [isBetaVerified, setIsBetaVerified] = useState(false);
+  const [isBetaExpired, setIsBetaExpired] = useState(false);
+  const [betaNetworkError, setBetaNetworkError] = useState(false);
+
+  const {
+    connectionStatus,
+    connectedIp,
+    telemetry,
+    manualConnect,
+    discoveredDevices,
+    selectDevice,
+    disconnectDevice,
+  } = useTelemetry(disableAutoConnect || !isBetaVerified);
 
   useEffect(() => {
     let isMounted = true;
@@ -198,7 +203,39 @@ function AppInner() {
       new Promise((resolve) => setTimeout(resolve, FLIGHT_DECK_PREP_TIMEOUT_MS)),
     ]);
 
-    Promise.all([minimumPrep, audioReady]).finally(() => {
+    const checkBetaStatus = async () => {
+      try {
+        const verified = await AsyncStorage.getItem('beta_verified');
+        const masterVerified = await AsyncStorage.getItem('beta_verified_master');
+        
+        if (verified === 'true' || masterVerified === 'true') {
+          setIsBetaVerified(true);
+        }
+
+        if (masterVerified === 'true') {
+          return; // Master key bypasses expiration and network checks
+        }
+        
+        // Use Supabase itself as the source of truth for internet time to avoid third-party API downtime
+        const response = await fetch(`${SUPABASE_URL}/rest/v1/`, { method: 'HEAD' });
+        const dateHeader = response.headers.get('date');
+        
+        if (!dateHeader) {
+          throw new Error('No date header');
+        }
+        
+        const currentUnix = new Date(dateHeader).getTime();
+        const expiryUnix = new Date(BETA_EXPIRY_DATE).getTime();
+        
+        if (currentUnix > expiryUnix) {
+          setIsBetaExpired(true);
+        }
+      } catch (e) {
+        setBetaNetworkError(true);
+      }
+    };
+
+    Promise.all([minimumPrep, audioReady, checkBetaStatus()]).finally(() => {
       if (isMounted) setIsSplashVisible(false);
     });
 
@@ -650,6 +687,34 @@ function AppInner() {
         {isSplashVisible ? (
           <FadeTransition key="splash">
             {renderSplashScreen()}
+          </FadeTransition>
+        ) : betaNetworkError ? (
+          <FadeTransition key="networkError">
+            <View style={[styles.splashContainer, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+              <View style={[styles.splashLogoWrapper, { backgroundColor: 'rgba(248, 113, 113, 0.1)', borderColor: '#F87171' }]}>
+                <WifiOff size={40} color="#F87171" />
+              </View>
+              <Text style={[styles.splashTitle, { color: theme.textPrimary }]}>Network Required</Text>
+              <Text style={[styles.splashSubtitle, { color: theme.textMuted, textAlign: 'center', marginHorizontal: 20 }]}>
+                An active internet connection is required to verify the beta period.
+              </Text>
+            </View>
+          </FadeTransition>
+        ) : isBetaExpired ? (
+          <FadeTransition key="expiredError">
+            <View style={[styles.splashContainer, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+              <View style={[styles.splashLogoWrapper, { backgroundColor: 'rgba(245, 158, 11, 0.1)', borderColor: '#F59E0B' }]}>
+                <Clock size={40} color="#F59E0B" />
+              </View>
+              <Text style={[styles.splashTitle, { color: theme.textPrimary }]}>Beta Expired</Text>
+              <Text style={[styles.splashSubtitle, { color: theme.textMuted, textAlign: 'center', marginHorizontal: 20 }]}>
+                The closed beta period has ended. Thank you for testing!
+              </Text>
+            </View>
+          </FadeTransition>
+        ) : !isBetaVerified ? (
+          <FadeTransition key="gatekeeper">
+            <Gatekeeper onVerify={() => setIsBetaVerified(true)} />
           </FadeTransition>
         ) : (
           <FadeTransition key={isConnected ? (isBackgroundMode ? "backgroundMode" : "dashboard") : "connection"}>

@@ -179,6 +179,10 @@ export const staticAudioMap = {
     female: require("../../assets/audio/female_crew_severe_turbulence.mp3"),
     male: require("../../assets/audio/male_crew_severe_turbulence.mp3")
   },
+  "Ladies and gentlemen, we've now returned to smooth air and the seat belt sign has been switched off. You are free to move around the cabin if needed, though we recommend keeping your seat belt fastened whenever you're seated. Thank you.": {
+    female: require("../../assets/audio/female_crew_post_turbulence.mp3"),
+    male: require("../../assets/audio/male_crew_post_turbulence.mp3")
+  },
   "Belt loader connected.": {
     female: require("../../assets/audio/female_service_belt_loader_connected.mp3"),
     male: require("../../assets/audio/male_service_belt_loader_connected.mp3")
