@@ -1,6 +1,6 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
-import { ArrowRight, CheckSquare, ShieldCheck, Square } from 'lucide-react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { ArrowRight, CheckSquare, RefreshCw, ShieldCheck, Square } from 'lucide-react-native';
 import { useTheme } from '../../context/ThemeContext';
 
 const PHASE_META = {
@@ -100,7 +100,6 @@ const getConditions = (phase, telemetry) => {
     pushback: [
       common.onGround,
       common.pushbackAttached,
-      { label: "Engines not required yet", met: true },
     ],
     taxi_out: [
       common.onGround,
@@ -123,7 +122,7 @@ const getConditions = (phase, telemetry) => {
   return byPhase[phase] || byPhase.preflight;
 };
 
-const CrewAssistant = ({ telemetry, isConnected }) => {
+const CrewAssistant = ({ telemetry, isConnected, onResetConnectingFlight }) => {
   const { theme } = useTheme();
   const phase = isConnected ? telemetry.phase || "preflight" : "preflight";
   const details = PHASE_META[phase] || PHASE_META.preflight;
@@ -143,6 +142,21 @@ const CrewAssistant = ({ telemetry, isConnected }) => {
           </View>
           <Text style={[styles.headerTitle, { color: theme.textSecondary }]}>Crew Assistant</Text>
         </View>
+        {isConnected && (
+          <TouchableOpacity
+            style={[
+              styles.nextFlightButton,
+              { backgroundColor: theme.accentBgStrong, borderColor: theme.accentActiveBorder },
+            ]}
+            onPress={onResetConnectingFlight}
+            activeOpacity={0.75}
+            accessibilityRole="button"
+            accessibilityLabel="Prepare next flight"
+          >
+            <RefreshCw size={13} color={theme.accentText} />
+            <Text style={[styles.nextFlightText, { color: theme.accentText }]}>Next Flight</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       <View style={styles.phaseRow}>
@@ -204,11 +218,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 10,
     borderBottomWidth: 1,
     paddingBottom: 10,
     marginBottom: 14,
   },
   titleContainer: {
+    flex: 1,
+    minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
@@ -226,6 +243,21 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 1.2,
     textTransform: 'uppercase',
+  },
+  nextFlightButton: {
+    flexShrink: 0,
+    minHeight: 32,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  nextFlightText: {
+    fontSize: 11,
+    fontWeight: '800',
   },
   phaseRow: {
     flexDirection: 'row',

@@ -31,13 +31,17 @@ const PRECISION_CALLOUT_MAX_WAIT_MS = {
   V2: 2000,
 };
 const DEFAULT_CALLOUT_MAX_WAIT_MS = 5000;
+const STATIC_AUDIO_START_TIMEOUT_MS = 1200;
+const POLLY_AUDIO_START_TIMEOUT_MS = 2500;
+const CHIME_START_TIMEOUT_MS = 700;
+const CHIME_MAX_WAIT_MS = 2500;
+const BOARDING_ANNOUNCEMENT_START_TIMEOUT_MS = 3000;
+const BOARDING_ANNOUNCEMENT_MAX_WAIT_MS = 180000;
 const EXPO_SPEECH_MIN_TIMEOUT_MS = 3500;
 const EXPO_SPEECH_MAX_TIMEOUT_MS = 45000;
 const EXPO_SPEECH_MS_PER_WORD = 520;
 const QUEUE_ACTION_TIMEOUT_MS = 15000;
-const QUEUE_DRAIN_WAIT_TIMEOUT_MS = 20000;
-const MAX_SPEECH_QUEUE_LENGTH = 40;
-const MAX_CALLOUT_QUEUE_LENGTH = 10;
+const MAX_SPEECH_QUEUE_LENGTH = 120;
 const STATIC_AUDIO_START_OFFSET_SEC = 0.035;
 const BOARDING_MUSIC_FADE_MS = 1400;
 const BACKGROUND_KEEP_ALIVE_INTERVAL_MS = 45000;
@@ -46,6 +50,10 @@ const BACKGROUND_AUDIO_PLAYER_OPTIONS = {
   keepAudioSessionActive: true,
 };
 const EFFECT_AUDIO_PLAYER_OPTIONS = {
+  keepAudioSessionActive: true,
+};
+const CHIME_AUDIO_PLAYER_OPTIONS = {
+  updateInterval: 50,
   keepAudioSessionActive: true,
 };
 const STATIC_AUDIO_PLAYER_OPTIONS = {
@@ -64,16 +72,9 @@ const normalizeSpeechOptions = (options, defaultTone = "default") => {
 const hasUriScheme = (value) =>
   typeof value === "string" && /^[a-z][a-z0-9+.-]*:/i.test(value);
 
-const isPrecisionCallout = (spokenText) =>
-  Object.prototype.hasOwnProperty.call(PRECISION_CALLOUT_MAX_WAIT_MS, spokenText);
-
-const isCoalescableCallout = (spokenText) =>
-  /^(Flaps|Spoilers|Landing gear|Gears down)/i.test(String(spokenText || ""));
-
 class SpeechManager {
   constructor() {
     this.speechQueue = [];
-    this.calloutQueue = [];
     this.sirenPlaying = false;
     this.addLog = null;
     this.lastSpokenText = "";
@@ -92,12 +93,14 @@ class SpeechManager {
     this.sirenPlayer = null;
     this.chimePlayer = null;
     this.boardingAnnouncePlayer = null;
+    this.boardingAnnounceFinish = null;
     this.silentPlayer = null;
     this.pollyPlayer = null; // dedicated player for Polly audio
     this.currentAnnouncementPlayer = null;
     this.currentAnnouncementFinish = null;
     this.currentCalloutPlayer = null;
     this.currentCalloutFinish = null;
+    this.currentChimeFinish = null;
     this._boardingMusicFadeTimer = null;
     this._lockScreenArtworkUrl = null;
     this._backgroundSessionState = { active: false, connectedIp: "" };
@@ -106,12 +109,13 @@ class SpeechManager {
     this._backgroundAnchorStatusSubscription = null;
     this._backgroundKeepAliveTimer = null;
     this._backgroundAnchorPromise = null;
-    this._calloutDrainWaiters = new Set();
     this._boardingMusicPrefetches = new Map();
     this._audioConfigured = false;
     this.isProcessingQueue = false;
-    this.isProcessingCalloutQueue = false;
     this.expoSpeechActive = false;
+    this._playbackGeneration = 0;
+    this._speechPlaybackDepth = 0;
+    this._foregroundPlaybackTail = Promise.resolve();
 
     // In-memory Polly response cache: Map<"text|voiceId", base64DataUri>
     // Avoids repeat network calls for identical text+voice combinations.
@@ -124,11 +128,11 @@ class SpeechManager {
     if (!player) return;
     try {
       if (pause && typeof player.pause === "function") player.pause();
-    } catch (e) {}
+    } catch (e) { }
     try {
       if (typeof player.remove === "function") player.remove();
       else if (typeof player.release === "function") player.release();
-    } catch (e) {}
+    } catch (e) { }
   }
 
   _enqueueSpeech(entry) {
@@ -168,8 +172,9 @@ class SpeechManager {
     this.processQueue();
   }
 
-  async _runQueueAction(action) {
+  async _runQueueAction(action, options = {}) {
     let timeoutId;
+    const timeoutMs = options.actionTimeoutMs || QUEUE_ACTION_TIMEOUT_MS;
     try {
       await Promise.race([
         Promise.resolve().then(action),
@@ -177,7 +182,7 @@ class SpeechManager {
           timeoutId = setTimeout(() => {
             console.warn("[Speech] Queue action timed out; continuing queue.");
             resolve();
-          }, QUEUE_ACTION_TIMEOUT_MS);
+          }, timeoutMs);
         }),
       ]);
     } finally {
@@ -191,58 +196,29 @@ class SpeechManager {
       options: { ...(entry.options || {}), priority: true, _staticOwner: "callout" },
     };
 
-    if (isCoalescableCallout(calloutEntry.spokenText)) {
-      const duplicateIndex = this.calloutQueue.findIndex(
-        (queued) =>
-          isCoalescableCallout(queued.spokenText) &&
-          String(queued.spokenText).split(" ")[0] ===
-            String(calloutEntry.spokenText).split(" ")[0]
-      );
-      if (duplicateIndex !== -1) this.calloutQueue.splice(duplicateIndex, 1);
-    }
-
-    this.calloutQueue.push(calloutEntry);
-    this._trimCalloutQueue();
-    this.processCalloutQueue();
+    this._enqueueSpeech(calloutEntry);
+    this.processQueue();
   }
 
-  _trimCalloutQueue() {
-    while (this.calloutQueue.length > MAX_CALLOUT_QUEUE_LENGTH) {
-      const dropIndex = this.calloutQueue.findIndex(
-        (queued) => !isPrecisionCallout(queued.spokenText)
-      );
-      this.calloutQueue.splice(dropIndex === -1 ? 0 : dropIndex, 1);
-      console.warn("[Speech] Callout queue overflow; dropped the oldest non-precision callout.");
-    }
-  }
-
-  _isCalloutLaneBusy() {
-    return (
-      this.isProcessingCalloutQueue ||
-      this.calloutQueue.length > 0 ||
-      Boolean(this.currentCalloutPlayer || this.currentCalloutFinish)
-    );
-  }
-
-  _notifyCalloutLaneDrained() {
-    if (this._isCalloutLaneBusy()) return;
-    this._calloutDrainWaiters.forEach((resolve) => resolve());
-    this._calloutDrainWaiters.clear();
-  }
-
-  _waitForCalloutLane() {
-    if (!this._isCalloutLaneBusy()) return Promise.resolve();
-
-    return new Promise((resolve) => {
-      let timeoutId;
-      const finish = () => {
-        if (timeoutId) clearTimeout(timeoutId);
-        this._calloutDrainWaiters.delete(finish);
-        resolve();
-      };
-      timeoutId = setTimeout(finish, QUEUE_DRAIN_WAIT_TIMEOUT_MS);
-      this._calloutDrainWaiters.add(finish);
+  async _withForegroundPlayback(playbackAction) {
+    const previousPlayback = this._foregroundPlaybackTail.catch(() => { });
+    let releasePlayback;
+    const currentPlayback = new Promise((resolve) => {
+      releasePlayback = resolve;
     });
+    const tailPlayback = previousPlayback.then(() => currentPlayback);
+
+    this._foregroundPlaybackTail = tailPlayback;
+
+    await previousPlayback;
+    try {
+      return await playbackAction();
+    } finally {
+      releasePlayback();
+      if (this._foregroundPlaybackTail === tailPlayback) {
+        this._foregroundPlaybackTail = Promise.resolve();
+      }
+    }
   }
 
   _getCalloutMaxWaitMs(spokenText) {
@@ -300,6 +276,20 @@ class SpeechManager {
     }
   }
 
+  _markLoggedOptions(spokenText, options = {}) {
+    if (!spokenText || options._logged) return options;
+    this._logSpeech(spokenText, options);
+    return { ...options, _logged: true };
+  }
+
+  _beginSpeechAudio() {
+    this._speechPlaybackDepth += 1;
+  }
+
+  _endSpeechAudio() {
+    this._speechPlaybackDepth = Math.max(0, this._speechPlaybackDepth - 1);
+  }
+
   _getWordCount(text) {
     return String(text || "").trim().split(/\s+/).filter(Boolean).length;
   }
@@ -315,12 +305,26 @@ class SpeechManager {
     return Math.min(15000, this._getExpoSpeechTimeoutMs(spokenText));
   }
 
-  _interruptCurrentNonCalloutAudio() {
-    if (this.expoSpeechActive) {
-      try { Speech.stop(); } catch (e) {}
-      this.expoSpeechActive = false;
+  _stopSpeechPlayback({ clearQueues = false } = {}) {
+    this._playbackGeneration += 1;
+    if (clearQueues) {
+      this.speechQueue = [];
     }
+    Speech.stop();
+    this.expoSpeechActive = false;
     this._stopCurrentAnnouncement();
+    this.currentAnnouncementPlayer = null;
+    if (this.currentCalloutFinish) this.currentCalloutFinish({ interrupted: true });
+    else this._disposePlayer(this.currentCalloutPlayer);
+    this.currentCalloutPlayer = null;
+    if (this.currentChimeFinish) this.currentChimeFinish({ interrupted: true });
+    else this._disposePlayer(this.chimePlayer);
+    this.chimePlayer = null;
+    if (this.boardingAnnounceFinish) this.boardingAnnounceFinish({ interrupted: true });
+    else this._disposePlayer(this.boardingAnnouncePlayer);
+    this.boardingAnnouncePlayer = null;
+    this._speechPlaybackDepth = 0;
+    this.stopBoardingAnnouncement();
   }
 
   _speakWithExpoSpeech(text, profile) {
@@ -333,6 +337,7 @@ class SpeechManager {
         if (resolved) return;
         resolved = true;
         if (safetyTimer) clearTimeout(safetyTimer);
+        this._endSpeechAudio();
         this.expoSpeechActive = false;
         this._scheduleBackgroundMediaRefresh();
         resolve();
@@ -342,9 +347,10 @@ class SpeechManager {
         Promise.resolve(this._ensureBackgroundAnchor())
           .then(() => {
             this.expoSpeechActive = true;
+            this._beginSpeechAudio();
             safetyTimer = setTimeout(() => {
               console.warn("[Speech] Expo Speech callback timed out; continuing queue.");
-              try { Speech.stop(); } catch (e) {}
+              try { Speech.stop(); } catch (e) { }
               finish();
             }, this._getExpoSpeechTimeoutMs(text));
 
@@ -443,7 +449,7 @@ class SpeechManager {
       if (force && typeof this.silentPlayer.seekTo === "function") {
         await this.silentPlayer.seekTo(0, 0, 0);
       }
-    } catch (e) {}
+    } catch (e) { }
 
     try {
       if (!this.silentPlayer.playing && typeof this.silentPlayer.play === "function") {
@@ -477,6 +483,13 @@ class SpeechManager {
       }, delay);
       this._backgroundMediaRefreshTimers.add(timer);
     });
+  }
+
+  _recoverBackgroundAudioSession(delays = [0, 250, 1000]) {
+    this._ensureBackgroundAnchor({ force: true }).catch((e) => {
+      console.log("[Speech] Background audio recovery failed:", e?.message || e);
+    });
+    this._scheduleBackgroundMediaRefresh(delays);
   }
 
   _installBackgroundAnchorResumeGuard() {
@@ -517,7 +530,7 @@ class SpeechManager {
 
   _stopCurrentAnnouncement() {
     if (this.currentAnnouncementFinish) {
-      this.currentAnnouncementFinish();
+      this.currentAnnouncementFinish({ interrupted: true });
       return;
     }
     this._disposePlayer(this.currentAnnouncementPlayer);
@@ -529,23 +542,112 @@ class SpeechManager {
 
     try {
       await this._ensureBackgroundAnchor();
-      if (this.chimePlayer) {
-        this._disposePlayer(this.chimePlayer, { pause: true });
-        this.chimePlayer = null;
-      }
-      
-      this.chimePlayer = createAudioPlayer(CHIME_AUDIO_ASSET, EFFECT_AUDIO_PLAYER_OPTIONS);
-      this.chimePlayer.volume = this.masterVolume;
-      this.chimePlayer.play();
-      this._scheduleBackgroundMediaRefresh([0, 400]);
-      return true;
     } catch (e) {
-      console.log("[Speech] Chime play failed:", e);
-      return false;
+      console.log("[Speech] Chime background anchor failed:", e);
     }
+
+    return new Promise((resolve) => {
+      let player;
+      let subscription;
+      let checkInterval;
+      let startTimer;
+      let safetyTimer;
+      let resolved = false;
+      let hasStartedPlayback = false;
+
+      const finish = ({ interrupted = false } = {}) => {
+        if (resolved) return;
+        resolved = true;
+        if (subscription) {
+          try { subscription.remove(); } catch (e) { }
+        }
+        if (checkInterval) clearInterval(checkInterval);
+        if (startTimer) clearTimeout(startTimer);
+        if (safetyTimer) clearTimeout(safetyTimer);
+        if (this.chimePlayer === player) {
+          this.chimePlayer = null;
+        }
+        if (this.currentChimeFinish === finish) {
+          this.currentChimeFinish = null;
+        }
+        this._disposePlayer(player, { pause: true });
+        this._endSpeechAudio();
+        this._recoverBackgroundAudioSession([0, 400]);
+        resolve(interrupted || hasStartedPlayback);
+      };
+
+      const markPlaybackStarted = (status) => {
+        if (hasStartedPlayback) return;
+        if (
+          status?.playing ||
+          status?.didJustFinish ||
+          status?.currentTime > 0 ||
+          player?.playing ||
+          player?.currentTime > 0
+        ) {
+          hasStartedPlayback = true;
+        }
+      };
+
+      try {
+        if (this.chimePlayer) {
+          this._disposePlayer(this.chimePlayer, { pause: true });
+          this.chimePlayer = null;
+        }
+
+        player = createAudioPlayer(CHIME_AUDIO_ASSET, CHIME_AUDIO_PLAYER_OPTIONS);
+        player.volume = this.masterVolume;
+        this.chimePlayer = player;
+        this.currentChimeFinish = finish;
+
+        subscription = player.addListener("playbackStatusUpdate", (status) => {
+          markPlaybackStarted(status);
+          if (
+            status.error ||
+            status.didJustFinish ||
+            (status.currentTime > 0 &&
+              status.duration > 0 &&
+              status.currentTime >= status.duration - 0.05)
+          ) {
+            finish();
+          }
+        });
+
+        checkInterval = setInterval(() => {
+          try {
+            markPlaybackStarted();
+            if (player.duration > 0 && player.currentTime >= player.duration - 0.05) {
+              finish();
+            }
+          } catch (e) {
+            finish();
+          }
+        }, 50);
+
+        startTimer = setTimeout(() => {
+          if (hasStartedPlayback) return;
+          console.warn("[Speech] Chime did not start; continuing queue.");
+          finish();
+        }, CHIME_START_TIMEOUT_MS);
+
+        safetyTimer = setTimeout(finish, CHIME_MAX_WAIT_MS);
+
+        this._beginSpeechAudio();
+        player.play();
+        markPlaybackStarted();
+        this._scheduleBackgroundMediaRefresh([0, 400]);
+      } catch (e) {
+        console.log("[Speech] Chime play failed:", e);
+        finish();
+      }
+    });
   }
 
-  _playStaticAudio(
+  _isSignChimeRequest(options = {}) {
+    return options.chimeReason === "seatbelt_sign" || options.chimeReason === "no_smoking_sign";
+  }
+
+  async _playStaticAudio(
     audioAsset,
     volume,
     {
@@ -554,22 +656,28 @@ class SpeechManager {
       startAtSeconds = STATIC_AUDIO_START_OFFSET_SEC,
     } = {}
   ) {
+    try {
+      await this._ensureBackgroundAnchor();
+    } catch (e) { }
+
     return new Promise((resolve) => {
       let player;
       let subscription;
       let checkInterval;
       let safetyTimer;
+      let startTimer;
       let isResolved = false;
       let hasStartedPlayback = false;
 
-      const finish = () => {
+      const finish = ({ interrupted = false } = {}) => {
         if (isResolved) return;
         isResolved = true;
         if (subscription) {
-          try { subscription.remove(); } catch (e) {}
+          try { subscription.remove(); } catch (e) { }
         }
         if (checkInterval) clearInterval(checkInterval);
         if (safetyTimer) clearTimeout(safetyTimer);
+        if (startTimer) clearTimeout(startTimer);
         if (this.currentAnnouncementPlayer === player) {
           this.currentAnnouncementPlayer = null;
         }
@@ -583,12 +691,25 @@ class SpeechManager {
           this.currentCalloutFinish = null;
         }
         this._disposePlayer(player, { pause: true });
-        this._scheduleBackgroundMediaRefresh();
-        resolve(hasStartedPlayback);
+        this._endSpeechAudio();
+        this._recoverBackgroundAudioSession();
+        resolve(interrupted || hasStartedPlayback);
+      };
+
+      const markPlaybackStarted = (status) => {
+        if (hasStartedPlayback) return;
+        if (
+          status?.playing ||
+          status?.didJustFinish ||
+          status?.currentTime > 0 ||
+          player?.playing ||
+          player?.currentTime > 0
+        ) {
+          hasStartedPlayback = true;
+        }
       };
 
       try {
-        this._ensureBackgroundAnchor().catch(() => {});
         player = createAudioPlayer(audioAsset, STATIC_AUDIO_PLAYER_OPTIONS);
         if (owner === "callout") {
           this.currentCalloutPlayer = player;
@@ -600,16 +721,13 @@ class SpeechManager {
         player.volume = volume;
 
         subscription = player.addListener("playbackStatusUpdate", (status) => {
+          markPlaybackStarted(status);
           if (
             status.error ||
             status.didJustFinish ||
             (status.currentTime > 0 &&
               status.duration > 0 &&
-              status.currentTime >= status.duration - 0.1) ||
-            (hasStartedPlayback &&
-              status.currentTime > 0 &&
-              status.playing === false &&
-              !status.isBuffering)
+              status.currentTime >= status.duration - 0.1)
           ) {
             finish();
           }
@@ -617,20 +735,20 @@ class SpeechManager {
 
         checkInterval = setInterval(() => {
           try {
+            markPlaybackStarted();
             if (player.duration > 0 && player.currentTime >= player.duration - 0.1) {
-              finish();
-            } else if (
-              hasStartedPlayback &&
-              !player.playing &&
-              player.currentTime > 0 &&
-              !player.isBuffering
-            ) {
               finish();
             }
           } catch (e) {
             finish();
           }
         }, 100);
+
+        startTimer = setTimeout(() => {
+          if (hasStartedPlayback) return;
+          console.warn("[Speech] Static audio did not start; falling back to expo-speech.");
+          finish();
+        }, STATIC_AUDIO_START_TIMEOUT_MS);
 
         safetyTimer = setTimeout(finish, maxWaitMs);
         Promise.resolve()
@@ -641,8 +759,9 @@ class SpeechManager {
             return undefined;
           })
           .then(() => {
+            this._beginSpeechAudio();
             player.play();
-            hasStartedPlayback = true;
+            markPlaybackStarted();
             this._scheduleBackgroundMediaRefresh([0, 350]);
           })
           .catch(finish);
@@ -650,40 +769,6 @@ class SpeechManager {
         finish();
       }
     });
-  }
-
-  async processCalloutQueue() {
-    if (this.isProcessingCalloutQueue) return;
-    this.isProcessingCalloutQueue = true;
-
-    try {
-      while (this.calloutQueue.length > 0) {
-        const { spokenText, profile } = this.calloutQueue.shift();
-        const staticAudioEntry = staticAudioMap[spokenText];
-        if (!staticAudioEntry) continue;
-
-        try {
-          const audioAsset = staticAudioEntry[this.voicePreference] || staticAudioEntry.female;
-          
-          const startedStaticPlayback = await this._playStaticAudio(
-            audioAsset,
-            profile.volume * this.masterVolume * this.coPilotVolume,
-            {
-              owner: "callout",
-              maxWaitMs: this._getCalloutMaxWaitMs(spokenText),
-            }
-          );
-          if (!startedStaticPlayback) {
-            await this._speakWithExpoSpeech(spokenText, profile);
-          }
-        } catch (e) {
-          console.log("[Speech] Callout failed:", e);
-        }
-      }
-    } finally {
-      this.isProcessingCalloutQueue = false;
-      this._notifyCalloutLaneDrained();
-    }
   }
 
   async init() {
@@ -701,7 +786,7 @@ class SpeechManager {
         this.safetyBriefingVolume = parsed.safetyBriefingVolume ?? 1.0;
         this.chimeEnabled = parsed.chimeEnabled ?? true;
       }
-    } catch (e) {}
+    } catch (e) { }
 
     // Configure audio session for background playback
     // This allows TTS and audio to continue when the user switches to the game.
@@ -710,12 +795,12 @@ class SpeechManager {
     // Fetch available system voices
     try {
       this.availableVoices = await Speech.getAvailableVoicesAsync();
-    } catch (e) {}
+    } catch (e) { }
 
     // Preload chime for instant zero-latency playback
     try {
       this.chimePlayer = createAudioPlayer(CHIME_AUDIO_ASSET, EFFECT_AUDIO_PLAYER_OPTIONS);
-    } catch (e) {}
+    } catch (e) { }
 
     // Keep an audio session open so Android continues running JS/audio while the game is foregrounded.
     try {
@@ -728,8 +813,8 @@ class SpeechManager {
     // Preload all static audio files to completely eliminate the slight playback gap
     try {
       for (const entry of Object.values(staticAudioMap)) {
-        if (entry.female) preload(entry.female).catch(() => {});
-        if (entry.male) preload(entry.male).catch(() => {});
+        if (entry.female) preload(entry.female).catch(() => { });
+        if (entry.male) preload(entry.male).catch(() => { });
       }
     } catch (e) {
       console.log("[Speech] Failed to preload static audio:", e);
@@ -742,14 +827,14 @@ class SpeechManager {
 
   setBackgroundSessionState({ active = false, connectedIp = "" } = {}) {
     this._backgroundSessionState = { active, connectedIp };
-    this._ensureBackgroundAnchor().catch(() => {});
+    this._ensureBackgroundAnchor().catch(() => { });
     this._updateBackgroundMediaMetadata();
     this._scheduleBackgroundMediaRefresh([150, 750]);
   }
 
   handleAppStateChange(state) {
     const isBackgrounded = state === "background" || state === "inactive";
-    this._ensureBackgroundAnchor({ force: isBackgrounded }).catch(() => {});
+    this._ensureBackgroundAnchor({ force: isBackgrounded }).catch(() => { });
     this._scheduleBackgroundMediaRefresh(isBackgrounded ? [0, 500, 2000] : [0, 250]);
   }
 
@@ -759,7 +844,8 @@ class SpeechManager {
       await setAudioModeAsync({
         playsInSilentMode: true,          // Play even when iPhone is on silent
         shouldPlayInBackground: true,     // Keep audio session alive in background
-        interruptionMode: "doNotMix",     // Required by Expo v57 for lock-screen controls
+        // interruptionMode: "doNotMix",     // Required by Expo v57 for lock-screen controls
+        interruptionMode: "mixWithOthers",
         allowsRecording: false,
       });
       this._audioConfigured = true;
@@ -773,37 +859,25 @@ class SpeechManager {
     this.voiceEnabled = !this.voiceEnabled;
     if (!this.voiceEnabled) {
       if (this.boardingMusic) {
-        try { this.boardingMusic.pause(); } catch (e) {}
+        try { this.boardingMusic.pause(); } catch (e) { }
       }
       if (this.boardingAnnouncePlayer) {
-        try { this.boardingAnnouncePlayer.pause(); } catch (e) {}
+        try { this.boardingAnnouncePlayer.pause(); } catch (e) { }
       }
-      if (this.expoSpeechActive) {
-        Speech.stop();
-        this.expoSpeechActive = false;
-      }
-      this._stopCurrentAnnouncement();
-      this.currentAnnouncementPlayer = null;
-      if (this.currentCalloutFinish) this.currentCalloutFinish();
-      else this._disposePlayer(this.currentCalloutPlayer);
-      this.currentCalloutPlayer = null;
-      this.speechQueue = [];
-      this.calloutQueue = [];
+      this._stopSpeechPlayback({ clearQueues: true });
       this.isProcessingQueue = false;
-      this.isProcessingCalloutQueue = false;
-      this._notifyCalloutLaneDrained();
     } else {
       if (this.boardingMusic) {
         try {
           this.boardingMusic.play();
           this._scheduleBackgroundMediaRefresh([0, 500]);
-        } catch (e) {}
+        } catch (e) { }
       }
       if (this.boardingAnnouncePlayer) {
         try {
           this.boardingAnnouncePlayer.play();
           this._scheduleBackgroundMediaRefresh([0, 500]);
-        } catch (e) {}
+        } catch (e) { }
       }
     }
     return this.voiceEnabled;
@@ -839,7 +913,7 @@ class SpeechManager {
     }
 
     // Apply live volume updates to any currently-playing players
-    if (this.boardingMusic) {
+    if (this.boardingMusic && !this._boardingMusicFadeTimer) {
       this.boardingMusic.volume = this.masterVolume * this.boardingMusicVolume;
     }
     if (this.boardingAnnouncePlayer) {
@@ -880,9 +954,6 @@ class SpeechManager {
   }
 
   async speak(text, options = {}) {
-    // Ensure audio session is configured (lazy init in case init() hasn't resolved yet)
-    await this._ensureBackgroundAnchor();
-
     options = normalizeSpeechOptions(options);
     const tone = options.tone || "default";
     const now = Date.now();
@@ -897,10 +968,7 @@ class SpeechManager {
     if (!this.voiceEnabled) return;
 
     const profile = this.getVoiceProfile(tone);
-
-    if (tone === "callout" || options.priority) {
-      this._interruptCurrentNonCalloutAudio();
-    }
+    options = this._markLoggedOptions(spokenText, options);
 
     if (tone === "callout" && staticAudioMap[spokenText] && !options.forceQueue) {
       this._enqueueCallout({
@@ -910,10 +978,13 @@ class SpeechManager {
       });
       return;
     }
-    
+
     this._enqueueSpeech({ spokenText, options, profile });
     if (typeof options.afterSpeech === "function") {
-      this._enqueueAction(options.afterSpeech, { priority: options.priority });
+      this._enqueueAction(options.afterSpeech, {
+        priority: options.priority,
+        actionTimeoutMs: options.afterSpeechTimeoutMs,
+      });
       return;
     }
     this.processQueue();
@@ -921,62 +992,63 @@ class SpeechManager {
 
   async processQueue() {
     if (this.isProcessingQueue) return;
+    const generation = this._playbackGeneration;
     this.isProcessingQueue = true;
 
     try {
-      while (this.speechQueue.length > 0) {
+      while (this.speechQueue.length > 0 && generation === this._playbackGeneration) {
         const { spokenText, options = {}, profile, action } = this.speechQueue.shift();
 
         try {
           if (typeof action === "function") {
-            await this._runQueueAction(action);
+            await this._runQueueAction(action, options);
             continue;
           }
 
-          if (options._staticOwner !== "callout") {
-            await this._waitForCalloutLane();
+          if (!options._logged) {
+            this._logSpeech(spokenText, options);
           }
 
-          if (options.withChime) {
-            const playedChime = await this._playChimeNow();
-            if (playedChime) {
-              await new Promise((resolve) => setTimeout(resolve, 1500));
+          await this._withForegroundPlayback(async () => {
+            if (options.withChime && this._isSignChimeRequest(options)) {
+              await this._playChimeNow();
+              if (generation !== this._playbackGeneration) return;
             }
-          }
 
-          this._logSpeech(spokenText, options);
-
-          // ── If there is a pre-recorded audio file for this exact text ────────
-          const staticAudioEntry = staticAudioMap[spokenText];
-          if (staticAudioEntry) {
-            const audioAsset = staticAudioEntry[this.voicePreference] || staticAudioEntry.female;
-            const startedStaticPlayback = await this._playStaticAudio(
-              audioAsset,
-              profile.volume * this.masterVolume * this.coPilotVolume,
-              {
-                owner: options._staticOwner || "announcement",
-                maxWaitMs:
-                  options._staticOwner === "callout"
-                    ? this._getCalloutMaxWaitMs(spokenText)
-                    : this._getStaticAudioMaxWaitMs(spokenText, options.tone),
+            // ── If there is a pre-recorded audio file for this exact text ────────
+            const staticAudioEntry = staticAudioMap[spokenText];
+            if (staticAudioEntry) {
+              const audioAsset = staticAudioEntry[this.voicePreference] || staticAudioEntry.female;
+              const startedStaticPlayback = await this._playStaticAudio(
+                audioAsset,
+                profile.volume * this.masterVolume * this.coPilotVolume,
+                {
+                  owner: options._staticOwner || "announcement",
+                  maxWaitMs:
+                    options._staticOwner === "callout"
+                      ? this._getCalloutMaxWaitMs(spokenText)
+                      : this._getStaticAudioMaxWaitMs(spokenText, options.tone),
+                }
+              );
+              if (!startedStaticPlayback) {
+                await this._speakWithExpoSpeech(spokenText, profile);
               }
-            );
-            if (!startedStaticPlayback) {
+            }
+            // ── If this queue item was routed through Polly, use speakPolly ────────
+            else if (options._pollyVoiceId) {
+              await this.speakPolly(spokenText, options._pollyVoiceId, profile);
+            } else {
               await this._speakWithExpoSpeech(spokenText, profile);
             }
-          } 
-          // ── If this queue item was routed through Polly, use speakPolly ────────
-          else if (options._pollyVoiceId) {
-            await this.speakPolly(spokenText, options._pollyVoiceId, profile);
-          } else {
-            await this._speakWithExpoSpeech(spokenText, profile);
-          }
+          });
         } catch (e) {
           console.log("[Speech] Queue item failed:", e);
         }
       }
     } finally {
-      this.isProcessingQueue = false;
+      if (generation === this._playbackGeneration) {
+        this.isProcessingQueue = false;
+      }
     }
   }
 
@@ -1003,7 +1075,8 @@ class SpeechManager {
     if (this.pollyCache.has(cacheKey)) {
       console.log("[Polly] Cache hit, playing from memory.");
       const dataUri = this.pollyCache.get(cacheKey);
-      return this._playPollyAudio(dataUri, profile);
+      const started = await this._playPollyAudio(dataUri, profile);
+      return started ? undefined : this._speakExpofallback(text, profile);
     }
 
     // ── Fetch from backend with 3-second timeout ───────────────────────────
@@ -1037,7 +1110,8 @@ class SpeechManager {
       // Cache for this session
       this.pollyCache.set(cacheKey, dataUri);
 
-      return this._playPollyAudio(dataUri, profile);
+      const started = await this._playPollyAudio(dataUri, profile);
+      return started ? undefined : this._speakExpofallback(text, profile);
     } catch (err) {
       clearTimeout(timeoutId);
       if (err.name === "AbortError") {
@@ -1054,29 +1128,57 @@ class SpeechManager {
    * @private
    */
   async _playPollyAudio(dataUri, profile) {
+    try {
+      await this._ensureBackgroundAnchor();
+    } catch (e) { }
+
     return new Promise((resolve) => {
       let player;
       let cleanup;
+      let checkInterval;
       let safetyTimer;
+      let startTimer;
       let resolved = false;
+      let hasStartedPlayback = false;
 
-      const finish = () => {
+      const finish = ({ interrupted = false } = {}) => {
         if (resolved) return;
         resolved = true;
         if (cleanup) {
-          try { cleanup.remove(); } catch (_) {}
+          try { cleanup.remove(); } catch (_) { }
         }
+        if (checkInterval) clearInterval(checkInterval);
         if (safetyTimer) clearTimeout(safetyTimer);
+        if (startTimer) clearTimeout(startTimer);
         if (this.pollyPlayer === player) {
           this.pollyPlayer = null;
         }
+        if (this.currentAnnouncementPlayer === player) {
+          this.currentAnnouncementPlayer = null;
+        }
+        if (this.currentAnnouncementFinish === finish) {
+          this.currentAnnouncementFinish = null;
+        }
         this._disposePlayer(player, { pause: true });
-        this._scheduleBackgroundMediaRefresh();
-        resolve();
+        this._endSpeechAudio();
+        this._recoverBackgroundAudioSession();
+        resolve(interrupted || hasStartedPlayback);
+      };
+
+      const markPlaybackStarted = (status) => {
+        if (hasStartedPlayback) return;
+        if (
+          status?.playing ||
+          status?.didJustFinish ||
+          status?.currentTime > 0 ||
+          player?.playing ||
+          player?.currentTime > 0
+        ) {
+          hasStartedPlayback = true;
+        }
       };
 
       try {
-        this._ensureBackgroundAnchor().catch(() => {});
         // Release any previous Polly player
         this._disposePlayer(this.pollyPlayer);
         this.pollyPlayer = null;
@@ -1084,14 +1186,44 @@ class SpeechManager {
         player = createAudioPlayer({ uri: dataUri }, EFFECT_AUDIO_PLAYER_OPTIONS);
         player.volume = profile.volume * this.masterVolume * this.coPilotVolume;
         this.pollyPlayer = player;
+        this.currentAnnouncementPlayer = player;
+        this.currentAnnouncementFinish = finish;
 
         cleanup = player.addListener("playbackStatusUpdate", (status) => {
-          if (status.error || status.didJustFinish) finish();
+          markPlaybackStarted(status);
+          if (
+            status.error ||
+            status.didJustFinish ||
+            (status.currentTime > 0 &&
+              status.duration > 0 &&
+              status.currentTime >= status.duration - 0.1)
+          ) {
+            finish();
+          }
         });
+
+        checkInterval = setInterval(() => {
+          try {
+            markPlaybackStarted();
+            if (player.duration > 0 && player.currentTime >= player.duration - 0.1) {
+              finish();
+            }
+          } catch (e) {
+            finish();
+          }
+        }, 250);
+
+        startTimer = setTimeout(() => {
+          if (hasStartedPlayback) return;
+          console.warn("[Polly] Audio did not start; falling back to expo-speech.");
+          finish();
+        }, POLLY_AUDIO_START_TIMEOUT_MS);
 
         safetyTimer = setTimeout(finish, 60000);
 
+        this._beginSpeechAudio();
         player.play();
+        markPlaybackStarted();
         this._scheduleBackgroundMediaRefresh([0, 350, 1200]);
       } catch (err) {
         console.warn("[Polly] Audio playback failed:", err.message);
@@ -1117,8 +1249,6 @@ class SpeechManager {
    * @param {object} options  - Same options object passed to speak().
    */
   async speakWithPollyFallback(text, voiceId, options = {}) {
-    await this._ensureBackgroundAnchor();
-
     options = normalizeSpeechOptions(options);
     const tone = options.tone || "default";
     const now = Date.now();
@@ -1132,9 +1262,28 @@ class SpeechManager {
     if (!this.voiceEnabled) return;
 
     const profile = this.getVoiceProfile(tone);
+    options = this._markLoggedOptions(spokenText, options);
 
     // Use polly-aware queue entry
+    if (options.detachedFromQueue) {
+      this.speakPolly(spokenText, voiceId, profile)
+        .then(() => {
+          if (typeof options.afterSpeech === "function") options.afterSpeech();
+        })
+        .catch((error) => {
+          console.log("[Speech] Detached Polly failed:", error?.message || error);
+        });
+      return;
+    }
+
     this._enqueueSpeech({ spokenText, options: { ...options, _pollyVoiceId: voiceId }, profile });
+    if (typeof options.afterSpeech === "function") {
+      this._enqueueAction(options.afterSpeech, {
+        priority: options.priority,
+        actionTimeoutMs: options.afterSpeechTimeoutMs,
+      });
+      return;
+    }
     this.processQueue();
   }
 
@@ -1142,11 +1291,17 @@ class SpeechManager {
     await this._playChimeNow();
   }
 
-  async playBoardingAnnouncement(livery, { fadeBoardingMusic = true } = {}) {
-    this.stopBoardingMusic({ fade: fadeBoardingMusic });
-    
+  async playBoardingAnnouncement(livery, { fadeBoardingMusic = true, onFinish } = {}) {
+    if (this.boardingAnnounceFinish) {
+      await new Promise((resolve) => this._enqueueAction(resolve));
+      return;
+    }
     if (this.boardingAnnouncePlayer) return;
     if (this._isFetchingBoardingAnnounce && this._fetchingBoardingAnnounceFor === livery) return;
+
+    if (fadeBoardingMusic) {
+      this.stopBoardingMusic({ fade: true });
+    }
 
     this._isFetchingBoardingAnnounce = true;
     this._fetchingBoardingAnnounceFor = livery;
@@ -1177,46 +1332,139 @@ class SpeechManager {
       return "announcements/fallback.mp3";
     };
 
-    try {
-      const remoteFileName = getFileName(livery);
-      const audioUri = await getCachedAudioUri(remoteFileName, "announcements/fallback.mp3");
-      
-      // If we were stopped or disconnected while downloading, abort
-      if (this._boardingAnnounceRequestId !== playRequestId) return;
+    return new Promise(async (resolve) => {
+      let cleanup = null;
+      let checkInterval = null;
+      let startTimer = null;
+      let safetyTimer = null;
+      let finished = false;
+      let hasStartedPlayback = false;
+      let player = null;
 
-      if (!audioUri) {
-        console.warn("[Speech] Could not get cached audio for boarding announcement.");
-        return;
-      }
-
-      if (this.boardingAnnouncePlayer) {
-        this._disposePlayer(this.boardingAnnouncePlayer);
-      }
-      this.boardingAnnouncePlayer = createAudioPlayer(audioUri, EFFECT_AUDIO_PLAYER_OPTIONS);
-      this.boardingAnnouncePlayer.volume = this.masterVolume * this.safetyBriefingVolume;
-      
-      if (this.voiceEnabled) {
-        await this._ensureBackgroundAnchor();
-        this.boardingAnnouncePlayer.play();
-        this._scheduleBackgroundMediaRefresh([0, 500, 1500]);
-      }
-      
-      setTimeout(() => {
-        if (this._boardingAnnounceRequestId === playRequestId && this.voiceEnabled) {
-          this.playChime();
+      const finishCallback = ({ interrupted = false } = {}) => {
+        if (finished) return;
+        finished = true;
+        if (cleanup) {
+          try { cleanup.remove(); } catch (e) { }
+          cleanup = null;
         }
-      }, 35000);
-    } catch (e) {
-      console.log("[Speech] Boarding announcement failed:", e);
-    } finally {
-      if (this._boardingAnnounceRequestId === playRequestId) {
-        this._isFetchingBoardingAnnounce = false;
+        if (checkInterval) {
+          clearInterval(checkInterval);
+          checkInterval = null;
+        }
+        if (startTimer) clearTimeout(startTimer);
+        if (safetyTimer) clearTimeout(safetyTimer);
+        if (this.boardingAnnouncePlayer === player) {
+          this.boardingAnnouncePlayer = null;
+        }
+        if (this.boardingAnnounceFinish === finishCallback) {
+          this.boardingAnnounceFinish = null;
+        }
+
+        if (interrupted) {
+          this._disposePlayer(player, { pause: true });
+        } else {
+          setTimeout(() => {
+            this._disposePlayer(player, { pause: false });
+          }, 2000);
+        }
+        this._endSpeechAudio();
+        this._recoverBackgroundAudioSession();
+        if (interrupted || this._boardingAnnounceRequestId === playRequestId) {
+          this._boardingAnnounceRequestId = null;
+          this._isFetchingBoardingAnnounce = false;
+          this._fetchingBoardingAnnounceFor = "";
+        }
+        if (!interrupted && onFinish) onFinish();
+        resolve(interrupted || hasStartedPlayback);
+      };
+
+      const markPlaybackStarted = (status) => {
+        if (hasStartedPlayback) return;
+        if (
+          status?.playing ||
+          status?.didJustFinish ||
+          status?.currentTime > 0 ||
+          player?.playing ||
+          player?.currentTime > 0
+        ) {
+          hasStartedPlayback = true;
+        }
+      };
+
+      try {
+        const remoteFileName = getFileName(livery);
+        const audioUri = await getCachedAudioUri(remoteFileName, "announcements/fallback.mp3");
+
+        // If we were stopped or disconnected while downloading, abort
+        if (this._boardingAnnounceRequestId !== playRequestId) {
+          finishCallback({ interrupted: true });
+          return;
+        }
+
+        if (!audioUri) {
+          console.warn("[Speech] Could not get cached audio for boarding announcement.");
+          finishCallback();
+          return;
+        }
+
+        if (this.boardingAnnouncePlayer) {
+          this._disposePlayer(this.boardingAnnouncePlayer);
+        }
+        player = createAudioPlayer(audioUri, STATIC_AUDIO_PLAYER_OPTIONS);
+        player.volume = this.masterVolume * this.safetyBriefingVolume;
+        this.boardingAnnouncePlayer = player;
+        this.boardingAnnounceFinish = finishCallback;
+
+        cleanup = player.addListener("playbackStatusUpdate", (status) => {
+          markPlaybackStarted(status);
+          if (status.didJustFinish || status.error) {
+            finishCallback();
+          }
+        });
+
+        checkInterval = setInterval(() => {
+          try {
+            markPlaybackStarted();
+            if (!player) {
+              finishCallback();
+              return;
+            }
+          } catch (e) {
+            finishCallback();
+          }
+        }, 100);
+
+        startTimer = setTimeout(() => {
+          if (hasStartedPlayback) return;
+          console.warn("[Speech] Boarding announcement did not start; continuing queue.");
+          finishCallback();
+        }, BOARDING_ANNOUNCEMENT_START_TIMEOUT_MS);
+
+        safetyTimer = setTimeout(finishCallback, BOARDING_ANNOUNCEMENT_MAX_WAIT_MS);
+
+        if (this.voiceEnabled) {
+          await this._ensureBackgroundAnchor();
+          this._beginSpeechAudio();
+          player.play();
+          markPlaybackStarted();
+          this._scheduleBackgroundMediaRefresh([0, 500, 1500]);
+        } else {
+          finishCallback(); // if voice disabled, finish immediately
+        }
+      } catch (e) {
+        console.log("[Speech] Boarding announcement failed:", e);
+        finishCallback();
       }
-    }
+    });
   }
 
   stopBoardingAnnouncement() {
     this._boardingAnnounceRequestId = null;
+    if (this.boardingAnnounceFinish) {
+      this.boardingAnnounceFinish({ interrupted: true });
+      return;
+    }
     if (this.boardingAnnouncePlayer) {
       this._disposePlayer(this.boardingAnnouncePlayer);
       this.boardingAnnouncePlayer = null;
@@ -1294,7 +1542,10 @@ class SpeechManager {
     this._getBoardingMusicUri(livery);
   }
 
-  async playBoardingMusic(livery) {
+  async playBoardingMusic(livery, options = {}) {
+    const fade = options.fade !== false; // Default true
+    const durationMs = options.durationMs || BOARDING_MUSIC_FADE_MS;
+
     if (this.boardingMusic) return;
     if (this._isFetchingBoardingMusic && this._fetchingBoardingMusicFor === livery) return;
 
@@ -1307,7 +1558,7 @@ class SpeechManager {
 
     try {
       const audioUri = await this._getBoardingMusicUri(livery);
-      
+
       // If stopped or disconnected while downloading, abort
       if (this._boardingMusicRequestId !== playRequestId) return;
 
@@ -1325,12 +1576,34 @@ class SpeechManager {
       }
       this.boardingMusic = createAudioPlayer(audioUri, EFFECT_AUDIO_PLAYER_OPTIONS);
       this.boardingMusic.loop = true;
-      this.boardingMusic.volume = this.masterVolume * this.boardingMusicVolume;
-      
+      const targetVolume = this.masterVolume * this.boardingMusicVolume;
+      this.boardingMusic.volume = fade ? 0 : targetVolume;
+
       if (this.voiceEnabled) {
         await this._ensureBackgroundAnchor();
         this.boardingMusic.play();
         this._scheduleBackgroundMediaRefresh([0, 500, 1500]);
+      }
+
+      if (fade && this.voiceEnabled) {
+        const steps = 14;
+        const intervalMs = Math.max(50, Math.round(durationMs / steps));
+        let step = 0;
+        this._boardingMusicFadeTimer = setInterval(() => {
+          step += 1;
+          try {
+            if (this.boardingMusic) {
+              this.boardingMusic.volume = Math.min(targetVolume, targetVolume * (step / steps));
+            }
+          } catch (e) {
+            if (this._boardingMusicFadeTimer) clearInterval(this._boardingMusicFadeTimer);
+            return;
+          }
+          if (step >= steps) {
+            if (this._boardingMusicFadeTimer) clearInterval(this._boardingMusicFadeTimer);
+            this._boardingMusicFadeTimer = null;
+          }
+        }, intervalMs);
       }
     } catch (e) {
       console.log("[Speech] Boarding music failed:", e);
@@ -1388,19 +1661,9 @@ class SpeechManager {
   }
 
   stopAll() {
-    this.speechQueue = [];
-    this.calloutQueue = [];
+    this._stopSpeechPlayback({ clearQueues: true });
     this.isProcessingQueue = false;
-    this.isProcessingCalloutQueue = false;
-    Speech.stop();
-    this._stopCurrentAnnouncement();
-    this.currentAnnouncementPlayer = null;
-    if (this.currentCalloutFinish) this.currentCalloutFinish();
-    else this._disposePlayer(this.currentCalloutPlayer);
-    this.currentCalloutPlayer = null;
-    this._notifyCalloutLaneDrained();
     this.stopBoardingMusic();
-    this.stopBoardingAnnouncement();
     if (this.chimePlayer) {
       this._disposePlayer(this.chimePlayer);
       this.chimePlayer = null;

@@ -20,9 +20,10 @@ import TcpSocket from 'react-native-tcp-socket';
 import { Buffer } from 'buffer';
 
 const DEFAULT_PORT = 10112;
-const MANIFEST_TIMEOUT_MS = 8000;
-const WATCHDOG_INTERVAL_MS = 2000;
-const WATCHDOG_STALE_THRESHOLD_MS = 15000;
+const MANIFEST_TIMEOUT_MS = 15000;
+const WATCHDOG_INTERVAL_MS = 3000;
+const WATCHDOG_STALE_RECONNECT_MS = 5000;
+const WATCHDOG_STALE_DISCONNECT_MS = 15000;
 const RECONNECT_DELAY_MS = 2000;
 
 /** IF Connect v2 data type codes */
@@ -199,14 +200,16 @@ class IFConnectClient {
     console.log('[IFConnect] Closing connection');
     this._isConnected = false;
     clearTimeout(this._reconnectTimer);
+    this._reconnectTimer = null;
     clearInterval(this._watchdogTimer);
     clearTimeout(this._mTimeout);
 
-    if (this._pollSocket) {
-      try {
-        this._pollSocket.destroy();
-      } catch (e) {}
+    const oldSocket = this._pollSocket;
+    if (oldSocket) {
       this._pollSocket = null;
+      try {
+        oldSocket.destroy();
+      } catch (e) {}
     }
     
     if (this._mSocket) {
@@ -342,7 +345,6 @@ class IFConnectClient {
         { port: this._port, host: this._host },
         () => {
           console.log('[IFConnect] Poll socket connected. Starting telemetry stream.');
-          this._pollSocket = socket;
           this._isConnected = true;
           this._receiveBuffer = null;
           this._isPollWaiting = false;
@@ -365,6 +367,7 @@ class IFConnectClient {
           this._startWatchdog();
         }
       );
+      this._pollSocket = socket;
     } catch (e) {
       console.log('[IFConnect] TCP Poll socket creation error (unsupported environment):', e);
       this._emit('error', { message: 'TCP socket not supported in this environment' });
@@ -382,14 +385,14 @@ class IFConnectClient {
 
     socket.on('error', (err) => {
       console.log('[IFConnect] Poll socket error:', err.message);
-      if (this._isConnected) {
+      if (this._pollSocket === socket && this._isConnected) {
         this._scheduleReconnect();
       }
     });
 
     socket.on('close', () => {
       console.log('[IFConnect] Poll socket closed');
-      if (this._isConnected) {
+      if (this._pollSocket === socket && this._isConnected) {
         this._scheduleReconnect();
       }
     });
@@ -499,28 +502,37 @@ class IFConnectClient {
   _startWatchdog() {
     clearInterval(this._watchdogTimer);
     this._watchdogTimer = setInterval(() => {
-      if (this._isConnected && Date.now() - this._lastDataTime > WATCHDOG_STALE_THRESHOLD_MS) {
-        console.log('[IFConnect] Watchdog: no data for 15s — reconnecting...');
+      if (!this._isConnected) return;
+      const staleTime = Date.now() - this._lastDataTime;
+
+      if (staleTime > WATCHDOG_STALE_DISCONNECT_MS) {
+        console.log('[IFConnect] Watchdog: data stale for 15s — disconnecting...');
+        this._emit('disconnect', { message: 'Connection timed out (no data for 15s).' });
+        this.close();
+      } else if (staleTime > WATCHDOG_STALE_RECONNECT_MS) {
+        console.log('[IFConnect] Watchdog: data stale — scheduling reconnect...');
         this._scheduleReconnect();
       }
     }, WATCHDOG_INTERVAL_MS);
   }
 
   _scheduleReconnect() {
-    clearTimeout(this._reconnectTimer);
-    // Only one pending reconnect at a time
+    if (this._reconnectTimer) return; // Only one pending reconnect at a time
+
     this._reconnectTimer = setTimeout(() => {
+      this._reconnectTimer = null;
       if (!this._isConnected) return;
       console.log('[IFConnect] Attempting reconnect...');
       this._emit('reconnecting', { message: 'Connection lost, reconnecting...' });
       this._receiveBuffer = null;
       this._isPollWaiting = false;
 
-      if (this._pollSocket) {
-        try {
-          this._pollSocket.destroy();
-        } catch (e) {}
+      const oldSocket = this._pollSocket;
+      if (oldSocket) {
         this._pollSocket = null;
+        try {
+          oldSocket.destroy();
+        } catch (e) {}
       }
 
       // Keep the manifest; just reopen the poll socket

@@ -12,15 +12,18 @@
       "bundleIdentifier": "com.infinitecopilot.app",
       "infoPlist": {
         "UIBackgroundModes": [
+          "audio",
           "audio"
         ],
         "NSLocalNetworkUsageDescription": "Infinite Co-Pilot connects to Infinite Flight on your local network to provide real-time telemetry and crew announcements.",
         "NSBonjourServices": [
+          "_ifconnect._tcp",
           "_ifconnect._tcp"
         ],
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": true
-        }
+        },
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {

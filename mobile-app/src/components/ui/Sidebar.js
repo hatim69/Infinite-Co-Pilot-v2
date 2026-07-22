@@ -35,7 +35,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const SIDEBAR_WIDTH = Math.min(SCREEN_WIDTH * 0.88, 360);
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.0.1';
 const DISCORD_URL = 'https://discord.gg/hb3HkrfBEK';
 
 // ─── Theme Swatch ─────────────────────────────────────────────────────────────
@@ -127,7 +127,7 @@ function SidebarSection({ icon: Icon, title, theme, children }) {
 
 // ─── Main Sidebar ─────────────────────────────────────────────────────────────
 
-export default function Sidebar({ visible, onClose, isBackgroundMode, setIsBackgroundMode, disableAutoConnect, setDisableAutoConnect }) {
+export default function Sidebar({ visible, onClose, isBackgroundMode, setIsBackgroundMode, disableAutoConnect, setDisableAutoConnect, voicePreference, toggleVoiceGender }) {
   const { theme, activeTheme, setTheme } = useTheme();
   const insets = useSafeAreaInsets();
   const translateX = useRef(new Animated.Value(SIDEBAR_WIDTH)).current;
@@ -351,12 +351,25 @@ export default function Sidebar({ visible, onClose, isBackgroundMode, setIsBackg
                 theme={theme}
               />
 
+              {/* Voice Gender toggle */}
+              <View style={[styles.toggleRow, { borderTopColor: theme.borderMid }]}>
+                <View style={{ flex: 1, paddingRight: 16 }}>
+                  <Text style={[styles.sliderLabel, { color: theme.textLabel }]}>Co-Pilot Voice</Text>
+                  <Text style={[styles.toggleSub, { color: theme.textMuted }]}>
+                    Choose between male and female voices
+                  </Text>
+                </View>
+                <TouchableOpacity onPress={toggleVoiceGender} style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: theme.surfaceMid || 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: theme.borderMid }} activeOpacity={0.7}>
+                  <Text style={{ color: theme.textPrimary, fontSize: 11, fontWeight: 'bold' }}>{voicePreference === 'female' ? 'FEMALE' : 'MALE'}</Text>
+                </TouchableOpacity>
+              </View>
+
               {/* Chime toggle */}
               <View style={[styles.toggleRow, { borderTopColor: theme.borderMid }]}>
                 <View>
                   <Text style={[styles.sliderLabel, { color: theme.textLabel }]}>Notification Chime</Text>
                   <Text style={[styles.toggleSub, { color: theme.textMuted }]}>
-                    Play chime before announcements
+                    Play chime with sign changes
                   </Text>
                 </View>
                 <Switch

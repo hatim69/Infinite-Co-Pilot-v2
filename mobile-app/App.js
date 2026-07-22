@@ -155,7 +155,7 @@ const FadeTransition = ({ children }) => {
 // ─── Inner App (uses ThemeContext) ────────────────────────────────────────────
 function AppInner() {
   useKeepAwake(undefined, { suppressDeactivateWarnings: true });
-  const { theme } = useTheme();
+  const { theme, activeTheme } = useTheme();
 
   const [disableAutoConnect, setDisableAutoConnectState] = useState(false);
 
@@ -193,6 +193,7 @@ function AppInner() {
     discoveredDevices,
     selectDevice,
     disconnectDevice,
+    resetForConnectingFlight,
   } = useTelemetry(disableAutoConnect || !isBetaVerified);
 
   useEffect(() => {
@@ -291,7 +292,9 @@ function AppInner() {
   const scrollViewRef = useRef(null);
   const logScrollRef = useRef(null);
 
-  const isConnected = connectionStatus === "FLIGHT LINK ACTIVE";
+  const isActive = connectionStatus === "FLIGHT LINK ACTIVE";
+  const isReconnecting = connectionStatus === "RECONNECTING...";
+  const isConnected = isActive || isReconnecting;
   const isConnecting = connectionStatus === "CONNECTING..." || connectionStatus === "VERIFYING STATE...";
 
 
@@ -322,12 +325,7 @@ function AppInner() {
     });
   }, [connectedIp, isConnected]);
 
-  // Auto-scroll log to bottom
-  useEffect(() => {
-    if (logScrollRef.current) {
-      setTimeout(() => logScrollRef.current?.scrollToEnd({ animated: true }), 100);
-    }
-  }, [logs]);
+
 
   const toggleVoice = () => {
     const enabled = speechManager.toggleVoice();
@@ -360,6 +358,13 @@ function AppInner() {
     "SYSTEMS & POWER",
     "GROUND & LIGHTS",
   ];
+
+  // Auto-scroll log to bottom
+  useEffect(() => {
+    if (logScrollRef.current) {
+      setTimeout(() => logScrollRef.current?.scrollToEnd({ animated: true }), 100);
+    }
+  }, [logs, dashboardPage, showLogs]);
 
   // ─── Splash Screen ────────────────────────────────────────────────────────
   const renderSplashScreen = () => (
@@ -486,7 +491,11 @@ function AppInner() {
           {/* Page 0: Crew Assistant */}
           {dashboardPage === 0 && (
             <View style={{ flex: 1, paddingHorizontal: 16 }}>
-              <CrewAssistant telemetry={telemetry} isConnected={isConnected} />
+              <CrewAssistant
+                telemetry={telemetry}
+                isConnected={isConnected}
+                onResetConnectingFlight={resetForConnectingFlight}
+              />
               <View style={[styles.card, { flex: 1, marginBottom: 20, backgroundColor: theme.surfaceMid, borderColor: theme.border }]}>
                 <TouchableOpacity style={styles.cardHeader} onPress={() => setShowLogs((v) => !v)} activeOpacity={0.8}>
                   <View style={styles.cardHeaderLeft}>
@@ -618,6 +627,20 @@ function AppInner() {
             </View>
           )}
         </FadeTransition>
+
+        {isReconnecting && (
+          <View style={[StyleSheet.absoluteFill, { zIndex: 50, justifyContent: 'center', alignItems: 'center' }]}>
+            <TouchableOpacity 
+              activeOpacity={1} 
+              style={[StyleSheet.absoluteFill, { backgroundColor: theme.surface, opacity: 0.9 }]} 
+            />
+            <Radio size={48} color="#F59E0B" />
+            <Text style={{ color: theme.textPrimary, fontSize: 18, fontWeight: 'bold', marginTop: 16 }}>Connection Lost</Text>
+            <Text style={{ color: theme.textPrimary, fontSize: 14, marginTop: 8, textAlign: 'center', paddingHorizontal: 20 }}>
+              Trying to reconnect to simulator...
+            </Text>
+          </View>
+        )}
       </View>
     );
   };
@@ -631,7 +654,20 @@ function AppInner() {
         {/* ── Header ──────────────────────────────────────────────────── */}
         <View style={styles.header}>
           <View style={styles.headerLeft}>
-            <Text style={[styles.title, { color: theme.textPrimary }]}>Infinite Co-Pilot</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Image 
+                source={activeTheme === 'silver' ? require('./assets/images/in_app_logo_light.png') : require('./assets/images/in_app_logo_dark.png')} 
+                style={{ height: 24, width: 32, marginRight: 8 }}
+                resizeMode="contain"
+              />
+              <Text 
+                style={[styles.title, { color: theme.textPrimary, fontSize: 16, lineHeight: 18, flexShrink: 1 }]} 
+                numberOfLines={2} 
+                adjustsFontSizeToFit
+              >
+                Infinite{"\n"}Co-Pilot
+              </Text>
+            </View>
             {isInBackground && isConnected && (
               <View style={[styles.backgroundBadge, { backgroundColor: theme.accentBg }]}>
                 <Text style={[styles.backgroundBadgeText, { color: theme.accentText }]}>RUNNING IN BACKGROUND</Text>
@@ -643,9 +679,7 @@ function AppInner() {
               <Settings size={18} color={theme.textSlate} />
             </TouchableOpacity>
 
-            <TouchableOpacity onPress={toggleVoiceGender} style={[styles.iconBtn, { width: 'auto', paddingHorizontal: 10, backgroundColor: theme.iconBtn, borderColor: theme.iconBtnBorder }]} activeOpacity={0.7}>
-              <Text style={{ color: theme.textSlate, fontSize: 11, fontWeight: 'bold' }}>{voicePreference === 'female' ? 'FEMALE' : 'MALE'}</Text>
-            </TouchableOpacity>
+
 
             <TouchableOpacity onPress={toggleVoice} style={[styles.iconBtn, { backgroundColor: theme.iconBtn, borderColor: theme.iconBtnBorder }]} activeOpacity={0.7}>
               {voiceEnabled ? (
@@ -668,16 +702,18 @@ function AppInner() {
             <View
               style={[
                 styles.statusBadge,
-                isConnected
+                isActive
                   ? { backgroundColor: theme.accentBg, borderWidth: 1, borderColor: theme.accent }
-                  : isConnecting
-                    ? styles.statusConnecting
-                    : { backgroundColor: 'rgba(71, 85, 105, 0.3)', borderWidth: 1, borderColor: theme.border },
+                  : isReconnecting
+                    ? { backgroundColor: 'rgba(245, 158, 11, 0.2)', borderWidth: 1, borderColor: '#F59E0B' }
+                    : isConnecting
+                      ? styles.statusConnecting
+                      : { backgroundColor: 'rgba(71, 85, 105, 0.3)', borderWidth: 1, borderColor: theme.border },
               ]}
             >
-              <PulseDot active={isConnected} />
+              <PulseDot active={isActive} />
               <Text style={[styles.statusText, { color: theme.textPrimary }]}>
-                {isConnected ? 'ACTIVE' : isConnecting ? 'CONNECTING' : 'WAITING'}
+                {isActive ? 'ACTIVE' : isReconnecting ? 'RECONNECTING' : isConnecting ? 'CONNECTING' : 'WAITING'}
               </Text>
             </View>
           </View>
@@ -731,6 +767,8 @@ function AppInner() {
         setIsBackgroundMode={setIsBackgroundMode}
         disableAutoConnect={disableAutoConnect}
         setDisableAutoConnect={setDisableAutoConnect}
+        voicePreference={voicePreference}
+        toggleVoiceGender={toggleVoiceGender}
       />
     </SafeAreaView>
   );
