@@ -61,6 +61,7 @@ const STATIC_AUDIO_PLAYER_OPTIONS = {
   keepAudioSessionActive: true,
 };
 const CHIME_AUDIO_ASSET = require("../../assets/chime.mp3");
+const PTU_BARK_ASSET = require("../../assets/audio/ptu-bark.mp3");
 const BACKGROUND_AUDIO_ASSET = require("../../assets/silent.m4a");
 const LOCK_SCREEN_ARTWORK_ASSET = require("../../assets/images/icon.png");
 
@@ -76,6 +77,7 @@ class SpeechManager {
   constructor() {
     this.speechQueue = [];
     this.sirenPlaying = false;
+    this.ptuPlaying = false;
     this.addLog = null;
     this.lastSpokenText = "";
     this.lastSpokenAt = 0;
@@ -1289,6 +1291,31 @@ class SpeechManager {
 
   async playChime() {
     await this._playChimeNow();
+  }
+
+  async playPTUBurst() {
+    if (this.ptuPlaying) return;
+    this.ptuPlaying = true;
+    try {
+      await this._ensureBackgroundAnchor();
+    } catch (e) {
+      console.log("[Speech] PTU background anchor failed:", e);
+    }
+    
+    try {
+      const player = await createAudioPlayer(PTU_BARK_ASSET, EFFECT_AUDIO_PLAYER_OPTIONS);
+      player.volume = this.masterVolume;
+      player.play();
+      
+      // The audio file is ~8 seconds long. Let it play entirely.
+      // We wait 8500ms to ensure it finishes before disposing.
+      await new Promise((resolve) => setTimeout(resolve, 8500));
+      this._disposePlayer(player, { pause: true });
+    } catch (err) {
+      console.warn("Failed to play PTU burst", err);
+    } finally {
+      this.ptuPlaying = false;
+    }
   }
 
   async playBoardingAnnouncement(livery, { fadeBoardingMusic = true, onFinish } = {}) {

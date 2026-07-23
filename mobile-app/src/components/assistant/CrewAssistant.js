@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { ArrowRight, CheckSquare, RefreshCw, ShieldCheck, Square } from 'lucide-react-native';
 import { useTheme } from '../../context/ThemeContext';
+import { speechManager } from '../../utils/speech';
 
 const PHASE_META = {
   syncing: { title: "Detecting Phase", next: null, fallbackNextTitle: "First Confirmed Phase" },
@@ -129,6 +130,75 @@ const CrewAssistant = ({ telemetry, isConnected, onResetConnectingFlight }) => {
   const nextPhase = details.next;
   const nextDetails = nextPhase ? PHASE_META[nextPhase] : null;
   const conditions = isConnected ? getConditions(phase, telemetry) : [];
+
+  const prevEnginesRef = useRef({});
+  const prevGsRef = useRef(0);
+
+  useEffect(() => {
+    if (!isConnected) return;
+
+    // 1. Aircraft Type Constraint
+    const isAirbusA320Family = (name) => {
+      if (!name) return false;
+      const lower = name.toLowerCase();
+      // Match A318, A319, A320, A321, A320neo, A321neo
+      return lower.includes('a318') ||
+        lower.includes('a319') ||
+        lower.includes('a320') ||
+        lower.includes('a321');
+    };
+
+    if (!isAirbusA320Family(telemetry.name)) {
+      prevEnginesRef.current = telemetry.engines || {};
+      prevGsRef.current = telemetry.gs || 0;
+      return;
+    }
+
+    // 3. Inhibition Logic
+    const cargoDoorsOpen = telemetry.cargoDoorsOpen === 1;
+    const brakesSet = telemetry.brakes === 1;
+
+    if (cargoDoorsOpen || brakesSet) {
+      prevEnginesRef.current = telemetry.engines || {};
+      prevGsRef.current = telemetry.gs || 0;
+      return;
+    }
+
+    const prevEng = prevEnginesRef.current;
+    const currEng = telemetry.engines || {};
+    const currGs = telemetry.gs || 0;
+
+    // Check Engine 1 & 2 states
+    const eng1Prev = prevEng[1] || 0;
+    const eng1Curr = currEng[1] || 0;
+    const eng2Prev = prevEng[2] || 0;
+    const eng2Curr = currEng[2] || 0;
+
+    let shouldPlay = false;
+
+    // Trigger 1: Second Engine Start Sequence
+    // One running (2), the other OFF (0) -> STARTING (1)
+    if ((eng1Curr === 2 && eng2Prev === 0 && eng2Curr === 1) ||
+      (eng2Curr === 2 && eng1Prev === 0 && eng1Curr === 1)) {
+      shouldPlay = true;
+    }
+
+    // Trigger 2: Single-Engine Taxi (Engine Shutdown)
+    // Speed < 30 knots, one ON -> OFF (2 -> 0), other remains ON (2)
+    if (currGs < 30) {
+      if ((eng1Prev === 2 && eng1Curr === 0 && eng2Curr === 2) ||
+        (eng2Prev === 2 && eng2Curr === 0 && eng1Curr === 2)) {
+        shouldPlay = true;
+      }
+    }
+
+    if (shouldPlay) {
+      speechManager.playPTUBurst();
+    }
+
+    prevEnginesRef.current = currEng;
+    prevGsRef.current = currGs;
+  }, [telemetry.engines, telemetry.cargoDoorsOpen, telemetry.brakes, telemetry.gs, telemetry.name, isConnected]);
 
   return (
     <View style={[

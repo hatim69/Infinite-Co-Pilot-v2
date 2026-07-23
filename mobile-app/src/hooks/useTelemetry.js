@@ -175,6 +175,7 @@ const POLL_COMMANDS = [
   "aircraft/0/flightplan/destination_dist",
   "aircraft/0/location/destination_distance",
   "environment/turbulence_factor",
+  "aircraft/0/configuration/doors/cargo_doors_open",
 ];
 
 const INITIAL_TELEMETRY = {
@@ -226,6 +227,7 @@ const INITIAL_TELEMETRY = {
   onRunway: false,
   destDist: null,
   turbulence: 0,
+  cargoDoorsOpen: 0,
   performance: null,
   appState: -1,
   phase: PHASE_SYNCING,
@@ -1042,6 +1044,11 @@ export function useTelemetry(disableAutoConnect = false) {
             }
           }
           updateNext("gear", data);
+        }
+
+        // ── Cargo Doors ───────────────────────────────────────────────────
+        if (command === "aircraft/0/configuration/doors/cargo_doors_open") {
+          updateNext("cargoDoorsOpen", data);
         }
 
         // ── Parking Brake ─────────────────────────────────────────────────
