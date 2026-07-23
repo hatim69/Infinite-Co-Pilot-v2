@@ -553,7 +553,7 @@ function AppInner() {
       </View>
       <Text style={[styles.splashTitle, responsive.isTinyWidth && styles.splashTitleCompact, { color: theme.textPrimary, textAlign: 'center', fontSize: responsive.isTinyWidth ? 20 : 22 }]}>Background Mode Active</Text>
       <Text style={[styles.splashSubtitle, responsive.isTinyWidth && styles.splashSubtitleCompact, { color: theme.textMuted, textAlign: 'center', lineHeight: 20, marginTop: 8 }]}>
-        UI rendering is minimized to conserve resources. Callouts, TTS, and telemetry are running perfectly in the background.
+        UI rendering is minimized to conserve resources. Callouts and telemetry are running perfectly in the background.
       </Text>
     </View>
   );

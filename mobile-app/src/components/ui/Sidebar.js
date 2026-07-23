@@ -298,7 +298,7 @@ export default function Sidebar({ visible, onClose, isBackgroundMode, setIsBackg
                   <View style={{ flex: 1, paddingRight: 16 }}>
                     <Text style={[styles.sliderLabel, { color: theme.textLabel }]}>Background Mode</Text>
                     <Text style={[styles.toggleSub, { color: theme.textMuted }]}>
-                      Minimizes UI to save performance. Callouts and TTS continue running.
+                      Minimizes UI to save performance. Callouts and Telemetry continue running.
                     </Text>
                   </View>
                   <Switch
