@@ -263,10 +263,14 @@ export function useTelemetry(disableAutoConnect = false) {
     positiveRate: false,
     hasFlown: false,
     welcome: false,
-    alt5k: false,
-    alt10k: false,
-    alt15k: false,
-    alt24k: false,
+    alt5k_armedForClimb: true,
+    alt5k_armedForDescent: false,
+    alt10k_armedForClimb: true,
+    alt10k_armedForDescent: false,
+    alt15k_armedForClimb: true,
+    alt15k_armedForDescent: false,
+    alt24k_armedForClimb: true,
+    alt24k_armedForDescent: false,
     boardingAnnouncementPlayed: false,
     boardingMusicStarted: false,
     boardingMusicStopped: false,
@@ -563,8 +567,7 @@ export function useTelemetry(disableAutoConnect = false) {
           updateNext("msl", data);
 
           if (prevMsl !== null) {
-            const alt = (threshold) =>
-              crossedThreshold(prevMsl, data, threshold);
+            const currentAlt = data;
 
             const inClimbAnnouncementPhase = isPhaseActive(state, phaseTrackerRef.current, CLIMB_ANNOUNCEMENT_PHASES);
             const inDescentAnnouncementPhase = isPhaseActive(state, phaseTrackerRef.current, DESCENT_ANNOUNCEMENT_PHASES);
@@ -573,38 +576,32 @@ export function useTelemetry(disableAutoConnect = false) {
             const allowDescentAltitudeCallout =
               inDescentAnnouncementPhase || (phaseTrackerRef.current.phaseReady && isDescendingForCallout(state));
 
-            if (allowClimbAltitudeCallout && alt(5000).ascending && !flags.alt5k) {
-              speak("Passing five thousand.", "notice");
-              flags.alt5k = true;
-            }
-            if (allowDescentAltitudeCallout && alt(5000).descending && flags.alt5k) {
-              speak("Passing five thousand.", "notice");
-              flags.alt5k = false;
-            }
-            if (allowClimbAltitudeCallout && alt(10000).ascending && !flags.alt10k) {
-              speak("Ten thousand. Landing lights off.", { tone: "caution", priority: true });
-              flags.alt10k = true;
-            }
-            if (allowDescentAltitudeCallout && alt(10000).descending && flags.alt10k) {
-              speak("Ten thousand. Landing lights on.", { tone: "notice", priority: true });
-              flags.alt10k = false;
-            }
-            if (allowClimbAltitudeCallout && alt(15000).ascending && !flags.alt15k) {
-              speak("Passing one-five thousand.", "notice");
-              flags.alt15k = true;
-            }
-            if (allowDescentAltitudeCallout && alt(15000).descending && flags.alt15k) {
-              speak("Passing one-five thousand.", "notice");
-              flags.alt15k = false;
-            }
-            if (allowClimbAltitudeCallout && alt(24000).ascending && !flags.alt24k) {
-              speak("Passing Flight Level two-four-zero.", "notice");
-              flags.alt24k = true;
-            }
-            if (allowDescentAltitudeCallout && alt(24000).descending && flags.alt24k) {
-              speak("Descending Flight Level two-four-zero.", "notice");
-              flags.alt24k = false;
-            }
+            const HYSTERESIS = 300;
+
+            const checkAltitudeCallout = (alt, flagPrefix, climbText, descentText, options) => {
+              // Hysteresis Arming
+              if (currentAlt > alt + HYSTERESIS) {
+                flags[`${flagPrefix}_armedForDescent`] = true;
+              } else if (currentAlt < alt - HYSTERESIS) {
+                flags[`${flagPrefix}_armedForClimb`] = true;
+              }
+
+              // Callouts
+              const crossing = crossedThreshold(prevMsl, currentAlt, alt);
+              if (allowClimbAltitudeCallout && crossing.ascending && flags[`${flagPrefix}_armedForClimb`]) {
+                speak(climbText, options.climb || "notice");
+                flags[`${flagPrefix}_armedForClimb`] = false;
+              }
+              if (allowDescentAltitudeCallout && crossing.descending && flags[`${flagPrefix}_armedForDescent`]) {
+                speak(descentText, options.descent || "notice");
+                flags[`${flagPrefix}_armedForDescent`] = false;
+              }
+            };
+
+            checkAltitudeCallout(5000, 'alt5k', "Passing five thousand.", "Passing five thousand.", {});
+            checkAltitudeCallout(10000, 'alt10k', "Ten thousand. Landing lights off.", "Ten thousand. Landing lights on.", { climb: { tone: "caution", priority: true }, descent: { tone: "notice", priority: true } });
+            checkAltitudeCallout(15000, 'alt15k', "Passing one-five thousand.", "Passing one-five thousand.", {});
+            checkAltitudeCallout(24000, 'alt24k', "Passing Flight Level two-four-zero.", "Descending Flight Level two-four-zero.", {});
           }
         }
 
