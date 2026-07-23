@@ -20,6 +20,7 @@ import {
   TextInput,
   TouchableOpacity,
   Animated,
+  Alert,
   AppState,
   Platform,
   Image,
@@ -68,7 +69,6 @@ import {
 
 import { ThemeProvider, useTheme } from "./src/context/ThemeContext";
 import { useTelemetry } from "./src/hooks/useTelemetry";
-import { speechManager } from "./src/utils/speech";
 import { getFlapString } from "./src/utils/calculatePerformance";
 
 import SystemStatus from "./src/components/cards/SystemStatus";
@@ -194,13 +194,20 @@ function AppInner() {
     selectDevice,
     disconnectDevice,
     resetForConnectingFlight,
+    handleAppStateChange: handleSessionAppStateChange,
+    subscribeSessionEvents,
+    whenAudioReady,
+    setSpeechLogger,
+    getVoicePreference,
+    toggleVoice: toggleSessionVoice,
+    setVoicePreference: setSessionVoicePreference,
   } = useTelemetry(disableAutoConnect || !isBetaVerified);
 
   useEffect(() => {
     let isMounted = true;
     const minimumPrep = new Promise((resolve) => setTimeout(resolve, FLIGHT_DECK_MIN_PREP_MS));
     const audioReady = Promise.race([
-      speechManager.whenReady().catch(() => undefined),
+      whenAudioReady().catch(() => undefined),
       new Promise((resolve) => setTimeout(resolve, FLIGHT_DECK_PREP_TIMEOUT_MS)),
     ]);
 
@@ -248,7 +255,7 @@ function AppInner() {
   useEffect(() => {
     // Sync initial voice preference
     setTimeout(() => {
-      setVoicePreferenceState(speechManager.voicePreference);
+      setVoicePreferenceState(getVoicePreference());
     }, 500);
 
     async function startBackgroundService() {
@@ -301,7 +308,7 @@ function AppInner() {
 
   // Wire up the speech logger
   useEffect(() => {
-    speechManager.setLogger((text) => {
+    setSpeechLogger((text) => {
       setLogs((prev) => [
         ...prev,
         { time: new Date().toLocaleTimeString(), text },
@@ -309,38 +316,40 @@ function AppInner() {
     });
   }, []);
 
+  useEffect(() => {
+    const unsubscribe = subscribeSessionEvents((event) => {
+      if (event?.type === "alert") {
+        Alert.alert(event.title, event.message, event.buttons || [{ text: "OK" }]);
+      }
+    });
+
+    return unsubscribe;
+  }, []);
+
   // Track app background state
   useEffect(() => {
     const sub = AppState.addEventListener("change", (state) => {
       setIsInBackground(state === "background" || state === "inactive");
-      speechManager.handleAppStateChange(state);
+      handleSessionAppStateChange(state);
     });
     return () => sub.remove();
   }, []);
 
-  useEffect(() => {
-    speechManager.setBackgroundSessionState({
-      active: isConnected,
-      connectedIp,
-    });
-  }, [connectedIp, isConnected]);
-
 
 
   const toggleVoice = () => {
-    const enabled = speechManager.toggleVoice();
+    const enabled = toggleSessionVoice();
     setVoiceEnabled(enabled);
   };
 
   const toggleVoiceGender = async () => {
     const next = voicePreference === "female" ? "male" : "female";
-    await speechManager.setVoicePreference(next);
+    await setSessionVoicePreference(next);
     setVoicePreferenceState(next);
   };
 
   const handleDisconnect = () => {
     disconnectDevice();
-    speechManager.stopAll();
   };
 
   useEffect(() => {
