@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, useWindowDimensions } from 'react-native';
 import { ArrowRight, CheckSquare, RefreshCw, ShieldCheck, Square } from 'lucide-react-native';
 import { useTheme } from '../../context/ThemeContext';
 
@@ -122,25 +122,32 @@ const getConditions = (phase, telemetry) => {
   return byPhase[phase] || byPhase.preflight;
 };
 
-const CrewAssistant = ({ telemetry, isConnected, onResetConnectingFlight }) => {
+const CrewAssistant = ({ telemetry, isConnected, onResetConnectingFlight, layoutMode = "default" }) => {
   const { theme } = useTheme();
+  const { width, height } = useWindowDimensions();
   const phase = isConnected ? telemetry.phase || "preflight" : "preflight";
   const details = PHASE_META[phase] || PHASE_META.preflight;
   const nextPhase = details.next;
   const nextDetails = nextPhase ? PHASE_META[nextPhase] : null;
   const conditions = isConnected ? getConditions(phase, telemetry) : [];
+  const isCompact = layoutMode === "compact" || width < 360 || height < 420;
+  const isTablet = layoutMode === "tablet" || width >= 760;
+  const conditionWidth = isCompact ? '100%' : isTablet ? '31.5%' : '48%';
 
   return (
     <View style={[
       styles.container,
+      isCompact && styles.containerCompact,
       { backgroundColor: theme.surfaceMid, borderColor: theme.borderSoft }
     ]}>
-      <View style={[styles.headerRow, { borderBottomColor: theme.borderMid }]}>
+      <View style={[styles.headerRow, isCompact && styles.headerRowCompact, { borderBottomColor: theme.borderMid }]}>
         <View style={styles.titleContainer}>
           <View style={[styles.iconWrapper, { backgroundColor: theme.accentBg, borderColor: theme.accentActiveBorder }]}>
             <ShieldCheck size={18} color={theme.accentText} />
           </View>
-          <Text style={[styles.headerTitle, { color: theme.textSecondary }]}>Crew Assistant</Text>
+          <Text style={[styles.headerTitle, { color: theme.textSecondary }]} numberOfLines={1}>
+            Crew Assistant
+          </Text>
         </View>
         {isConnected && (
           <TouchableOpacity
@@ -159,17 +166,26 @@ const CrewAssistant = ({ telemetry, isConnected, onResetConnectingFlight }) => {
         )}
       </View>
 
-      <View style={styles.phaseRow}>
+      <View style={[styles.phaseRow, isCompact && styles.phaseRowCompact]}>
         <View style={styles.phaseBlock}>
           <Text style={[styles.microLabel, { color: theme.textDim }]}>Current Phase</Text>
-          <Text style={[styles.phaseTitle, { color: theme.textPrimary }]}>{details.title}</Text>
+          <Text
+            style={[styles.phaseTitle, isCompact && styles.phaseTitleCompact, { color: theme.textPrimary }]}
+            numberOfLines={2}
+            adjustsFontSizeToFit={!isCompact}
+          >
+            {details.title}
+          </Text>
         </View>
 
-        <ArrowRight size={18} color={theme.textDim} style={styles.arrowIcon} />
+        {!isCompact && <ArrowRight size={18} color={theme.textDim} style={styles.arrowIcon} />}
 
         <View style={styles.phaseBlock}>
           <Text style={[styles.microLabel, { color: theme.textDim }]}>Next Phase</Text>
-          <Text style={[styles.nextPhaseTitle, { color: nextDetails ? theme.accentText : theme.textMuted }]}>
+          <Text
+            style={[styles.nextPhaseTitle, isCompact && styles.nextPhaseTitleCompact, { color: nextDetails ? theme.accentText : theme.textMuted }]}
+            numberOfLines={2}
+          >
             {nextDetails ? nextDetails.title : details.fallbackNextTitle || "Complete"}
           </Text>
         </View>
@@ -182,7 +198,7 @@ const CrewAssistant = ({ telemetry, isConnected, onResetConnectingFlight }) => {
             {conditions.map((item) => {
               const Icon = item.met ? CheckSquare : Square;
               return (
-                <View key={item.label} style={styles.conditionItem}>
+                <View key={item.label} style={[styles.conditionItem, { width: conditionWidth }]}>
                   <Icon
                     size={15}
                     color={item.met ? theme.accentText : theme.textDim}
@@ -193,7 +209,7 @@ const CrewAssistant = ({ telemetry, isConnected, onResetConnectingFlight }) => {
                       styles.conditionText,
                       { color: item.met ? theme.textLabel : theme.textMuted },
                     ]}
-                    numberOfLines={1}
+                    numberOfLines={isCompact ? 2 : 1}
                   >
                     {item.label}
                   </Text>
@@ -214,6 +230,10 @@ const styles = StyleSheet.create({
     padding: 14,
     marginBottom: 20,
   },
+  containerCompact: {
+    padding: 12,
+    marginBottom: 12,
+  },
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -222,6 +242,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     paddingBottom: 10,
     marginBottom: 14,
+  },
+  headerRowCompact: {
+    flexWrap: 'wrap',
+    alignItems: 'flex-start',
   },
   titleContainer: {
     flex: 1,
@@ -243,10 +267,12 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 1.2,
     textTransform: 'uppercase',
+    flexShrink: 1,
   },
   nextFlightButton: {
-    flexShrink: 0,
-    minHeight: 32,
+    flexShrink: 1,
+    minHeight: 44,
+    minWidth: 44,
     borderWidth: 1,
     borderRadius: 8,
     paddingHorizontal: 10,
@@ -265,6 +291,11 @@ const styles = StyleSheet.create({
     gap: 10,
     marginBottom: 14,
   },
+  phaseRowCompact: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    gap: 8,
+  },
   phaseBlock: {
     flex: 1,
     minWidth: 0,
@@ -280,12 +311,18 @@ const styles = StyleSheet.create({
     fontSize: 25,
     fontWeight: '800',
   },
+  phaseTitleCompact: {
+    fontSize: 20,
+  },
   arrowIcon: {
     marginTop: 16,
   },
   nextPhaseTitle: {
     fontSize: 16,
     fontWeight: '800',
+  },
+  nextPhaseTitleCompact: {
+    fontSize: 15,
   },
   conditions: {
     borderTopWidth: 1,
@@ -298,7 +335,6 @@ const styles = StyleSheet.create({
     rowGap: 8,
   },
   conditionItem: {
-    width: '48%',
     minHeight: 24,
     flexDirection: 'row',
     alignItems: 'center',

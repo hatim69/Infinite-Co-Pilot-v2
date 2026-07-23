@@ -12,3 +12,12 @@ mobile-app/assets/mic_click_on.wav
 mobile-app/resize_icons.py
 # mobile-app/assets/audio
 scratch_audio
+mobile-app/.idea/deviceManager.xml
+.gitignore
+mobile-app/.idea/caches/deviceStreaming.xml
+mobile-app/.idea/modules.xml
+.gitignore
+mobile-app/.idea/misc.xml
+.gitignore
+mobile-app/.idea/vcs.xml
+mobile-app/.idea/mobile-app.iml

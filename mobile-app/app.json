@@ -4,7 +4,7 @@
     "slug": "infinite-co-pilot",
     "scheme": "infinitecopilot",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/images/icon.png",
     "userInterfaceStyle": "dark",
     "ios": {
@@ -28,6 +28,7 @@
     },
     "android": {
       "package": "com.infinitecopilot.app",
+      "allowBackup": false,
       "adaptiveIcon": {
         "backgroundColor": "#282829",
         "foregroundImage": "./assets/images/android-icon-foreground.png",

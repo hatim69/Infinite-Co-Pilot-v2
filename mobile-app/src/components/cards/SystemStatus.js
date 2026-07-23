@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, Platform } from 'react-native';
+import { View, Text, StyleSheet, Platform, useWindowDimensions } from 'react-native';
 import { useTheme } from '../../context/ThemeContext';
 
 /**
@@ -9,20 +9,25 @@ import { useTheme } from '../../context/ThemeContext';
  */
 const SystemStatus = ({ label, value, icon: Icon, highlight }) => {
   const { theme } = useTheme();
+  const { width } = useWindowDimensions();
 
   const isActive = highlight || (typeof value === 'string' && (value === 'ON' || value === 'SET' || value === 'CONN' || value === 'ACTIVE' || value === 'ARMED'));
   const isWarning = typeof value === 'string' && (value === 'MOVING');
+  const isSingleColumn = width < 360;
+  const isThreeColumn = width >= 760;
+  const itemWidth = isSingleColumn ? '100%' : isThreeColumn ? '32%' : '48%';
 
   return (
     <View style={[
       styles.container,
+      { width: itemWidth },
       { backgroundColor: theme.surface, borderColor: theme.border },
       isActive && { borderColor: theme.accentActiveBorder, backgroundColor: theme.accentActive },
       isWarning && styles.containerWarning,
     ]}>
       <View style={styles.left}>
         {Icon && <Icon size={12} color={theme.textDim} style={styles.icon} />}
-        <Text style={[styles.label, { color: theme.textDim }]} numberOfLines={1}>{label}</Text>
+        <Text style={[styles.label, { color: theme.textDim }]} numberOfLines={isSingleColumn ? 2 : 1}>{label}</Text>
       </View>
       <Text
         style={[
@@ -31,7 +36,7 @@ const SystemStatus = ({ label, value, icon: Icon, highlight }) => {
           isActive && { color: theme.accentText },
           isWarning && styles.valueWarning,
         ]}
-        numberOfLines={1}
+        numberOfLines={isSingleColumn ? 2 : 1}
       >
         {value !== undefined && value !== null && value !== '' ? value : '...'}
       </Text>
@@ -48,8 +53,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    width: '48.5%',
     marginBottom: 8,
+    minHeight: 44,
   },
   containerWarning: {
     borderColor: 'rgba(245, 158, 11, 0.4)',
@@ -60,6 +65,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flex: 1,
     marginRight: 4,
+    minWidth: 0,
   },
   icon: {
     marginRight: 5,
@@ -76,7 +82,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
     textAlign: 'right',
-    flexShrink: 0,
+    flexShrink: 1,
+    maxWidth: '58%',
   },
   valueWarning: {
     color: '#FBBF24',

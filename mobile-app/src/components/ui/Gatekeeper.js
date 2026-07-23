@@ -7,6 +7,7 @@ import {
   StyleSheet,
   ActivityIndicator,
   KeyboardAvoidingView,
+  ScrollView,
   Platform,
   Alert
 } from 'react-native';
@@ -105,11 +106,16 @@ export default function Gatekeeper({ onVerify }) {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardView}
       >
-        <View style={styles.content}>
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
           <View style={[styles.iconWrapper, { backgroundColor: theme.accentBg, borderColor: theme.accent }]}>
             <ShieldAlert size={48} color={theme.accent} />
           </View>
-          
+
           <Text style={[styles.title, { color: theme.textPrimary }]}>Closed Beta</Text>
           <Text style={[styles.subtitle, { color: theme.textMuted }]}>
             Infinite Co-Pilot is currently in closed beta. Please enter your invitation code to continue.
@@ -118,11 +124,11 @@ export default function Gatekeeper({ onVerify }) {
           <View style={styles.inputContainer}>
             <TextInput
               style={[
-                styles.input, 
-                { 
-                  backgroundColor: theme.inputBg, 
-                  borderColor: error ? '#F87171' : theme.border, 
-                  color: theme.textPrimary 
+                styles.input,
+                {
+                  backgroundColor: theme.inputBg,
+                  borderColor: error ? '#F87171' : theme.border,
+                  color: theme.textPrimary
                 }
               ]}
               placeholder="e.g. BETA-XXXX-XXXX"
@@ -143,7 +149,7 @@ export default function Gatekeeper({ onVerify }) {
 
           <TouchableOpacity
             style={[
-              styles.verifyBtn, 
+              styles.verifyBtn,
               { backgroundColor: isVerifying ? theme.accentBgStrong : theme.connectBtn },
               (!code.trim() || isVerifying) && { opacity: 0.7 }
             ]}
@@ -159,11 +165,11 @@ export default function Gatekeeper({ onVerify }) {
               </Text>
             )}
           </TouchableOpacity>
-          
+
           <Text style={[styles.disclaimer, { color: theme.textFaint }]}>
             An active internet connection is required to verify the beta validity period.
           </Text>
-        </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -176,8 +182,11 @@ const styles = StyleSheet.create({
   keyboardView: {
     flex: 1,
   },
-  content: {
+  scrollView: {
     flex: 1,
+  },
+  content: {
+    flexGrow: 1,
     alignItems: 'center',
     justifyContent: 'center',
     padding: 24,

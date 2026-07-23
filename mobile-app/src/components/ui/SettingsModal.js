@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from "react";
-import { Modal, View, Text, TouchableOpacity, StyleSheet, Switch } from "react-native";
+import { Modal, View, Text, TouchableOpacity, StyleSheet, Switch, ScrollView, useWindowDimensions } from "react-native";
 import { X, Volume2 } from "lucide-react-native";
 import Slider from "./Slider";
 import { speechManager } from "../../utils/speech";
 
 export default function SettingsModal({ visible, onClose }) {
+  const { height } = useWindowDimensions();
+  const isShort = height < 620;
   const [volumes, setVolumes] = useState({
     masterVolume: 1.0,
     coPilotVolume: 1.0,
@@ -43,7 +45,7 @@ export default function SettingsModal({ visible, onClose }) {
       onRequestClose={onClose}
     >
       <View style={styles.overlay}>
-        <View style={styles.modalContent}>
+        <View style={[styles.modalContent, isShort && styles.modalContentCompact, { maxHeight: Math.max(280, height - 40) }]}>
           <View style={styles.header}>
             <View style={{ flexDirection: "row", alignItems: "center" }}>
               <Volume2 size={18} color="#60A5FA" style={{ marginRight: 8 }} />
@@ -54,7 +56,11 @@ export default function SettingsModal({ visible, onClose }) {
             </TouchableOpacity>
           </View>
 
-          <View style={styles.slidersContainer}>
+          <ScrollView
+            style={styles.modalScroll}
+            contentContainerStyle={styles.slidersContainer}
+            showsVerticalScrollIndicator={false}
+          >
             <VolumeSlider 
               label="Master Volume" 
               value={volumes.masterVolume} 
@@ -89,7 +95,7 @@ export default function SettingsModal({ visible, onClose }) {
                 ios_backgroundColor="#334155"
               />
             </View>
-          </View>
+          </ScrollView>
         </View>
       </View>
     </Modal>
@@ -135,6 +141,12 @@ const styles = StyleSheet.create({
     shadowRadius: 20,
     elevation: 10,
   },
+  modalContentCompact: {
+    padding: 18,
+  },
+  modalScroll: {
+    flexShrink: 1,
+  },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -148,9 +160,14 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "700",
     color: "#F8FAFC",
+    flexShrink: 1,
   },
   closeBtn: {
+    minWidth: 44,
+    minHeight: 44,
     padding: 4,
+    alignItems: "center",
+    justifyContent: "center",
   },
   slidersContainer: {
     gap: 20,
@@ -162,6 +179,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    gap: 10,
     marginTop: 8,
     paddingTop: 16,
     borderTopWidth: 1,

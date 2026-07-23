@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, Platform } from 'react-native';
+import { View, Text, StyleSheet, Platform, useWindowDimensions } from 'react-native';
 import { useTheme } from '../../context/ThemeContext';
 
 /**
@@ -8,6 +8,8 @@ import { useTheme } from '../../context/ThemeContext';
  */
 const FlightStrip = ({ telemetry }) => {
   const { theme } = useTheme();
+  const { width } = useWindowDimensions();
+  const isCompact = width < 380;
 
   const fmt = (val, decimals = 0) =>
     val !== null && val !== undefined ? Math.round(val).toFixed(decimals) : '...';
@@ -17,42 +19,42 @@ const FlightStrip = ({ telemetry }) => {
   const vsColor = vsValue === null ? theme.textSlate : vsValue > 200 ? '#34D399' : vsValue < -200 ? '#F87171' : theme.textSlate;
 
   return (
-    <View style={[styles.flightStrip, { backgroundColor: theme.surfaceDeep, borderColor: theme.borderDeep }]}>
-      <View style={styles.stripBox}>
+    <View style={[styles.flightStrip, isCompact && styles.flightStripCompact, { backgroundColor: theme.surfaceDeep, borderColor: theme.borderDeep }]}>
+      <View style={[styles.stripBox, isCompact && styles.stripBoxCompact]}>
         <Text style={[styles.stripLabel, { color: theme.textFaint }]}>IAS</Text>
-        <Text style={[styles.stripValue, { color: theme.textSecondary }]}>{fmt(telemetry.ias)}</Text>
+        <Text style={[styles.stripValue, isCompact && styles.stripValueCompact, { color: theme.textSecondary }]} numberOfLines={1} adjustsFontSizeToFit>{fmt(telemetry.ias)}</Text>
         <Text style={[styles.stripUnit, { color: theme.border }]}>KTS</Text>
       </View>
 
-      <View style={[styles.divider, { backgroundColor: theme.border }]} />
+      {!isCompact && <View style={[styles.divider, { backgroundColor: theme.border }]} />}
 
-      <View style={styles.stripBox}>
+      <View style={[styles.stripBox, isCompact && styles.stripBoxCompact]}>
         <Text style={[styles.stripLabel, { color: theme.textFaint }]}>GS</Text>
-        <Text style={[styles.stripValue, { color: theme.textSecondary }]}>{fmt(telemetry.gs)}</Text>
+        <Text style={[styles.stripValue, isCompact && styles.stripValueCompact, { color: theme.textSecondary }]} numberOfLines={1} adjustsFontSizeToFit>{fmt(telemetry.gs)}</Text>
         <Text style={[styles.stripUnit, { color: theme.border }]}>KTS</Text>
       </View>
 
-      <View style={[styles.divider, { backgroundColor: theme.border }]} />
+      {!isCompact && <View style={[styles.divider, { backgroundColor: theme.border }]} />}
 
-      <View style={styles.stripBox}>
+      <View style={[styles.stripBox, isCompact && styles.stripBoxCompact]}>
         <Text style={[styles.stripLabel, { color: theme.textFaint }]}>VS</Text>
-        <Text style={[styles.stripValue, { color: vsColor }]}>{vsStr}</Text>
+        <Text style={[styles.stripValue, isCompact && styles.stripValueCompact, { color: vsColor }]} numberOfLines={1} adjustsFontSizeToFit>{vsStr}</Text>
         <Text style={[styles.stripUnit, { color: theme.border }]}>FPM</Text>
       </View>
 
-      <View style={[styles.divider, { backgroundColor: theme.border }]} />
+      {!isCompact && <View style={[styles.divider, { backgroundColor: theme.border }]} />}
 
-      <View style={styles.stripBox}>
+      <View style={[styles.stripBox, isCompact && styles.stripBoxCompact]}>
         <Text style={[styles.stripLabel, { color: theme.textFaint }]}>ALT</Text>
-        <Text style={[styles.stripValue, { color: theme.textSecondary }]}>{fmt(telemetry.msl)}</Text>
+        <Text style={[styles.stripValue, isCompact && styles.stripValueCompact, { color: theme.textSecondary }]} numberOfLines={1} adjustsFontSizeToFit>{fmt(telemetry.msl)}</Text>
         <Text style={[styles.stripUnit, { color: theme.border }]}>FT MSL</Text>
       </View>
 
-      <View style={[styles.divider, { backgroundColor: theme.border }]} />
+      {!isCompact && <View style={[styles.divider, { backgroundColor: theme.border }]} />}
 
-      <View style={styles.stripBox}>
+      <View style={[styles.stripBox, isCompact && styles.stripBoxCompact]}>
         <Text style={[styles.stripLabel, { color: theme.textFaint }]}>AGL</Text>
-        <Text style={[styles.stripValue, { color: theme.textSecondary }]}>{fmt(telemetry.agl)}</Text>
+        <Text style={[styles.stripValue, isCompact && styles.stripValueCompact, { color: theme.textSecondary }]} numberOfLines={1} adjustsFontSizeToFit>{fmt(telemetry.agl)}</Text>
         <Text style={[styles.stripUnit, { color: theme.border }]}>FT AGL</Text>
       </View>
     </View>
@@ -62,6 +64,7 @@ const FlightStrip = ({ telemetry }) => {
 const styles = StyleSheet.create({
   flightStrip: {
     flexDirection: 'row',
+    flexWrap: 'nowrap',
     justifyContent: 'space-between',
     borderRadius: 14,
     paddingVertical: 14,
@@ -74,9 +77,20 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 5,
   },
+  flightStripCompact: {
+    flexWrap: 'wrap',
+    rowGap: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+  },
   stripBox: {
     alignItems: 'center',
     flex: 1,
+    minWidth: 0,
+  },
+  stripBoxCompact: {
+    flexBasis: '31%',
+    flexGrow: 1,
   },
   divider: {
     width: 1,
@@ -95,6 +109,9 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
     letterSpacing: -0.5,
+  },
+  stripValueCompact: {
+    fontSize: 16,
   },
   stripUnit: {
     fontSize: 8,

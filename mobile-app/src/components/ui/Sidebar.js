@@ -8,7 +8,7 @@
  *  3. About      — app version + Discord link
  */
 
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useMemo, useRef, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -19,11 +19,12 @@ import {
   Switch,
   Linking,
   ScrollView,
-  Dimensions,
   Platform,
   Modal,
   TextInput,
-  Alert
+  Alert,
+  KeyboardAvoidingView,
+  useWindowDimensions
 } from 'react-native';
 import { X, Volume2, Palette, Info, MessageCircle, Check, Settings, Bug } from 'lucide-react-native';
 import * as Sentry from '@sentry/react-native';
@@ -33,9 +34,7 @@ import { speechManager } from '../../utils/speech';
 import Slider from './Slider';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const SIDEBAR_WIDTH = Math.min(SCREEN_WIDTH * 0.88, 360);
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.2.0';
 const DISCORD_URL = 'https://discord.gg/hb3HkrfBEK';
 
 // ─── Theme Swatch ─────────────────────────────────────────────────────────────
@@ -130,7 +129,15 @@ function SidebarSection({ icon: Icon, title, theme, children }) {
 export default function Sidebar({ visible, onClose, isBackgroundMode, setIsBackgroundMode, disableAutoConnect, setDisableAutoConnect, voicePreference, toggleVoiceGender }) {
   const { theme, activeTheme, setTheme } = useTheme();
   const insets = useSafeAreaInsets();
-  const translateX = useRef(new Animated.Value(SIDEBAR_WIDTH)).current;
+  const { width, height } = useWindowDimensions();
+  const sidebarWidth = useMemo(() => {
+    const usableWidth = Math.max(width || 0, 1);
+    if (usableWidth < 340) return usableWidth;
+    if (usableWidth < 480) return Math.min(usableWidth * 0.92, 360);
+    return Math.min(usableWidth * 0.72, 420);
+  }, [width]);
+  const isCompactWindow = width < 360 || height < 460;
+  const translateX = useRef(new Animated.Value(sidebarWidth)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
 
   // Control modal mount state for exit animations
@@ -208,7 +215,7 @@ export default function Sidebar({ visible, onClose, isBackgroundMode, setIsBackg
     } else {
       Animated.parallel([
         Animated.timing(translateX, {
-          toValue: SIDEBAR_WIDTH,
+          toValue: sidebarWidth,
           duration: 220,
           useNativeDriver: false,
         }),
@@ -221,7 +228,13 @@ export default function Sidebar({ visible, onClose, isBackgroundMode, setIsBackg
         setModalVisible(false);
       });
     }
-  }, [visible, translateX, backdropOpacity]);
+  }, [visible, translateX, backdropOpacity, sidebarWidth]);
+
+  useEffect(() => {
+    if (!visible) {
+      translateX.setValue(sidebarWidth);
+    }
+  }, [sidebarWidth, translateX, visible]);
 
   const updateVolume = (key, value) => {
     setVolumes((prev) => ({ ...prev, [key]: value }));
@@ -252,7 +265,7 @@ export default function Sidebar({ visible, onClose, isBackgroundMode, setIsBackg
           style={[
             styles.panel,
             {
-              width: SIDEBAR_WIDTH,
+              width: sidebarWidth,
               backgroundColor: theme.surfaceStrong,
               borderLeftColor: theme.border,
               transform: [{ translateX }],
@@ -261,129 +274,134 @@ export default function Sidebar({ visible, onClose, isBackgroundMode, setIsBackg
             },
           ]}
         >
-          {/* Header */}
-          <View style={[styles.panelHeader, { borderBottomColor: theme.borderMid }]}>
-            <Text style={[styles.panelTitle, { color: theme.textPrimary }]}>Settings</Text>
-            <TouchableOpacity onPress={onClose} style={[styles.closeBtn, { backgroundColor: theme.iconBtn, borderColor: theme.iconBtnBorder }]} activeOpacity={0.7}>
-              <X size={18} color={theme.textSlate} />
-            </TouchableOpacity>
-          </View>
-
-          <ScrollView
-            style={styles.scrollArea}
-            contentContainerStyle={[styles.scrollContent, { paddingBottom: 40 }]}
-            showsVerticalScrollIndicator={false}
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={styles.panelKeyboard}
           >
-            {/* ── General ─────────────────────────────────────────────── */}
-            <SidebarSection icon={Settings} title="GENERAL" theme={theme}>
-              <View style={[styles.toggleRow, { borderTopWidth: 0, marginTop: 0, paddingTop: 4 }]}>
-                <View style={{ flex: 1, paddingRight: 16 }}>
-                  <Text style={[styles.sliderLabel, { color: theme.textLabel }]}>Background Mode</Text>
-                  <Text style={[styles.toggleSub, { color: theme.textMuted }]}>
-                    Minimizes UI to save performance. Callouts and TTS continue running.
-                  </Text>
-                </View>
-                <Switch
-                  value={isBackgroundMode}
-                  onValueChange={setIsBackgroundMode}
-                  trackColor={{ false: theme.borderMid, true: theme.switchTrack }}
-                  thumbColor="#FFFFFF"
-                  ios_backgroundColor={theme.sliderTrack}
-                />
-              </View>
+            {/* Header */}
+            <View style={[styles.panelHeader, isCompactWindow && styles.panelHeaderCompact, { borderBottomColor: theme.borderMid }]}>
+              <Text style={[styles.panelTitle, { color: theme.textPrimary }]} numberOfLines={1}>Settings</Text>
+              <TouchableOpacity onPress={onClose} style={[styles.closeBtn, { backgroundColor: theme.iconBtn, borderColor: theme.iconBtnBorder }]} activeOpacity={0.7}>
+                <X size={18} color={theme.textSlate} />
+              </TouchableOpacity>
+            </View>
 
-              <View style={[styles.toggleRow, { borderTopColor: theme.borderMid }]}>
-                <View style={{ flex: 1, paddingRight: 16 }}>
-                  <Text style={[styles.sliderLabel, { color: theme.textLabel }]}>Disable Auto-Connect</Text>
-                  <Text style={[styles.toggleSub, { color: theme.textMuted }]}>
-                    Require manual connection to the simulator.
-                  </Text>
-                </View>
-                <Switch
-                  value={disableAutoConnect}
-                  onValueChange={setDisableAutoConnect}
-                  trackColor={{ false: theme.borderMid, true: theme.switchTrack }}
-                  thumbColor="#FFFFFF"
-                  ios_backgroundColor={theme.sliderTrack}
-                />
-              </View>
-            </SidebarSection>
-
-            {/* ── Appearance ─────────────────────────────────────────────── */}
-            <SidebarSection icon={Palette} title="APPEARANCE" theme={theme}>
-              <View style={styles.swatchRow}>
-                {Object.entries(THEMES).map(([key, td]) => (
-                  <ThemeSwatch
-                    key={key}
-                    themeKey={key}
-                    themeData={td}
-                    isActive={activeTheme === key}
-                    onPress={setTheme}
+            <ScrollView
+              style={styles.scrollArea}
+              contentContainerStyle={[styles.scrollContent, { paddingBottom: isCompactWindow ? 24 : 40 }]}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
+              {/* ── General ─────────────────────────────────────────────── */}
+              <SidebarSection icon={Settings} title="GENERAL" theme={theme}>
+                <View style={[styles.toggleRow, { borderTopWidth: 0, marginTop: 0, paddingTop: 4 }]}>
+                  <View style={{ flex: 1, paddingRight: 16 }}>
+                    <Text style={[styles.sliderLabel, { color: theme.textLabel }]}>Background Mode</Text>
+                    <Text style={[styles.toggleSub, { color: theme.textMuted }]}>
+                      Minimizes UI to save performance. Callouts and TTS continue running.
+                    </Text>
+                  </View>
+                  <Switch
+                    value={isBackgroundMode}
+                    onValueChange={setIsBackgroundMode}
+                    trackColor={{ false: theme.borderMid, true: theme.switchTrack }}
+                    thumbColor="#FFFFFF"
+                    ios_backgroundColor={theme.sliderTrack}
                   />
-                ))}
-              </View>
-            </SidebarSection>
-
-            {/* ── Audio ──────────────────────────────────────────────────── */}
-            <SidebarSection icon={Volume2} title="AUDIO" theme={theme}>
-              <VolumeSliderRow
-                label="Master Volume"
-                value={volumes.masterVolume}
-                onValueChange={(val) => updateVolume('masterVolume', val)}
-                theme={theme}
-              />
-              <VolumeSliderRow
-                label="Co-Pilot Voice"
-                value={volumes.coPilotVolume}
-                onValueChange={(val) => updateVolume('coPilotVolume', val)}
-                theme={theme}
-              />
-              <VolumeSliderRow
-                label="Boarding Music"
-                value={volumes.boardingMusicVolume}
-                onValueChange={(val) => updateVolume('boardingMusicVolume', val)}
-                theme={theme}
-              />
-              <VolumeSliderRow
-                label="Safety Briefing"
-                value={volumes.safetyBriefingVolume}
-                onValueChange={(val) => updateVolume('safetyBriefingVolume', val)}
-                theme={theme}
-              />
-
-              {/* Voice Gender toggle */}
-              <View style={[styles.toggleRow, { borderTopColor: theme.borderMid }]}>
-                <View style={{ flex: 1, paddingRight: 16 }}>
-                  <Text style={[styles.sliderLabel, { color: theme.textLabel }]}>Co-Pilot Voice</Text>
-                  <Text style={[styles.toggleSub, { color: theme.textMuted }]}>
-                    Choose between male and female voices
-                  </Text>
                 </View>
-                <TouchableOpacity onPress={toggleVoiceGender} style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: theme.surfaceMid || 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: theme.borderMid }} activeOpacity={0.7}>
-                  <Text style={{ color: theme.textPrimary, fontSize: 11, fontWeight: 'bold' }}>{voicePreference === 'female' ? 'FEMALE' : 'MALE'}</Text>
-                </TouchableOpacity>
-              </View>
 
-              {/* Chime toggle */}
-              <View style={[styles.toggleRow, { borderTopColor: theme.borderMid }]}>
-                <View>
-                  <Text style={[styles.sliderLabel, { color: theme.textLabel }]}>Notification Chime</Text>
-                  <Text style={[styles.toggleSub, { color: theme.textMuted }]}>
-                    Play chime with sign changes
-                  </Text>
+                <View style={[styles.toggleRow, { borderTopColor: theme.borderMid }]}>
+                  <View style={{ flex: 1, paddingRight: 16 }}>
+                    <Text style={[styles.sliderLabel, { color: theme.textLabel }]}>Disable Auto-Connect</Text>
+                    <Text style={[styles.toggleSub, { color: theme.textMuted }]}>
+                      Require manual connection to the simulator.
+                    </Text>
+                  </View>
+                  <Switch
+                    value={disableAutoConnect}
+                    onValueChange={setDisableAutoConnect}
+                    trackColor={{ false: theme.borderMid, true: theme.switchTrack }}
+                    thumbColor="#FFFFFF"
+                    ios_backgroundColor={theme.sliderTrack}
+                  />
                 </View>
-                <Switch
-                  value={volumes.chimeEnabled}
-                  onValueChange={(val) => updateVolume('chimeEnabled', val)}
-                  trackColor={{ false: theme.borderMid, true: theme.switchTrack }}
-                  thumbColor="#FFFFFF"
-                  ios_backgroundColor={theme.sliderTrack}
+              </SidebarSection>
+
+              {/* ── Appearance ─────────────────────────────────────────────── */}
+              <SidebarSection icon={Palette} title="APPEARANCE" theme={theme}>
+                <View style={styles.swatchRow}>
+                  {Object.entries(THEMES).map(([key, td]) => (
+                    <ThemeSwatch
+                      key={key}
+                      themeKey={key}
+                      themeData={td}
+                      isActive={activeTheme === key}
+                      onPress={setTheme}
+                    />
+                  ))}
+                </View>
+              </SidebarSection>
+
+              {/* ── Audio ──────────────────────────────────────────────────── */}
+              <SidebarSection icon={Volume2} title="AUDIO" theme={theme}>
+                <VolumeSliderRow
+                  label="Master Volume"
+                  value={volumes.masterVolume}
+                  onValueChange={(val) => updateVolume('masterVolume', val)}
+                  theme={theme}
                 />
-              </View>
-            </SidebarSection>
+                <VolumeSliderRow
+                  label="Co-Pilot Voice"
+                  value={volumes.coPilotVolume}
+                  onValueChange={(val) => updateVolume('coPilotVolume', val)}
+                  theme={theme}
+                />
+                <VolumeSliderRow
+                  label="Boarding Music"
+                  value={volumes.boardingMusicVolume}
+                  onValueChange={(val) => updateVolume('boardingMusicVolume', val)}
+                  theme={theme}
+                />
+                <VolumeSliderRow
+                  label="Safety Briefing"
+                  value={volumes.safetyBriefingVolume}
+                  onValueChange={(val) => updateVolume('safetyBriefingVolume', val)}
+                  theme={theme}
+                />
 
-            {/* ── Testing ────────────────────────────────────────────────── */}
-            {/* <SidebarSection icon={Volume2} title="TESTING" theme={theme}>
+                {/* Voice Gender toggle */}
+                <View style={[styles.toggleRow, { borderTopColor: theme.borderMid }]}>
+                  <View style={{ flex: 1, paddingRight: 16 }}>
+                    <Text style={[styles.sliderLabel, { color: theme.textLabel }]}>Co-Pilot Voice</Text>
+                    <Text style={[styles.toggleSub, { color: theme.textMuted }]}>
+                      Choose between male and female voices
+                    </Text>
+                  </View>
+                  <TouchableOpacity onPress={toggleVoiceGender} style={[styles.voiceToggleBtn, { backgroundColor: theme.surfaceMid || 'rgba(255,255,255,0.05)', borderColor: theme.borderMid }]} activeOpacity={0.7}>
+                    <Text style={{ color: theme.textPrimary, fontSize: 11, fontWeight: 'bold' }}>{voicePreference === 'female' ? 'FEMALE' : 'MALE'}</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Chime toggle */}
+                <View style={[styles.toggleRow, { borderTopColor: theme.borderMid }]}>
+                  <View style={{ flex: 1, minWidth: 0, paddingRight: 16 }}>
+                    <Text style={[styles.sliderLabel, { color: theme.textLabel }]}>Notification Chime</Text>
+                    <Text style={[styles.toggleSub, { color: theme.textMuted }]}>
+                      Play chime with sign changes
+                    </Text>
+                  </View>
+                  <Switch
+                    value={volumes.chimeEnabled}
+                    onValueChange={(val) => updateVolume('chimeEnabled', val)}
+                    trackColor={{ false: theme.borderMid, true: theme.switchTrack }}
+                    thumbColor="#FFFFFF"
+                    ios_backgroundColor={theme.sliderTrack}
+                  />
+                </View>
+              </SidebarSection>
+
+              {/* ── Testing ────────────────────────────────────────────────── */}
+              {/* <SidebarSection icon={Volume2} title="TESTING" theme={theme}>
               <TouchableOpacity
                 style={[styles.discordBtn, { backgroundColor: theme.accentBg, borderColor: theme.accentBorder }]}
                 onPress={() => {
@@ -403,74 +421,75 @@ export default function Sidebar({ visible, onClose, isBackgroundMode, setIsBackg
               </TouchableOpacity>
             </SidebarSection> */}
 
-            {/* ── Feedback ────────────────────────────────────────────────── */}
-            <SidebarSection icon={Bug} title="FEEDBACK & BUGS" theme={theme}>
-              <View style={[styles.feedbackContainer, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-                <TextInput
-                  style={[styles.feedbackInput, { color: theme.textPrimary, borderColor: theme.borderMid, backgroundColor: theme.inputBg || 'rgba(0,0,0,0.1)' }]}
-                  placeholder="Email"
-                  placeholderTextColor={theme.textFaint || '#64748B'}
-                  value={feedbackEmail}
-                  onChangeText={setFeedbackEmail}
-                  autoCapitalize="none"
-                  keyboardType="email-address"
-                />
-                <TextInput
-                  style={[styles.feedbackInput, styles.feedbackTextArea, { color: theme.textPrimary, borderColor: theme.borderMid, backgroundColor: theme.inputBg || 'rgba(0,0,0,0.1)' }]}
-                  placeholder="What's on your mind? Found a bug?"
-                  placeholderTextColor={theme.textFaint || '#64748B'}
-                  value={feedbackText}
-                  onChangeText={setFeedbackText}
-                  multiline={true}
-                  textAlignVertical="top"
-                />
+              {/* ── Feedback ────────────────────────────────────────────────── */}
+              <SidebarSection icon={Bug} title="FEEDBACK & BUGS" theme={theme}>
+                <View style={[styles.feedbackContainer, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+                  <TextInput
+                    style={[styles.feedbackInput, { color: theme.textPrimary, borderColor: theme.borderMid, backgroundColor: theme.inputBg || 'rgba(0,0,0,0.1)' }]}
+                    placeholder="Email"
+                    placeholderTextColor={theme.textFaint || '#64748B'}
+                    value={feedbackEmail}
+                    onChangeText={setFeedbackEmail}
+                    autoCapitalize="none"
+                    keyboardType="email-address"
+                  />
+                  <TextInput
+                    style={[styles.feedbackInput, styles.feedbackTextArea, { color: theme.textPrimary, borderColor: theme.borderMid, backgroundColor: theme.inputBg || 'rgba(0,0,0,0.1)' }]}
+                    placeholder="What's on your mind? Found a bug?"
+                    placeholderTextColor={theme.textFaint || '#64748B'}
+                    value={feedbackText}
+                    onChangeText={setFeedbackText}
+                    multiline={true}
+                    textAlignVertical="top"
+                  />
+                  <TouchableOpacity
+                    style={[styles.submitBtn, { backgroundColor: theme.accentBg, borderColor: theme.accentBorder, opacity: (!feedbackText.trim() || !feedbackEmail.trim() || isSendingFeedback) ? 0.5 : 1 }]}
+                    onPress={handleFeedbackSubmit}
+                    disabled={!feedbackText.trim() || !feedbackEmail.trim() || isSendingFeedback}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.submitBtnText, { color: theme.accent }]}>
+                      {isSendingFeedback ? "SENDING..." : "SUBMIT FEEDBACK"}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </SidebarSection>
+
+              {/* ── About ──────────────────────────────────────────────────── */}
+              <SidebarSection icon={Info} title="ABOUT" theme={theme}>
+                {/* Version row */}
+                <View style={[styles.aboutRow, { borderColor: theme.border, backgroundColor: theme.surface }]}>
+                  <View style={{ flex: 1, minWidth: 0, paddingRight: 12 }}>
+                    <Text style={[styles.aboutAppName, { color: theme.textPrimary }]} numberOfLines={1}>Infinite Co-Pilot</Text>
+                    <Text style={[styles.aboutSub, { color: theme.textMuted }]}>
+                      Real-time flight assistant
+                    </Text>
+                  </View>
+                  <View style={[styles.versionBadge, { backgroundColor: theme.accentBg, borderColor: theme.accentBorder }]}>
+                    <Text style={[styles.versionText, { color: theme.accentText }]}>v{APP_VERSION}</Text>
+                  </View>
+                </View>
+
+                {/* Discord button */}
                 <TouchableOpacity
-                  style={[styles.submitBtn, { backgroundColor: theme.accentBg, borderColor: theme.accentBorder, opacity: (!feedbackText.trim() || !feedbackEmail.trim() || isSendingFeedback) ? 0.5 : 1 }]}
-                  onPress={handleFeedbackSubmit}
-                  disabled={!feedbackText.trim() || !feedbackEmail.trim() || isSendingFeedback}
-                  activeOpacity={0.7}
+                  style={[styles.discordBtn, { backgroundColor: theme.accentBg, borderColor: theme.accentBorder }]}
+                  onPress={openDiscord}
+                  activeOpacity={0.75}
                 >
-                  <Text style={[styles.submitBtnText, { color: theme.accent }]}>
-                    {isSendingFeedback ? "SENDING..." : "SUBMIT FEEDBACK"}
-                  </Text>
+                  <MessageCircle size={16} color={theme.accent} style={{ marginRight: 10 }} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.discordLabel, { color: theme.textPrimary }]} numberOfLines={1}>Join our Discord</Text>
+                    <Text style={[styles.discordSub, { color: theme.textMuted }]} numberOfLines={2}>
+                      Community, support, bug-reports & updates
+                    </Text>
+                  </View>
+                  <View style={[styles.discordArrow, { backgroundColor: theme.accentBgStrong }]}>
+                    <Text style={[styles.discordArrowText, { color: theme.accent }]}>↗</Text>
+                  </View>
                 </TouchableOpacity>
-              </View>
-            </SidebarSection>
-
-            {/* ── About ──────────────────────────────────────────────────── */}
-            <SidebarSection icon={Info} title="ABOUT" theme={theme}>
-              {/* Version row */}
-              <View style={[styles.aboutRow, { borderColor: theme.border, backgroundColor: theme.surface }]}>
-                <View>
-                  <Text style={[styles.aboutAppName, { color: theme.textPrimary }]}>Infinite Co-Pilot</Text>
-                  <Text style={[styles.aboutSub, { color: theme.textMuted }]}>
-                    Real-time flight assistant
-                  </Text>
-                </View>
-                <View style={[styles.versionBadge, { backgroundColor: theme.accentBg, borderColor: theme.accentBorder }]}>
-                  <Text style={[styles.versionText, { color: theme.accentText }]}>v{APP_VERSION}</Text>
-                </View>
-              </View>
-
-              {/* Discord button */}
-              <TouchableOpacity
-                style={[styles.discordBtn, { backgroundColor: theme.accentBg, borderColor: theme.accentBorder }]}
-                onPress={openDiscord}
-                activeOpacity={0.75}
-              >
-                <MessageCircle size={16} color={theme.accent} style={{ marginRight: 10 }} />
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.discordLabel, { color: theme.textPrimary }]}>Join our Discord</Text>
-                  <Text style={[styles.discordSub, { color: theme.textMuted }]}>
-                    Community, support, bug-reports & updates
-                  </Text>
-                </View>
-                <View style={[styles.discordArrow, { backgroundColor: theme.accentBgStrong }]}>
-                  <Text style={[styles.discordArrowText, { color: theme.accent }]}>↗</Text>
-                </View>
-              </TouchableOpacity>
-            </SidebarSection>
-          </ScrollView>
+              </SidebarSection>
+            </ScrollView>
+          </KeyboardAvoidingView>
         </Animated.View>
       </View>
     </Modal>
@@ -495,6 +514,9 @@ const styles = StyleSheet.create({
     shadowRadius: 20,
     elevation: 20,
   },
+  panelKeyboard: {
+    flex: 1,
+  },
 
   // Header
   panelHeader: {
@@ -506,14 +528,19 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
     borderBottomWidth: 1,
   },
+  panelHeaderCompact: {
+    paddingHorizontal: 14,
+    paddingTop: 14,
+    paddingBottom: 12,
+  },
   panelTitle: {
     fontSize: 20,
     fontWeight: '700',
     letterSpacing: -0.2,
   },
   closeBtn: {
-    width: 36,
-    height: 36,
+    width: 44,
+    height: 44,
     borderRadius: 10,
     borderWidth: 1,
     alignItems: 'center',
@@ -548,12 +575,14 @@ const styles = StyleSheet.create({
   // Theme swatches
   swatchRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
     gap: 10,
     marginBottom: 12,
   },
   swatchWrapper: {
     flex: 1,
+    minWidth: 72,
     alignItems: 'center',
     gap: 8,
   },
@@ -619,10 +648,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 10,
     marginTop: 8,
     paddingTop: 16,
     borderTopWidth: 1,
     marginBottom: 8,
+  },
+  voiceToggleBtn: {
+    minHeight: 44,
+    minWidth: 64,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   toggleSub: {
     fontSize: 11,
@@ -634,6 +674,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 10,
     borderWidth: 1,
     borderRadius: 12,
     padding: 14,
@@ -653,6 +694,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 5,
+    flexShrink: 0,
   },
   versionText: {
     fontSize: 12,
@@ -711,6 +753,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 8,
     padding: 12,
+    minHeight: 44,
     alignItems: 'center',
     justifyContent: 'center',
   },
