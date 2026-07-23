@@ -71,6 +71,7 @@
         }
       ],
       "./withNotifeeServiceType.js",
+      "./withTaskKiller.js",
       [
         "@sentry/react-native/expo",
         {

@@ -42,7 +42,8 @@ function withNotifeeManifest(config) {
       $: {
         "android:name": "app.notifee.core.ForegroundService",
         "android:foregroundServiceType": "connectedDevice|mediaPlayback",
-        "tools:replace": "android:foregroundServiceType",
+        "android:stopWithTask": "true",
+        "tools:replace": "android:foregroundServiceType,android:stopWithTask",
       },
     });
 
