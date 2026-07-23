@@ -11,8 +11,9 @@ The Phase 1 architecture intentionally preserves the existing subsystems:
 
 - `ifConnectClient` still owns the TCP protocol and polling loop.
 - `speechManager` still owns audio, speech queues, silent audio, and music.
-- `App.js` still owns the existing Notifee and platform setup.
-- Android and iOS background behavior is unchanged.
+- Android foreground-service runtime owns active Android monitoring lifetime.
+- `App.js` still owns general app shell, beta gate, and UI presentation.
+- iOS audio-background behavior is unchanged.
 
 ## React Boundary
 
@@ -47,17 +48,21 @@ The current runtime lifecycle is:
 1. `useTelemetry` starts `FlightSession`.
 2. `FlightSession` listens for Infinite Flight UDP discovery packets.
 3. Auto-connect or manual connect calls `FlightSession.connect()`.
-4. `FlightSession` delegates TCP work to `ifConnectClient`.
-5. Telemetry packets update `FlightSession` state and trigger existing
+4. On Android, `FlightSession.connect()` starts the foreground-service runtime.
+5. The Android runtime acquires its own `FlightSession.start()` hold while
+   monitoring is active, so React can detach without owning session lifetime.
+6. `FlightSession` delegates TCP work to `ifConnectClient`.
+7. Telemetry packets update `FlightSession` state and trigger existing
    announcement logic.
-6. Telemetry-derived flight events, including Airbus PTU playback, are handled
+8. Telemetry-derived flight events, including Airbus PTU playback, are handled
    inside `FlightSession`.
-7. App lifecycle changes are forwarded to `FlightSession`, which coordinates the
+9. App lifecycle changes are forwarded to `FlightSession`, which coordinates the
    existing audio/runtime behavior with `speechManager`.
-8. React receives state snapshots through `FlightSession.subscribe()`.
-9. Explicit disconnect calls `FlightSession.disconnect()`, which performs the
-   full flight-session shutdown.
-10. Hook unmount calls `FlightSession.stop()`.
+10. React receives state snapshots through `FlightSession.subscribe()`.
+11. Explicit disconnect calls `FlightSession.disconnect()`, which performs the
+   full flight-session shutdown and stops the Android foreground-service runtime.
+12. Hook unmount calls `FlightSession.stop()`. During Android monitoring, the
+   runtime hold keeps the session alive until monitoring ends.
 
 ## Dependency Direction
 
@@ -67,6 +72,7 @@ The active ownership flow is:
 React UI
   -> useTelemetry
     -> FlightSession
+      -> Android foreground-service runtime
       -> ifConnectClient
       -> speechManager
 ```
@@ -74,11 +80,36 @@ React UI
 `speechManager` remains the audio subsystem, but flight decisions and flight
 cleanup route through `FlightSession`.
 
+## Android Runtime
+
+The Android foreground service is registered early from `index.js`, but it does
+not start on app launch. It starts only when `FlightSession.connect()` begins an
+active monitoring session.
+
+While the service is active, it owns an additional `FlightSession.start()` hold.
+This gives Android exactly one runtime owner and the app exactly one flight
+owner:
+
+```text
+Android Foreground Service
+  -> FlightSession
+    -> existing subsystems
+```
+
+The service notification is persistent and reflects active monitoring. When the
+session ends through disconnect, simulator main-menu exit, or IF Connect
+disconnect/error handling, `FlightSession` stops the service and releases the
+runtime hold.
+
+The previous launch-time Notifee foreground service was removed. The existing
+audio-background anchor remains because it still owns Expo audio session
+behavior, speech/music continuity, and iOS background audio behavior.
+
 ## Future Intent
 
 This refactor creates the ownership boundary for later Android work. A future
 foreground service should coordinate with `FlightSession` instead of reaching
 through React components, hooks, `ifConnectClient`, or `speechManager` directly.
 
-Phase 1 does not change networking, audio internals, notifications, native
-services, or background execution behavior.
+The Android runtime migration does not change telemetry protocol, polling,
+reconnect, announcement scheduling, speech internals, or IF Connect internals.

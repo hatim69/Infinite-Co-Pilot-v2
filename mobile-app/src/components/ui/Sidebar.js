@@ -35,7 +35,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const SIDEBAR_WIDTH = Math.min(SCREEN_WIDTH * 0.88, 360);
-const APP_VERSION = '1.0.2';
+const APP_VERSION = '1.1.0';
 const DISCORD_URL = 'https://discord.gg/hb3HkrfBEK';
 
 // ─── Theme Swatch ─────────────────────────────────────────────────────────────

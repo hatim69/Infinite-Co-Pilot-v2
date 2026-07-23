@@ -28,16 +28,6 @@ import {
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import notifee, { AndroidForegroundServiceType, AndroidImportance } from "@notifee/react-native";
-
-if (Platform.OS === "android" && notifee?.registerForegroundService) {
-  notifee.registerForegroundService(() => {
-    return new Promise(() => {
-      // Keep the JS runtime alive while Android treats the app as a foreground service.
-    });
-  });
-}
-
 import {
   Settings,
   Droplet,
@@ -257,43 +247,6 @@ function AppInner() {
     setTimeout(() => {
       setVoicePreferenceState(getVoicePreference());
     }, 500);
-
-    async function startBackgroundService() {
-      if (Platform.OS !== "android" || !notifee) return;
-
-      try {
-        const channelId = await notifee.createChannel({
-          id: "flight_link",
-          name: "Flight Link Status",
-          importance: AndroidImportance.LOW,
-        });
-
-        await notifee.displayNotification({
-          id: "flight_link",
-          title: "Infinite Co-Pilot Active",
-          body: "Ready to monitor Infinite Flight in the background.",
-          android: {
-            channelId,
-            asForegroundService: true,
-            foregroundServiceTypes: [
-              AndroidForegroundServiceType.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
-              AndroidForegroundServiceType.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK,
-            ],
-            color: "#0D9488",
-            ongoing: true,
-            pressAction: {
-              id: "default",
-            },
-          },
-        });
-
-        await notifee.requestPermission();
-      } catch (e) {
-        console.log("[ForegroundService] Start failed:", e?.message || e);
-      }
-    }
-
-    startBackgroundService();
   }, []);
 
   const scrollViewRef = useRef(null);

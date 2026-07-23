@@ -1,4 +1,5 @@
 import 'expo-dev-client';
+import './src/runtime/androidFlightRuntime';
 import { registerRootComponent } from 'expo';
 
 import App from './App';

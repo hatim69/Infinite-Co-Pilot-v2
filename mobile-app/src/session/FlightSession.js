@@ -13,6 +13,7 @@
 import { AppState } from "react-native";
 import dgram from "react-native-udp";
 import ifConnect from "../utils/ifConnectClient";
+import androidFlightRuntime from "../runtime/androidFlightRuntime";
 import { speechManager } from "../utils/speech";
 import { calculatePerformance, getFlapString } from "../utils/calculatePerformance";
 import { formatTime } from "../utils/flightMath";
@@ -292,6 +293,8 @@ class FlightSession {
     this.discoveredDevices = [];
     this.autoConnectTimer = null;
     this.verifyTimer = null;
+    this.androidRuntimeSessionRetained = false;
+    this.androidRuntimeStartPromise = null;
     this.appState = AppState.currentState || "active";
     this.phaseTracker = createPhaseTracker();
     this.phaseSync = createPhaseSyncState();
@@ -384,6 +387,11 @@ class FlightSession {
     if (connectedIp === this.state.connectedIp) return;
     this.state = { ...this.state, connectedIp };
     this._syncBackgroundSessionState();
+    if (androidFlightRuntime.isMonitoringActive()) {
+      androidFlightRuntime.updateNotification({ connectedIp }).catch((error) => {
+        console.log("[FlightSession] Android runtime notification update failed:", error?.message || error);
+      });
+    }
     this._notify();
   }
 
@@ -462,6 +470,41 @@ class FlightSession {
   _resetPtuState() {
     this.ptuPreviousEngines = {};
     this.ptuPreviousGroundSpeed = 0;
+  }
+
+  _retainAndroidRuntimeSession() {
+    if (this.androidRuntimeSessionRetained) return;
+    this.androidRuntimeSessionRetained = true;
+    this.start({ disableAutoConnect: this.disableAutoConnect });
+  }
+
+  _releaseAndroidRuntimeSession() {
+    if (!this.androidRuntimeSessionRetained) return;
+    this.androidRuntimeSessionRetained = false;
+    this.stop();
+  }
+
+  _startAndroidRuntime(connectedIp) {
+    if (this.androidRuntimeStartPromise) return this.androidRuntimeStartPromise;
+
+    this.androidRuntimeStartPromise = androidFlightRuntime.startMonitoring({
+      connectedIp,
+      onAcquireSession: () => this._retainAndroidRuntimeSession(),
+      onReleaseSession: () => this._releaseAndroidRuntimeSession(),
+      onError: (error) => {
+        console.log("[FlightSession] Android runtime start failed:", error?.message || error);
+      },
+    }).finally(() => {
+      this.androidRuntimeStartPromise = null;
+    });
+
+    return this.androidRuntimeStartPromise;
+  }
+
+  _stopAndroidRuntime() {
+    androidFlightRuntime.stopMonitoring().catch((error) => {
+      console.log("[FlightSession] Android runtime stop failed:", error?.message || error);
+    });
   }
 
   handleAppStateChange(state) {
@@ -1326,6 +1369,7 @@ class FlightSession {
       ifConnect.close(() => {});
       this._resetAnnouncementState({ isManualConnection: false });
       this._resetPtuState();
+      this._stopAndroidRuntime();
       speechManager.stopAll();
       setTimeout(() => {
         speechManager.speak("Client disconnected.", { tone: "notice" });
@@ -1341,6 +1385,7 @@ class FlightSession {
       ifConnect.close(() => {});
       this._resetAnnouncementState({ isManualConnection: false });
       this._resetPtuState();
+      this._stopAndroidRuntime();
       speechManager.stopAll();
       setTimeout(() => {
         speechManager.speak("Client disconnected.", { tone: "notice" });
@@ -1368,6 +1413,7 @@ class FlightSession {
   connect(ip, isManual = false) {
     if (this.isConnected) return;
     this.isConnected = true;
+    this._startAndroidRuntime(ip).catch(() => {});
     this._setConnectionStatus("CONNECTING...");
     this._setConnectedIp(ip);
 
@@ -1570,6 +1616,7 @@ class FlightSession {
     this._setTelemetry({ ...INITIAL_TELEMETRY });
     this.isConnected = false;
     ifConnect.close(() => {});
+    this._stopAndroidRuntime();
 
     if (isMainMenuExit && this.flags.isManualConnection) {
       this._emitEvent({
