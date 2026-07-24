@@ -21,3 +21,4 @@ mobile-app/.idea/misc.xml
 .gitignore
 mobile-app/.idea/vcs.xml
 mobile-app/.idea/mobile-app.iml
+.DS_Store

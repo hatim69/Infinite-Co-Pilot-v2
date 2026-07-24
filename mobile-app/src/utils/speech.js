@@ -1344,7 +1344,9 @@ class SpeechManager {
       if (lower.includes("air china")) return "announcements/air-china.mp3";
       if (lower.includes("air france")) return "announcements/air-france.mp3";
       if (lower.includes("air india")) return "announcements/air-india.mp3";
+      if (lower.includes("american")) return "announcements/american-airlines.mp3";
       if (lower.includes("british airways")) return "announcements/british-airways.mp3";
+      if (lower.includes("caribbean")) return "announcements/caribbean-airlines.mp3";
       if (lower.includes("delta")) return "announcements/delta.mp3";
       if (lower.includes("egyptair")) return "announcements/egyptair.mp3";
       if (lower.includes("emirates")) return "announcements/emirates.mp3";
@@ -1352,10 +1354,16 @@ class SpeechManager {
       if (lower.includes("garuda indonesia")) return "announcements/garuda-indonesia.mp3";
       if (lower.includes("indigo")) return "announcements/indigo.mp3";
       if (lower.includes("japan airlines") || lower.includes("jal")) return "announcements/japan-airlines.mp3";
+      if (lower.includes("lot")) return "announcements/lot.mp3";
       if (lower.includes("lufthansa")) return "announcements/lufthansa.mp3";
+      if (lower.includes("malaysia")) return "announcements/malaysia-airlines.mp3";
       if (lower.includes("qatar")) return "announcements/qatar.mp3";
       if (lower.includes("singapore")) return "announcements/singapore-airlines.mp3";
+      if (lower.includes("swiss")) return "announcements/swiss.mp3";
+      if (lower.includes("thai")) return "announcements/thai-airways.mp3";
       if (lower.includes("turkish")) return "announcements/turkish-airlines.mp3";
+      if (lower.includes("united")) return "announcements/united-airlines.mp3";
+      if (lower.includes("vietnam")) return "announcements/vietnam-airlines.mp3";
       return "announcements/fallback.mp3";
     };
 
