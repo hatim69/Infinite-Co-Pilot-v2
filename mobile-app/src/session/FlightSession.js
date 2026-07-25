@@ -758,7 +758,6 @@ class FlightSession {
             const pollyVoice = speechManager.voicePreference === "male" ? "Matthew" : "Ruth";
             speechManager.speakWithPollyFallback(welcomeText, pollyVoice, {
               tone: "briefing",
-              detachedFromQueue: true,
               afterSpeech: () => {
                 flags.arrivalWelcomeEnded = true;
                 this._handleAmbientBoardingMusic();

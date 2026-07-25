@@ -1657,7 +1657,13 @@ class SpeechManager {
       const audioUri = await this._getBoardingMusicUri(livery);
 
       // If stopped or disconnected while downloading, abort
-      if (this._boardingMusicRequestId !== playRequestId) return;
+      if (this._boardingMusicRequestId !== playRequestId) {
+        this._isFetchingBoardingMusic = false;
+        if (this._fetchingBoardingMusicFor === livery) {
+          this._fetchingBoardingMusicFor = "";
+        }
+        return;
+      }
 
       if (!audioUri) {
         console.warn("[Speech] Could not get cached audio for boarding music.");
@@ -1707,12 +1713,15 @@ class SpeechManager {
     } finally {
       if (this._boardingMusicRequestId === playRequestId) {
         this._isFetchingBoardingMusic = false;
+        this._fetchingBoardingMusicFor = "";
       }
     }
   }
 
   stopBoardingMusic({ fade = false, durationMs = BOARDING_MUSIC_FADE_MS } = {}) {
     this._boardingMusicRequestId = null;
+    this._isFetchingBoardingMusic = false;
+    this._fetchingBoardingMusicFor = "";
     const player = this.boardingMusic;
     if (!player) return;
 
