@@ -16,15 +16,13 @@ class AndroidFlightRuntime {
     this.handlers = {};
     this.startPromise = null;
     this.stopPromise = null;
+    this.channelId = null;
+    this.permissionRequested = false;
     this._registerForegroundService();
   }
 
   isSupported() {
     return Platform.OS === "android" && Boolean(notifee?.registerForegroundService);
-  }
-
-  isMonitoringActive() {
-    return this.monitoringActive;
   }
 
   _registerForegroundService() {
@@ -64,11 +62,13 @@ class AndroidFlightRuntime {
   }
 
   async _ensureChannel() {
-    return notifee.createChannel({
+    if (this.channelId) return this.channelId;
+    this.channelId = await notifee.createChannel({
       id: CHANNEL_ID,
       name: "Flight Monitoring",
       importance: AndroidImportance.LOW,
     });
+    return this.channelId;
   }
 
   async startMonitoring({ connectedIp = "", onAcquireSession, onReleaseSession, onError } = {}) {
@@ -102,16 +102,21 @@ class AndroidFlightRuntime {
   }
 
   async _startMonitoring({ connectedIp }) {
+    const startedAt = Date.now();
     this.monitoringActive = true;
 
-    try {
-      await notifee.requestPermission();
-    } catch (error) {
-      console.log("[AndroidRuntime] Notification permission request failed:", error?.message || error);
+    if (!this.permissionRequested) {
+      this.permissionRequested = true;
+      try {
+        await notifee.requestPermission();
+      } catch (error) {
+        console.log("[AndroidRuntime] Notification permission request failed:", error?.message || error);
+      }
     }
 
     const channelId = await this._ensureChannel();
     await notifee.displayNotification(this._createNotification({ channelId, connectedIp }));
+    console.log(`[AndroidRuntime] Foreground service start requested in ${Date.now() - startedAt}ms`);
     return { started: true };
   }
 

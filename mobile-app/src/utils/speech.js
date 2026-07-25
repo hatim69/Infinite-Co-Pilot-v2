@@ -7,7 +7,8 @@
  *   - Chime, boarding announcements, boarding music, and siren via expo-audio
  *
  * Background audio is configured so announcements fire even when the user
- * switches to the game app. Requires UIBackgroundModes: ["audio"] in app.json.
+ * switches to the game app. iOS keeps the existing audio-background anchor;
+ * Android runtime lifetime is owned by the app foreground service.
  *
  * Polly backend URL is read from EXPO_PUBLIC_POLLY_BACKEND_URL env var.
  * Falls back to expo-speech automatically if the backend is unreachable.
@@ -17,6 +18,7 @@ import * as Speech from "expo-speech";
 import { Asset } from "expo-asset";
 import { createAudioPlayer, setAudioModeAsync, preload } from "expo-audio";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Platform } from "react-native";
 import { getCachedAudioUri } from "./audioCache";
 import { staticAudioMap } from "./staticAudioMap";
 
@@ -73,6 +75,8 @@ const normalizeSpeechOptions = (options, defaultTone = "default") => {
 const hasUriScheme = (value) =>
   typeof value === "string" && /^[a-z][a-z0-9+.-]*:/i.test(value);
 
+const usesBackgroundAudioAnchor = () => Platform.OS !== "android";
+
 class SpeechManager {
   constructor() {
     this.speechQueue = [];
@@ -126,8 +130,20 @@ class SpeechManager {
     this.ready = this.init();
   }
 
+  _clearPlayerMediaSession(player) {
+    if (!player) return;
+    try {
+      if (typeof player.clearLockScreenControls === "function") {
+        player.clearLockScreenControls();
+      } else if (typeof player.setActiveForLockScreen === "function") {
+        player.setActiveForLockScreen(false);
+      }
+    } catch (e) { }
+  }
+
   _disposePlayer(player, { pause = true } = {}) {
     if (!player) return;
+    this._clearPlayerMediaSession(player);
     try {
       if (pause && typeof player.pause === "function") player.pause();
     } catch (e) { }
@@ -396,6 +412,7 @@ class SpeechManager {
   }
 
   async _activateBackgroundMediaSession() {
+    if (!usesBackgroundAudioAnchor()) return;
     if (!this.silentPlayer || typeof this.silentPlayer.setActiveForLockScreen !== "function") {
       return;
     }
@@ -436,6 +453,10 @@ class SpeechManager {
 
   async _ensureBackgroundAnchorNow({ force = false } = {}) {
     await this._configureAudioSession();
+    if (!usesBackgroundAudioAnchor()) {
+      this._releaseBackgroundAnchor();
+      return;
+    }
 
     if (!this.silentPlayer) {
       this.silentPlayer = createAudioPlayer(
@@ -466,6 +487,7 @@ class SpeechManager {
   }
 
   _startBackgroundKeepAlive() {
+    if (!usesBackgroundAudioAnchor()) return;
     if (this._backgroundKeepAliveTimer) return;
 
     this._backgroundKeepAliveTimer = setInterval(() => {
@@ -476,6 +498,7 @@ class SpeechManager {
   }
 
   _scheduleBackgroundMediaRefresh(delays = [0, 250, 1000]) {
+    if (!usesBackgroundAudioAnchor()) return;
     if (!this.silentPlayer) return;
 
     delays.forEach((delay) => {
@@ -488,6 +511,10 @@ class SpeechManager {
   }
 
   _recoverBackgroundAudioSession(delays = [0, 250, 1000]) {
+    if (!usesBackgroundAudioAnchor()) {
+      this._configureAudioSession().catch(() => { });
+      return;
+    }
     this._ensureBackgroundAnchor({ force: true }).catch((e) => {
       console.log("[Speech] Background audio recovery failed:", e?.message || e);
     });
@@ -495,6 +522,7 @@ class SpeechManager {
   }
 
   _installBackgroundAnchorResumeGuard() {
+    if (!usesBackgroundAudioAnchor()) return;
     if (!this.silentPlayer || this._backgroundAnchorStatusSubscription) return;
 
     try {
@@ -516,6 +544,7 @@ class SpeechManager {
   }
 
   async _updateBackgroundMediaMetadata() {
+    if (!usesBackgroundAudioAnchor()) return;
     if (!this.silentPlayer) return;
 
     try {
@@ -527,6 +556,38 @@ class SpeechManager {
       }
     } catch (e) {
       console.log("[Speech] Background media metadata update failed:", e?.message || e);
+    }
+  }
+
+  _releaseBackgroundAnchor() {
+    this._backgroundMediaRefreshTimers.forEach((timer) => clearTimeout(timer));
+    this._backgroundMediaRefreshTimers.clear();
+
+    if (this._backgroundAnchorResumeTimer) {
+      clearTimeout(this._backgroundAnchorResumeTimer);
+      this._backgroundAnchorResumeTimer = null;
+    }
+
+    if (this._backgroundKeepAliveTimer) {
+      clearInterval(this._backgroundKeepAliveTimer);
+      this._backgroundKeepAliveTimer = null;
+    }
+
+    if (this._backgroundAnchorStatusSubscription) {
+      try {
+        this._backgroundAnchorStatusSubscription.remove();
+      } catch (e) { }
+      this._backgroundAnchorStatusSubscription = null;
+    }
+
+    if (this.silentPlayer) {
+      try {
+        if (typeof this.silentPlayer.setActiveForLockScreen === "function") {
+          this.silentPlayer.setActiveForLockScreen(false);
+        }
+      } catch (e) { }
+      this._disposePlayer(this.silentPlayer, { pause: true });
+      this.silentPlayer = null;
     }
   }
 
@@ -804,7 +865,8 @@ class SpeechManager {
       this.chimePlayer = createAudioPlayer(CHIME_AUDIO_ASSET, EFFECT_AUDIO_PLAYER_OPTIONS);
     } catch (e) { }
 
-    // Keep an audio session open so Android continues running JS/audio while the game is foregrounded.
+    // Keep an audio session open on platforms that still use audio as the
+    // background anchor. Android runtime lifetime is owned by the foreground service.
     try {
       await this._ensureBackgroundAnchor({ force: true });
       this._scheduleBackgroundMediaRefresh([250, 1000, 2500]);

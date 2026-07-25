@@ -23,7 +23,7 @@ const DEFAULT_PORT = 10112;
 const MANIFEST_TIMEOUT_MS = 15000;
 const WATCHDOG_INTERVAL_MS = 3000;
 const WATCHDOG_STALE_RECONNECT_MS = 5000;
-const WATCHDOG_STALE_DISCONNECT_MS = 15000;
+const WATCHDOG_STALE_FORCE_RECONNECT_MS = 15000;
 const RECONNECT_DELAY_MS = 2000;
 
 /** IF Connect v2 data type codes */
@@ -66,6 +66,7 @@ class IFConnectClient {
     this._watchdogTimer = null;
     this._mTimeout = null;
     this._lastDataTime = 0;
+    this._reconnectAttempt = 0;
   }
 
   // ─── Event Emitter ───────────────────────────────────────────────────────────
@@ -376,6 +377,7 @@ class IFConnectClient {
 
     socket.on('data', (rawData) => {
       this._lastDataTime = Date.now();
+      this._reconnectAttempt = 0;
       const chunk = Buffer.isBuffer(rawData) ? rawData : Buffer.from(rawData);
       this._receiveBuffer = this._receiveBuffer
         ? Buffer.concat([this._receiveBuffer, chunk])
@@ -505,38 +507,46 @@ class IFConnectClient {
       if (!this._isConnected) return;
       const staleTime = Date.now() - this._lastDataTime;
 
-      if (staleTime > WATCHDOG_STALE_DISCONNECT_MS) {
-        console.log('[IFConnect] Watchdog: data stale for 15s — disconnecting...');
-        this._emit('disconnect', { message: 'Connection timed out (no data for 15s).' });
-        this.close();
+      if (staleTime > WATCHDOG_STALE_FORCE_RECONNECT_MS) {
+        console.log('[IFConnect] Watchdog: data stale for 15s — forcing poll socket recovery...');
+        this._reconnectPollSocket('watchdog-stale-timeout');
       } else if (staleTime > WATCHDOG_STALE_RECONNECT_MS) {
         console.log('[IFConnect] Watchdog: data stale — scheduling reconnect...');
-        this._scheduleReconnect();
+        this._scheduleReconnect('watchdog-stale');
       }
     }, WATCHDOG_INTERVAL_MS);
   }
 
-  _scheduleReconnect() {
+  _reconnectPollSocket(reason = 'unknown') {
+    if (!this._isConnected) return;
+    clearTimeout(this._reconnectTimer);
+    this._reconnectTimer = null;
+    this._reconnectAttempt += 1;
+    console.log(`[IFConnect] Rebuilding poll socket (reason: ${reason}, attempt ${this._reconnectAttempt})...`);
+    this._emit('reconnecting', { message: 'Connection lost, reconnecting...' });
+    this._receiveBuffer = null;
+    this._isPollWaiting = false;
+    this._lastDataTime = Date.now();
+
+    const oldSocket = this._pollSocket;
+    if (oldSocket) {
+      this._pollSocket = null;
+      try {
+        oldSocket.destroy();
+      } catch (e) {}
+    }
+
+    // Keep the manifest; just reopen the poll socket
+    this._openPollSocket();
+  }
+
+  _scheduleReconnect(reason = 'unknown') {
     if (this._reconnectTimer) return; // Only one pending reconnect at a time
 
     this._reconnectTimer = setTimeout(() => {
       this._reconnectTimer = null;
       if (!this._isConnected) return;
-      console.log('[IFConnect] Attempting reconnect...');
-      this._emit('reconnecting', { message: 'Connection lost, reconnecting...' });
-      this._receiveBuffer = null;
-      this._isPollWaiting = false;
-
-      const oldSocket = this._pollSocket;
-      if (oldSocket) {
-        this._pollSocket = null;
-        try {
-          oldSocket.destroy();
-        } catch (e) {}
-      }
-
-      // Keep the manifest; just reopen the poll socket
-      this._openPollSocket();
+      this._reconnectPollSocket(reason);
     }, RECONNECT_DELAY_MS);
   }
 
@@ -549,6 +559,7 @@ class IFConnectClient {
     this._manifestByCommand = {};
     this._lastDataTime = 0;
     this._successCallback = null;
+    this._reconnectAttempt = 0;
   }
 }
 

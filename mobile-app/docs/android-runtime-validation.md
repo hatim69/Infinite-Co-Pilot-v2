@@ -10,6 +10,7 @@ node --check index.js
 node --check src/runtime/androidFlightRuntime.js
 node --check src/session/FlightSession.js
 node --check src/hooks/useTelemetry.js
+node --check src/utils/speech.js
 npx expo config --type public
 ```
 
@@ -29,14 +30,17 @@ Confirmed by static audit:
 - React remains an attachable UI and does not own foreground-service lifetime.
 - The existing task-removal kill behavior is unchanged.
 - iOS audio-background behavior is unchanged.
+- Android silent audio keep-alive is disabled.
+- Android silent media-session refresh timers are disabled.
+- Android lock-screen activation for the silent player is disabled.
 
 ## Background Mechanism Review
 
 - Notifee foreground service: retained, but moved from app launch to active
   monitoring only.
 - Silent/background audio anchor: retained. It still owns Expo audio session
-  behavior, speech/music continuity, and iOS background audio. It was not safely
-  replaceable by the Android foreground service without changing audio behavior.
+  behavior and iOS background audio. Android no longer creates the silent anchor
+  for runtime survival.
 - `TaskRemovedKillService`: retained to preserve the existing product behavior
   where task removal intentionally terminates monitoring.
 - App-launch foreground notification: removed. It was redundant once active
@@ -60,6 +64,8 @@ Flight available. They were not executable in this repository-only environment.
 | Notification permission denied | Pending device test | Start attempt is handled without crashing; Android may hide notification UI depending on OS policy. |
 | Battery optimization | Pending device test | Document OEM/device-specific restrictions if the service is throttled. |
 | Doze | Pending device test | Foreground service should improve survivability, but Android/OEM limits must be documented if observed. |
+| Silent media notification | Pending device test | No persistent media-player notification should appear when only monitoring is active. |
+| Boarding music locked | Pending device test | Boarding music should continue; record any Android sustained-playback limitation. |
 
 ## Manual Test Checklist
 

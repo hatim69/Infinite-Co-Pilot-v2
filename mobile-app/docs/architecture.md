@@ -101,9 +101,14 @@ session ends through disconnect, simulator main-menu exit, or IF Connect
 disconnect/error handling, `FlightSession` stops the service and releases the
 runtime hold.
 
-The previous launch-time Notifee foreground service was removed. The existing
-audio-background anchor remains because it still owns Expo audio session
-behavior, speech/music continuity, and iOS background audio behavior.
+The previous launch-time Notifee foreground service was removed. On Android, the
+silent audio keep-alive and lock-screen media-session anchor are also disabled:
+runtime lifetime belongs to the foreground service notification only.
+
+The audio engine still configures Expo audio mode and uses real audio players
+for announcements, callouts, safety briefings, GPWS effects, and boarding music.
+iOS keeps the existing audio-background anchor because iOS background execution
+still depends on the audio capability.
 
 ## Future Intent
 

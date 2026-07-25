@@ -387,11 +387,6 @@ class FlightSession {
     if (connectedIp === this.state.connectedIp) return;
     this.state = { ...this.state, connectedIp };
     this._syncBackgroundSessionState();
-    if (androidFlightRuntime.isMonitoringActive()) {
-      androidFlightRuntime.updateNotification({ connectedIp }).catch((error) => {
-        console.log("[FlightSession] Android runtime notification update failed:", error?.message || error);
-      });
-    }
     this._notify();
   }
 
