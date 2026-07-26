@@ -66,6 +66,7 @@ import { getFlapString } from "./src/utils/calculatePerformance";
 import SystemStatus from "./src/components/cards/SystemStatus";
 import FlightStrip from "./src/components/layout/FlightStrip";
 import CrewAssistant from "./src/components/assistant/CrewAssistant";
+import BackgroundReliability from "./src/components/cards/BackgroundReliability";
 import Sidebar from "./src/components/ui/Sidebar";
 import Gatekeeper from "./src/components/ui/Gatekeeper";
 import { BETA_EXPIRY_DATE, SUPABASE_URL } from "./src/utils/beta";
@@ -594,6 +595,7 @@ function AppInner() {
                 onResetConnectingFlight={resetForConnectingFlight}
                 layoutMode={responsive.isTinyWidth ? "compact" : responsive.isTablet ? "tablet" : "default"}
               />
+              <BackgroundReliability />
               <View style={[styles.card, responsive.isShort && styles.cardCompact, { backgroundColor: theme.surfaceMid, borderColor: theme.border }]}>
                 <TouchableOpacity style={styles.cardHeader} onPress={() => setShowLogs((v) => !v)} activeOpacity={0.8}>
                   <View style={styles.cardHeaderLeft}>
