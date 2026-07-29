@@ -18,6 +18,7 @@
 
 import TcpSocket from 'react-native-tcp-socket';
 import { Buffer } from 'buffer';
+import { runtimeTrace } from './runtimeTrace';
 
 const DEFAULT_PORT = 10112;
 const MANIFEST_TIMEOUT_MS = 15000;
@@ -67,6 +68,8 @@ class IFConnectClient {
     this._mTimeout = null;
     this._lastDataTime = 0;
     this._reconnectAttempt = 0;
+    this._pollRequestSeq = 0;
+    this._pollResponseSeq = 0;
   }
 
   // ─── Event Emitter ───────────────────────────────────────────────────────────
@@ -95,6 +98,20 @@ class IFConnectClient {
     }
   }
 
+  getDiagnostics() {
+    return {
+      connected: this._isConnected,
+      host: this._host,
+      waitingForPollResponse: this._isPollWaiting,
+      pollQueueSize: this._pollQ.length,
+      pollIndex: this._pollIndex,
+      pollRequestSeq: this._pollRequestSeq,
+      pollResponseSeq: this._pollResponseSeq,
+      lastDataAgeMs: this._lastDataTime ? Date.now() - this._lastDataTime : null,
+      reconnectAttempt: this._reconnectAttempt,
+    };
+  }
+
   // ─── Public API ──────────────────────────────────────────────────────────────
 
   /**
@@ -109,6 +126,12 @@ class IFConnectClient {
     this._host = h;
     this._port = params.port || DEFAULT_PORT;
     console.log(`[IFConnect] Connecting to ${this._host}:${this._port}...`);
+    runtimeTrace("ifconnect.init", {
+      source: "FlightSession.connect",
+      host: this._host,
+      port: this._port,
+      pollQueueSize: this._pollQ.length,
+    }, { throttleMs: 0 });
     this._fetchManifest();
   }
 
@@ -184,6 +207,11 @@ class IFConnectClient {
   pollRegister(cmd) {
     if (this._manifestByName[cmd] && !this._pollQ.includes(cmd)) {
       this._pollQ.push(cmd);
+      runtimeTrace("ifconnect.poll_register", {
+        source: "FlightSession.connect",
+        command: cmd,
+        pollQueueSize: this._pollQ.length,
+      }, { throttleMs: this._pollQ.length === 1 ? 0 : 10000 });
       // If polling was stalled (e.g. empty queue), restart it
       if (!this._isPollWaiting && this._isConnected && this._pollSocket) {
         this._sendNextPoll();
@@ -199,6 +227,10 @@ class IFConnectClient {
    */
   close(callback) {
     console.log('[IFConnect] Closing connection');
+    runtimeTrace("ifconnect.close", {
+      source: "FlightSession/ifConnect",
+      ...this.getDiagnostics(),
+    }, { throttleMs: 0 });
     this._isConnected = false;
     clearTimeout(this._reconnectTimer);
     this._reconnectTimer = null;
@@ -248,6 +280,11 @@ class IFConnectClient {
         { port: this._port, host: this._host },
         () => {
           console.log('[IFConnect] Manifest socket connected, requesting manifest...');
+          runtimeTrace("ifconnect.manifest_connected", {
+            source: "react-native-tcp-socket",
+            host: this._host,
+            port: this._port,
+          }, { throttleMs: 0 });
           // Send manifest request: command -1, GET flag 0
           const buf = Buffer.alloc(5);
           buf.writeInt32LE(-1, 0);
@@ -280,6 +317,11 @@ class IFConnectClient {
         done = true;
         const manifestStr = mBuffer.toString('utf8', 12, 12 + mStringLength);
         this._parseManifest(manifestStr);
+        runtimeTrace("ifconnect.manifest_received", {
+          source: "tcp.data",
+          manifestBytes: mStringLength,
+          commandsAvailable: Object.keys(this._manifestByName).length,
+        }, { throttleMs: 0 });
         cleanup();
         // Proceed to open the poll socket after a brief delay
         // This ensures the simulator's TCP server has time to properly close the manifest session
@@ -350,6 +392,12 @@ class IFConnectClient {
           this._receiveBuffer = null;
           this._isPollWaiting = false;
           this._lastDataTime = Date.now();
+          runtimeTrace("ifconnect.poll_socket_connected", {
+            source: "react-native-tcp-socket",
+            host: this._host,
+            port: this._port,
+            pollQueueSize: this._pollQ.length,
+          }, { throttleMs: 0 });
 
           // Fire success callback
           if (this._successCallback) {
@@ -415,6 +463,14 @@ class IFConnectClient {
       if (cmdInfo) {
         const value = this._decodeValue(cmdInfo.type, this._receiveBuffer, dataLen);
         if (value !== undefined) {
+          this._pollResponseSeq += 1;
+          runtimeTrace("ifconnect.poll_response", {
+            source: "tcp.data",
+            command: cmdInfo.name,
+            pollResponseSeq: this._pollResponseSeq,
+            pollRequestSeq: this._pollRequestSeq,
+            pollQueueSize: this._pollQ.length,
+          });
           this._emit('data', { command: cmdInfo.name, data: value });
         }
       }
@@ -492,6 +548,14 @@ class IFConnectClient {
     try {
       this._pollSocket.write(buf);
       this._isPollWaiting = true;
+      this._pollRequestSeq += 1;
+      runtimeTrace("ifconnect.poll_request", {
+        source: "setTimeout/tcp.write",
+        command: this._manifestByCommand[cmdInfo.command]?.name || "unknown",
+        pollRequestSeq: this._pollRequestSeq,
+        pollResponseSeq: this._pollResponseSeq,
+        pollQueueSize: this._pollQ.length,
+      });
     } catch (e) {
       console.log('[IFConnect] Write error:', e);
       this._isPollWaiting = false;
@@ -506,6 +570,11 @@ class IFConnectClient {
     this._watchdogTimer = setInterval(() => {
       if (!this._isConnected) return;
       const staleTime = Date.now() - this._lastDataTime;
+      runtimeTrace("ifconnect.watchdog_tick", {
+        source: "setInterval",
+        staleTimeMs: staleTime,
+        ...this.getDiagnostics(),
+      }, { throttleMs: 30000 });
 
       if (staleTime > WATCHDOG_STALE_FORCE_RECONNECT_MS) {
         console.log('[IFConnect] Watchdog: data stale for 15s — forcing poll socket recovery...');
@@ -523,6 +592,11 @@ class IFConnectClient {
     this._reconnectTimer = null;
     this._reconnectAttempt += 1;
     console.log(`[IFConnect] Rebuilding poll socket (reason: ${reason}, attempt ${this._reconnectAttempt})...`);
+    runtimeTrace("ifconnect.poll_socket_rebuild", {
+      source: "watchdog/socket",
+      reason,
+      ...this.getDiagnostics(),
+    }, { throttleMs: 0 });
     this._emit('reconnecting', { message: 'Connection lost, reconnecting...' });
     this._receiveBuffer = null;
     this._isPollWaiting = false;
@@ -560,6 +634,8 @@ class IFConnectClient {
     this._lastDataTime = 0;
     this._successCallback = null;
     this._reconnectAttempt = 0;
+    this._pollRequestSeq = 0;
+    this._pollResponseSeq = 0;
   }
 }
 

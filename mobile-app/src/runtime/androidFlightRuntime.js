@@ -3,6 +3,7 @@ import notifee, {
   AndroidForegroundServiceType,
   AndroidImportance,
 } from "@notifee/react-native";
+import { runtimeTrace } from "../utils/runtimeTrace";
 
 const CHANNEL_ID = "flight_monitoring";
 const NOTIFICATION_ID = "flight_monitoring";
@@ -31,6 +32,13 @@ class AndroidFlightRuntime {
 
     globalThis.__INFINITE_COPILOT_ANDROID_FGS_REGISTERED__ = true;
     notifee.registerForegroundService(() => {
+      runtimeTrace("androidRuntime.service_callback", {
+        source: "notifee.registerForegroundService",
+        owner: "AndroidFlightRuntime",
+        monitoringActive: this.monitoringActive,
+        serviceActive: this.serviceActive,
+        sessionRetained: this.sessionRetained,
+      }, { throttleMs: 0 });
       if (!this.monitoringActive) {
         return Promise.resolve();
       }
@@ -40,6 +48,13 @@ class AndroidFlightRuntime {
 
       return new Promise((resolve) => {
         this.serviceResolve = () => {
+          runtimeTrace("androidRuntime.service_resolve", {
+            source: "stopMonitoring",
+            owner: "AndroidFlightRuntime",
+            monitoringActive: this.monitoringActive,
+            serviceActive: this.serviceActive,
+            sessionRetained: this.sessionRetained,
+          }, { throttleMs: 0 });
           this._releaseSession();
           this.serviceActive = false;
           this.serviceResolve = null;
@@ -52,12 +67,24 @@ class AndroidFlightRuntime {
   _retainSession() {
     if (this.sessionRetained) return;
     this.sessionRetained = true;
+    runtimeTrace("androidRuntime.retain_session", {
+      source: "foreground-service",
+      owner: "AndroidFlightRuntime",
+      monitoringActive: this.monitoringActive,
+      serviceActive: this.serviceActive,
+    }, { throttleMs: 0 });
     this.handlers.onAcquireSession?.();
   }
 
   _releaseSession() {
     if (!this.sessionRetained) return;
     this.sessionRetained = false;
+    runtimeTrace("androidRuntime.release_session", {
+      source: "foreground-service",
+      owner: "AndroidFlightRuntime",
+      monitoringActive: this.monitoringActive,
+      serviceActive: this.serviceActive,
+    }, { throttleMs: 0 });
     this.handlers.onReleaseSession?.();
   }
 
@@ -82,6 +109,13 @@ class AndroidFlightRuntime {
 
     if (this.monitoringActive) {
       await this.updateNotification({ connectedIp });
+      runtimeTrace("androidRuntime.start_already_running", {
+        source: "FlightSession",
+        owner: "AndroidFlightRuntime",
+        connectedIp,
+        serviceActive: this.serviceActive,
+        sessionRetained: this.sessionRetained,
+      }, { throttleMs: 0 });
       return { started: true, alreadyRunning: true };
     }
 
@@ -104,6 +138,11 @@ class AndroidFlightRuntime {
   async _startMonitoring({ connectedIp }) {
     const startedAt = Date.now();
     this.monitoringActive = true;
+    runtimeTrace("androidRuntime.start", {
+      source: "FlightSession",
+      owner: "AndroidFlightRuntime",
+      connectedIp,
+    }, { throttleMs: 0 });
 
     if (!this.permissionRequested) {
       this.permissionRequested = true;
@@ -117,6 +156,14 @@ class AndroidFlightRuntime {
     const channelId = await this._ensureChannel();
     await notifee.displayNotification(this._createNotification({ channelId, connectedIp }));
     console.log(`[AndroidRuntime] Foreground service start requested in ${Date.now() - startedAt}ms`);
+    runtimeTrace("androidRuntime.notification_displayed", {
+      source: "notifee.displayNotification",
+      owner: "AndroidFlightRuntime",
+      connectedIp,
+      elapsedMs: Date.now() - startedAt,
+      serviceActive: this.serviceActive,
+      sessionRetained: this.sessionRetained,
+    }, { throttleMs: 0 });
     return { started: true };
   }
 
@@ -163,6 +210,12 @@ class AndroidFlightRuntime {
 
   async _stopMonitoring() {
     this.monitoringActive = false;
+    runtimeTrace("androidRuntime.stop", {
+      source: "FlightSession",
+      owner: "AndroidFlightRuntime",
+      serviceActive: this.serviceActive,
+      sessionRetained: this.sessionRetained,
+    }, { throttleMs: 0 });
 
     if (this.serviceResolve) {
       this.serviceResolve();
