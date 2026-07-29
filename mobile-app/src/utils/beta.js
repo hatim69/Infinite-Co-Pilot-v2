@@ -5,7 +5,8 @@
 // Beta period ends in 3 days from July 19th.
 // Format: ISO 8601 string in UTC.
 // export const BETA_EXPIRY_DATE = "2026-07-22T23:59:59Z";
-export const BETA_EXPIRY_DATE = "2026-07-28T23:59:59Z";
+// export const BETA_EXPIRY_DATE = "2026-07-28T23:59:59Z";
+export const BETA_EXPIRY_DATE = "2026-07-31T23:59:59Z";
 
 // Master Developer Key - bypasses all database checks and expiry checks
 // export const MASTER_KEY = "X9Q-MASTER-12";
