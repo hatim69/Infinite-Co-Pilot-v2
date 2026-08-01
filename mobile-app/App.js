@@ -710,6 +710,7 @@ function AppInner() {
                 <SectionHeader title="Ground Services" icon={ArrowLeftRight} color="#FB923C" />
                 <View style={styles.gridContainer}>
                   <SystemStatus label="Pushback" value={telemetry.pushback === 1 ? "ACTIVE" : telemetry.pushback === 0 ? "OFF" : null} icon={ArrowLeftRight} />
+                  <SystemStatus label="Fuel Truck" value={telemetry.fuelTruck === 1 ? "CONN" : telemetry.fuelTruck === 0 ? "DISC" : null} icon={ArrowLeftRight} />
                   <SystemStatus label="Belt Loader" value={telemetry.beltLoader === 1 ? "CONN" : telemetry.beltLoader === 0 ? "DISC" : null} icon={ArrowLeftRight} />
                   <SystemStatus label="Catering" value={telemetry.catering === 1 ? "CONN" : telemetry.catering === 0 ? "DISC" : null} icon={ArrowLeftRight} />
                   <SystemStatus label="GPU" value={telemetry.gpu === 1 ? "CONN" : telemetry.gpu === 0 ? "DISC" : null} icon={Zap} />
