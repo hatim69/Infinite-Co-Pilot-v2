@@ -63,6 +63,16 @@ const STATIC_AUDIO_PLAYER_OPTIONS = {
   updateInterval: 100,
   keepAudioSessionActive: true,
 };
+const AUDIO_RESOURCES = Object.freeze({
+  BOARDING_ANNOUNCEMENT: "boardingAnnouncePlayer",
+  STATIC_AUDIO: "staticAudioPlayer",
+  POLLY: "pollyPlayer",
+  EXPO_SPEECH: "expoSpeech",
+  CHIME: "chimePlayer",
+  CURRENT_ANNOUNCEMENT: "currentAnnouncementPlayer",
+  CURRENT_CALLOUT: "currentCalloutPlayer",
+});
+const QUEUE_CHANNELS = Object.freeze(["cockpit", "cabin"]);
 const STATIC_PLAYER_HEALTH = Object.freeze({
   HEALTHY: "healthy",
   RECOVERING: "recovering",
@@ -87,6 +97,7 @@ const usesBackgroundAudioAnchor = () => Platform.OS !== "android";
 class SpeechManager {
   constructor() {
     this.speechQueue = [];
+    this.cabinQueue = [];
     this.sirenPlaying = false;
     this.ptuPlaying = false;
     this.addLog = null;
@@ -120,6 +131,7 @@ class SpeechManager {
     this.currentCalloutFinish = null;
     this.currentChimeFinish = null;
     this._boardingMusicFadeTimer = null;
+    this._boardingMusicFadeFinish = null;
     this._lockScreenArtworkUrl = null;
     this._backgroundSessionState = { active: false, connectedIp: "" };
     this._backgroundMediaRefreshTimers = new Set();
@@ -130,10 +142,16 @@ class SpeechManager {
     this._boardingMusicPrefetches = new Map();
     this._audioConfigured = false;
     this.isProcessingQueue = false;
+    this.isProcessingCabinQueue = false;
     this.expoSpeechActive = false;
     this._playbackGeneration = 0;
     this._speechPlaybackDepth = 0;
-    this._foregroundPlaybackTail = Promise.resolve();
+    this._busyAudioResources = new Set();
+    this._channelBusy = {
+      cockpit: false,
+      cabin: false,
+    };
+    this._schedulerScheduled = false;
 
     // In-memory Polly response cache: Map<"text|voiceId", base64DataUri>
     // Avoids repeat network calls for identical text+voice combinations.
@@ -182,7 +200,9 @@ class SpeechManager {
   getDiagnostics() {
     return {
       queueSize: this.speechQueue.length,
+      cabinQueueSize: this.cabinQueue.length,
       isProcessingQueue: this.isProcessingQueue,
+      isProcessingCabinQueue: this.isProcessingCabinQueue,
       expoSpeechActive: this.expoSpeechActive,
       voiceEnabled: this.voiceEnabled,
       speechPlaybackDepth: this._speechPlaybackDepth,
@@ -194,6 +214,7 @@ class SpeechManager {
       staticAudioPlayerActive: Boolean(this.staticAudioPlayer),
       staticAudioLeaseActive: Boolean(this.activeStaticLease),
       staticAudioPlayerHealth: this.staticAudioPlayerHealth,
+      busyAudioResources: Array.from(this._busyAudioResources),
     };
   }
 
@@ -214,6 +235,40 @@ class SpeechManager {
       activeLeaseId: this.activeStaticLease?.id || null,
       staticPlayerActive: Boolean(this.staticAudioPlayer),
       playerCount: this._getActivePlayerCount(),
+      ...payload,
+    }, { throttleMs: 0 });
+  }
+
+  _describeAudioSource(audioAsset) {
+    if (typeof audioAsset === "number") return `asset:${audioAsset}`;
+    if (typeof audioAsset === "string") return audioAsset;
+    if (audioAsset?.uri) return audioAsset.uri;
+    return String(audioAsset || "unknown");
+  }
+
+  _statusTimeMillis(status, key) {
+    const value = status?.[key];
+    if (typeof value === "number") return value;
+    if (key === "positionMillis" && typeof status?.currentTime === "number") {
+      return Math.round(status.currentTime * 1000);
+    }
+    if (key === "durationMillis" && typeof status?.duration === "number") {
+      return Math.round(status.duration * 1000);
+    }
+    return null;
+  }
+
+  _traceStaticLeaseDebug(event, lease, payload = {}) {
+    runtimeTrace("speech.static_lease_debug", {
+      source: "expo-audio",
+      owner: "SpeechManager",
+      debugEvent: event,
+      leaseId: lease?.id || null,
+      audioSource: lease?.source || null,
+      activeLeaseId: this.activeStaticLease?.id || null,
+      generation: lease?.generation ?? this._playbackGeneration,
+      currentGeneration: this._playbackGeneration,
+      playerHealth: this.staticAudioPlayerHealth,
       ...payload,
     }, { throttleMs: 0 });
   }
@@ -251,57 +306,115 @@ class SpeechManager {
     this._traceStaticPlayer("speech.static_player_removed", { reason });
   }
 
-  _enqueueSpeech(entry) {
+  _getQueue(channel = "cockpit") {
+    return channel === "cabin" ? this.cabinQueue : this.speechQueue;
+  }
+
+  _traceQueue(event, channel, payload = {}) {
+    runtimeTrace(event, {
+      source: "speech-queue",
+      owner: "SpeechManager",
+      channel,
+      cockpitQueueSize: this.speechQueue.length,
+      cabinQueueSize: this.cabinQueue.length,
+      playerCount: this._getActivePlayerCount(),
+      ...payload,
+    }, { throttleMs: 0 });
+  }
+
+  _enqueueSpeech(entry, channel = "cockpit") {
+    const queue = this._getQueue(channel);
     runtimeTrace("speech.enqueue", {
       source: entry.action ? "queue-action" : "speechManager.speak",
       owner: "SpeechManager",
+      channel,
       tone: entry.options?.tone,
       priority: Boolean(entry.options?.priority),
-      queueSize: this.speechQueue.length,
+      queueSize: queue.length,
       playerCount: this._getActivePlayerCount(),
     }, { throttleMs: 0 });
 
     if (entry.spokenText) {
-      const duplicateIndex = this.speechQueue.findIndex(
+      const duplicateIndex = queue.findIndex(
         (queued) =>
           queued.spokenText === entry.spokenText &&
           Boolean(queued.options?.priority) === Boolean(entry.options?.priority)
       );
-      if (duplicateIndex !== -1) this.speechQueue.splice(duplicateIndex, 1);
+      if (duplicateIndex !== -1) queue.splice(duplicateIndex, 1);
     }
 
     if (!entry.options?.priority) {
-      this.speechQueue.push(entry);
-      this._trimSpeechQueue();
+      queue.push(entry);
+      this._traceQueue("speech.queue_item_queued", channel, {
+        tone: entry.options?.tone,
+        hasAction: typeof entry.action === "function",
+        text: entry.spokenText,
+      });
+      this._trimSpeechQueue(channel);
       return;
     }
 
-    const firstNormalIndex = this.speechQueue.findIndex(
+    const firstNormalIndex = queue.findIndex(
       (queued) => !queued.options?.priority
     );
-    if (firstNormalIndex === -1) this.speechQueue.push(entry);
-    else this.speechQueue.splice(firstNormalIndex, 0, entry);
-    this._trimSpeechQueue();
+    if (firstNormalIndex === -1) queue.push(entry);
+    else queue.splice(firstNormalIndex, 0, entry);
+    this._traceQueue("speech.queue_item_queued", channel, {
+      tone: entry.options?.tone,
+      priority: true,
+      hasAction: typeof entry.action === "function",
+      text: entry.spokenText,
+    });
+    this._trimSpeechQueue(channel);
   }
 
-  _trimSpeechQueue() {
-    while (this.speechQueue.length > MAX_SPEECH_QUEUE_LENGTH) {
-      const dropIndex = this.speechQueue.findIndex((queued) => !queued.options?.priority);
-      this.speechQueue.splice(dropIndex === -1 ? 0 : dropIndex, 1);
+  _trimSpeechQueue(channel = "cockpit") {
+    const queue = this._getQueue(channel);
+    while (queue.length > MAX_SPEECH_QUEUE_LENGTH) {
+      const dropIndex = queue.findIndex((queued) => !queued.options?.priority);
+      queue.splice(dropIndex === -1 ? 0 : dropIndex, 1);
       console.warn("[Speech] Speech queue overflow; dropped the oldest queued announcement.");
     }
   }
 
-  _enqueueAction(action, options = {}) {
-    this._enqueueSpeech({ action, options });
-    this.processQueue();
+  _enqueueAction(action, options = {}, channel = "cockpit") {
+    this._enqueueSpeech({ action, options }, channel);
+    this._scheduleQueues();
+  }
+
+  enqueueCabinAction(action, options = {}) {
+    return new Promise((resolve) => {
+      this._enqueueAction(async () => {
+        try {
+          const result = await Promise.resolve().then(action);
+          resolve(result);
+          return result;
+        } catch (error) {
+          resolve(false);
+          throw error;
+        }
+      }, options, "cabin");
+    });
   }
 
   async _runQueueAction(action, options = {}) {
+    if (options.detached) {
+      Promise.resolve()
+        .then(action)
+        .catch((error) => {
+          console.log("[Speech] Detached queue action failed:", error?.message || error);
+        });
+      return undefined;
+    }
+
     let timeoutId;
-    const timeoutMs = options.actionTimeoutMs || QUEUE_ACTION_TIMEOUT_MS;
+    const timeoutMs =
+      options.actionTimeoutMs === false ? false : options.actionTimeoutMs || QUEUE_ACTION_TIMEOUT_MS;
+    if (timeoutMs === false) {
+      return Promise.resolve().then(action);
+    }
     try {
-      await Promise.race([
+      return await Promise.race([
         Promise.resolve().then(action),
         new Promise((resolve) => {
           timeoutId = setTimeout(() => {
@@ -321,28 +434,311 @@ class SpeechManager {
       options: { ...(entry.options || {}), priority: true, _staticOwner: "callout" },
     };
 
-    this._enqueueSpeech(calloutEntry);
+    this._enqueueSpeech(calloutEntry, "cockpit");
     this.processQueue();
   }
 
-  async _withForegroundPlayback(playbackAction) {
-    const previousPlayback = this._foregroundPlaybackTail.catch(() => { });
-    let releasePlayback;
-    const currentPlayback = new Promise((resolve) => {
-      releasePlayback = resolve;
+  _normalizeResources(resources = []) {
+    const values = Array.isArray(resources) ? resources : [resources];
+    return Array.from(new Set(values.filter(Boolean)));
+  }
+
+  _getEntryResources(entry = {}) {
+    const { spokenText, options = {}, action } = entry;
+    if (typeof action === "function") {
+      return this._normalizeResources(options.resources);
+    }
+
+    const resources = [];
+    if (options.withChime && this._isSignChimeRequest(options)) {
+      resources.push(AUDIO_RESOURCES.CHIME);
+    }
+
+    if (spokenText && staticAudioMap[spokenText]) {
+      resources.push(AUDIO_RESOURCES.STATIC_AUDIO);
+      resources.push(
+        options._staticOwner === "callout"
+          ? AUDIO_RESOURCES.CURRENT_CALLOUT
+          : AUDIO_RESOURCES.CURRENT_ANNOUNCEMENT
+      );
+      return this._normalizeResources(resources);
+    }
+
+    if (options._pollyVoiceId) {
+      resources.push(AUDIO_RESOURCES.POLLY, AUDIO_RESOURCES.CURRENT_ANNOUNCEMENT);
+      return this._normalizeResources(resources);
+    }
+
+    resources.push(AUDIO_RESOURCES.EXPO_SPEECH);
+    return this._normalizeResources(resources);
+  }
+
+  _areResourcesFree(resources = []) {
+    return this._normalizeResources(resources).every(
+      (resource) => !this._busyAudioResources.has(resource)
+    );
+  }
+
+  _acquireResources(resources = []) {
+    for (const resource of this._normalizeResources(resources)) {
+      this._busyAudioResources.add(resource);
+    }
+  }
+
+  _releaseResources(resources = []) {
+    for (const resource of this._normalizeResources(resources)) {
+      this._busyAudioResources.delete(resource);
+    }
+  }
+
+  _releaseReservationResources(reservation, resources = []) {
+    const normalized = this._normalizeResources(resources);
+    this._releaseResources(normalized);
+    reservation.resources = reservation.resources.filter(
+      (resource) => !normalized.includes(resource)
+    );
+  }
+
+  async _waitForResources(resources = []) {
+    const normalized = this._normalizeResources(resources);
+    if (this._areResourcesFree(normalized)) return;
+
+    await new Promise((resolve) => {
+      const check = () => {
+        if (this._areResourcesFree(normalized)) {
+          resolve();
+          return;
+        }
+        setTimeout(check, 25);
+      };
+      check();
     });
-    const tailPlayback = previousPlayback.then(() => currentPlayback);
+  }
 
-    this._foregroundPlaybackTail = tailPlayback;
-
-    await previousPlayback;
+  async _runWithTemporaryResources(resources, action, context = {}) {
+    const normalized = this._normalizeResources(resources);
+    await this._waitForResources(normalized);
+    this._acquireResources(normalized);
+    runtimeTrace("speech.scheduler_resource_acquired", {
+      source: "speech-scheduler",
+      owner: "SpeechManager",
+      resources: normalized,
+      busyAudioResources: Array.from(this._busyAudioResources),
+      ...context,
+    }, { throttleMs: 0 });
     try {
-      return await playbackAction();
+      return await Promise.resolve().then(action);
     } finally {
-      releasePlayback();
-      if (this._foregroundPlaybackTail === tailPlayback) {
-        this._foregroundPlaybackTail = Promise.resolve();
+      this._releaseResources(normalized);
+      runtimeTrace("speech.scheduler_resource_released", {
+        source: "speech-scheduler",
+        owner: "SpeechManager",
+        resources: normalized,
+        busyAudioResources: Array.from(this._busyAudioResources),
+        ...context,
+      }, { throttleMs: 0 });
+      this._scheduleQueues();
+    }
+  }
+
+  _setChannelProcessing(channel, isProcessing) {
+    if (channel === "cabin") this.isProcessingCabinQueue = isProcessing;
+    else this.isProcessingQueue = isProcessing;
+  }
+
+  _getQueueSource(channel) {
+    return channel === "cabin"
+      ? "speechManager.processCabinQueue"
+      : "speechManager.processQueue";
+  }
+
+  _scheduleQueues() {
+    if (this._schedulerScheduled) return Promise.resolve(false);
+    this._schedulerScheduled = true;
+    return Promise.resolve().then(() => {
+      this._schedulerScheduled = false;
+      return this._drainScheduler();
+    });
+  }
+
+  _drainScheduler() {
+    if (!this.voiceEnabled) return false;
+
+    let startedAny = false;
+    let startedThisPass = false;
+    do {
+      startedThisPass = false;
+      for (const channel of QUEUE_CHANNELS) {
+        if (this._channelBusy[channel]) continue;
+
+        const queue = this._getQueue(channel);
+        const entry = queue[0];
+        if (!entry) continue;
+
+        const resources = this._getEntryResources(entry);
+        if (!this._areResourcesFree(resources)) {
+          this._traceQueue("speech.scheduler_waiting_for_resources", channel, {
+            resources,
+            busyAudioResources: Array.from(this._busyAudioResources),
+            text: entry.spokenText,
+            hasAction: typeof entry.action === "function",
+          });
+          continue;
+        }
+
+        queue.shift();
+        this._startScheduledEntry(channel, entry, resources);
+        startedAny = true;
+        startedThisPass = true;
       }
+    } while (startedThisPass);
+
+    return startedAny;
+  }
+
+  _startScheduledEntry(channel, entry, resources) {
+    const generation = this._playbackGeneration;
+    const reservation = {
+      resources: this._normalizeResources(resources),
+    };
+    const { spokenText, options = {}, action } = entry;
+    const queue = this._getQueue(channel);
+
+    this._channelBusy[channel] = true;
+    this._setChannelProcessing(channel, true);
+    this._acquireResources(reservation.resources);
+
+    runtimeTrace("speech.queue_start", {
+      source: this._getQueueSource(channel),
+      owner: "SpeechManager",
+      channel,
+      generation,
+      resources: reservation.resources,
+      ...this.getDiagnostics(),
+    }, { throttleMs: 0 });
+
+    runtimeTrace("speech.queue_item_start", {
+      source: action ? "queue-action" : "speech-queue",
+      owner: "SpeechManager",
+      channel,
+      generation,
+      tone: options.tone,
+      priority: Boolean(options.priority),
+      hasAction: typeof action === "function",
+      staticAudio: Boolean(spokenText && staticAudioMap[spokenText]),
+      resources: reservation.resources,
+      queueSize: queue.length,
+      playerCount: this._getActivePlayerCount(),
+    }, { throttleMs: 0 });
+
+    Promise.resolve()
+      .then(() => this._runScheduledQueueEntry(channel, entry, reservation, generation))
+      .catch((e) => {
+        console.log("[Speech] Queue item failed:", e);
+        runtimeTrace("speech.queue_item_error", {
+          source: "speech-queue",
+          owner: "SpeechManager",
+          channel,
+          error: e?.message || String(e),
+          queueSize: queue.length,
+          playerCount: this._getActivePlayerCount(),
+        }, { throttleMs: 0 });
+      })
+      .finally(() => {
+        this._releaseResources(reservation.resources);
+        this._channelBusy[channel] = false;
+        this._setChannelProcessing(channel, false);
+        runtimeTrace("speech.queue_idle", {
+          source: this._getQueueSource(channel),
+          owner: "SpeechManager",
+          channel,
+          generation,
+          ...this.getDiagnostics(),
+        }, { throttleMs: 0 });
+        this._scheduleQueues();
+      });
+  }
+
+  async _runScheduledQueueEntry(channel, entry, reservation, generation) {
+    const { spokenText, options = {}, profile, action } = entry;
+    if (typeof action === "function") {
+      await this._runQueueAction(action, options);
+      return;
+    }
+
+    if (!options._logged) {
+      this._logSpeech(spokenText, options);
+    }
+
+    options._onPlaybackStart?.({ channel, spokenText });
+    this._traceQueue("speech.playback_started", channel, {
+      text: spokenText,
+      tone: options.tone,
+      resources: reservation.resources,
+    });
+
+    try {
+      if (options.withChime && this._isSignChimeRequest(options)) {
+        await this._playChimeNow();
+        if (generation !== this._playbackGeneration) return;
+      }
+
+      const staticAudioEntry = staticAudioMap[spokenText];
+      if (staticAudioEntry) {
+        const audioAsset = staticAudioEntry[this.voicePreference] || staticAudioEntry.female;
+        const startedStaticPlayback = await this._playStaticAudio(
+          audioAsset,
+          profile.volume * this.masterVolume * this.coPilotVolume,
+          {
+            owner: options._staticOwner || "announcement",
+            maxWaitMs:
+              options._staticOwner === "callout"
+                ? this._getCalloutMaxWaitMs(spokenText)
+                : this._getStaticAudioMaxWaitMs(spokenText, options.tone),
+          }
+        );
+        if (!startedStaticPlayback && generation === this._playbackGeneration) {
+          this._releaseReservationResources(reservation, [
+            AUDIO_RESOURCES.STATIC_AUDIO,
+            options._staticOwner === "callout"
+              ? AUDIO_RESOURCES.CURRENT_CALLOUT
+              : AUDIO_RESOURCES.CURRENT_ANNOUNCEMENT,
+          ]);
+          await this._runWithTemporaryResources(
+            [AUDIO_RESOURCES.EXPO_SPEECH],
+            () => this._speakWithExpoSpeech(spokenText, profile),
+            {
+              channel,
+              text: spokenText,
+              reason: "static_audio_fallback",
+            }
+          );
+        }
+      } else if (options._pollyVoiceId) {
+        await this.speakPolly(spokenText, options._pollyVoiceId, profile, {
+          fallback: () =>
+            generation === this._playbackGeneration
+              ? this._runWithTemporaryResources(
+                [AUDIO_RESOURCES.EXPO_SPEECH],
+                () => this._speakExpofallback(spokenText, profile),
+                {
+                  channel,
+                  text: spokenText,
+                  reason: "polly_fallback",
+                }
+              )
+              : undefined,
+        });
+      } else {
+        await this._speakWithExpoSpeech(spokenText, profile);
+      }
+    } finally {
+      options._onPlaybackFinish?.({ channel, spokenText });
+      this._traceQueue("speech.playback_finished", channel, {
+        text: spokenText,
+        tone: options.tone,
+        resources: reservation.resources,
+      });
     }
   }
 
@@ -434,7 +830,14 @@ class SpeechManager {
     this._playbackGeneration += 1;
     if (clearQueues) {
       this.speechQueue = [];
+      this.cabinQueue = [];
     }
+    this._busyAudioResources.clear();
+    this._channelBusy = {
+      cockpit: false,
+      cabin: false,
+    };
+    this._schedulerScheduled = false;
     Speech.stop();
     this.expoSpeechActive = false;
     this._stopCurrentAnnouncement();
@@ -865,6 +1268,15 @@ class SpeechManager {
       if (result.shouldRetry && retryCount < STATIC_AUDIO_MAX_RETRY_COUNT) {
         this.staticAudioPlayerHealth = STATIC_PLAYER_HEALTH.RECOVERING;
         this._staticPlayerRebuildCount += 1;
+        this._traceStaticLeaseDebug("player_rebuilt", {
+          id: result.leaseId,
+          generation: result.generation,
+          source: this._describeAudioSource(audioAsset),
+        }, {
+          reason: result.reason,
+          retryCount: retryCount + 1,
+          rebuildCount: this._staticPlayerRebuildCount,
+        });
         this._traceStaticPlayer("speech.static_player_rebuilt", {
           reason: result.reason,
           leaseId: result.leaseId,
@@ -881,7 +1293,18 @@ class SpeechManager {
         this._removeReusableStaticPlayer(`failed_${result.reason || "error"}`);
       }
 
-      return result.interrupted || result.started;
+      const played = result.interrupted || result.started;
+      if (!played) {
+        this._traceStaticLeaseDebug("fallback_triggered", {
+          id: result.leaseId,
+          generation: result.generation,
+          source: this._describeAudioSource(audioAsset),
+        }, {
+          reason: result.reason,
+          retryCount,
+        });
+      }
+      return played;
     }
 
     return false;
@@ -922,6 +1345,7 @@ class SpeechManager {
         generation: requestGeneration,
         owner,
         audioAsset,
+        source: this._describeAudioSource(audioAsset),
         subscription: null,
         checkInterval: null,
         safetyTimer: null,
@@ -929,8 +1353,16 @@ class SpeechManager {
         resolved: false,
         started: false,
         speechAudioBegun: false,
+        replaceCompleted: false,
+        playCalled: false,
+        playbackAdvanced: false,
+        lastPositionMillis: null,
         retryCount,
       };
+      this._traceStaticLeaseDebug("lease_created", lease, {
+        ownerType: owner,
+        retryCount,
+      });
 
       const finish = ({
         interrupted = false,
@@ -941,6 +1373,10 @@ class SpeechManager {
         lease.resolved = true;
 
         if (lease.subscription) {
+          this._traceStaticLeaseDebug("listener_removed", lease, {
+            reason,
+            interrupted,
+          });
           try { lease.subscription.remove(); } catch (e) { }
         }
         if (lease.checkInterval) clearInterval(lease.checkInterval);
@@ -970,6 +1406,18 @@ class SpeechManager {
           retryCount,
           queueSize: this.speechQueue.length,
         });
+        this._traceStaticLeaseDebug(
+          interrupted ? "lease_cancelled" : "lease_resolved",
+          lease,
+          {
+            reason,
+            nativeFailure,
+            started: lease.started,
+            replaceCompleted: lease.replaceCompleted,
+            playCalled: lease.playCalled,
+            playbackAdvanced: lease.playbackAdvanced,
+          }
+        );
         resolve({
           interrupted,
           started: lease.started,
@@ -984,6 +1432,15 @@ class SpeechManager {
       lease.finish = finish;
 
       const markPlaybackStarted = (status) => {
+        const positionMillis = this._statusTimeMillis(status, "positionMillis");
+        if (
+          lease.playCalled &&
+          typeof positionMillis === "number" &&
+          (lease.lastPositionMillis === null || positionMillis > lease.lastPositionMillis + 20)
+        ) {
+          lease.playbackAdvanced = true;
+        }
+        if (typeof positionMillis === "number") lease.lastPositionMillis = positionMillis;
         if (lease.started || !this._isStaticLeaseCurrent(lease)) return;
         if (
           status?.playing ||
@@ -998,6 +1455,11 @@ class SpeechManager {
 
       try {
         player = this._getReusableStaticPlayer();
+        try {
+          player._infiniteCoPilotPreviousStaticLeaseId =
+            player._infiniteCoPilotCurrentStaticLeaseId || null;
+          player._infiniteCoPilotCurrentStaticLeaseId = lease.id;
+        } catch (e) { }
         if (this.activeStaticLease && this.activeStaticLease !== lease) {
           this.activeStaticLease.finish?.({ interrupted: true, reason: "superseded" });
         }
@@ -1021,6 +1483,33 @@ class SpeechManager {
         lease.subscription = player.addListener("playbackStatusUpdate", (status) => {
           if (!this._isStaticLeaseCurrent(lease)) return;
           markPlaybackStarted(status);
+          const positionMillis = this._statusTimeMillis(status, "positionMillis");
+          const durationMillis = this._statusTimeMillis(status, "durationMillis");
+          this._traceStaticLeaseDebug("status_update", lease, {
+            originatingLeaseId: player?._infiniteCoPilotCurrentStaticLeaseId || null,
+            previousLeaseId: player?._infiniteCoPilotPreviousStaticLeaseId || null,
+            positionMillis,
+            durationMillis,
+            isPlaying: Boolean(status?.playing ?? status?.isPlaying),
+            didJustFinish: Boolean(status?.didJustFinish),
+            isLoaded: status?.isLoaded ?? null,
+            replaceCompleted: lease.replaceCompleted,
+            playbackAdvanced: lease.playbackAdvanced,
+          });
+          if (status?.didJustFinish) {
+            this._traceStaticLeaseDebug("did_just_finish_received", lease, {
+              currentLeaseId: lease.id,
+              originatingLeaseId:
+                lease.replaceCompleted && lease.playbackAdvanced
+                  ? lease.id
+                  : player?._infiniteCoPilotPreviousStaticLeaseId || null,
+              activeLeaseId: this.activeStaticLease?.id || null,
+              positionMillis,
+              durationMillis,
+              playbackAdvanced: lease.playbackAdvanced,
+              replaceCompleted: lease.replaceCompleted,
+            });
+          }
           if (
             status.error
           ) {
@@ -1033,6 +1522,9 @@ class SpeechManager {
           ) {
             finish({ reason: "complete" });
           }
+        });
+        this._traceStaticLeaseDebug("listener_attached", lease, {
+          ownerType: owner,
         });
 
         lease.checkInterval = setInterval(() => {
@@ -1067,6 +1559,7 @@ class SpeechManager {
             if (!this._isStaticLeaseCurrent(lease)) return undefined;
             playbackStage = "replace";
             if (typeof player.replace === "function") {
+              this._traceStaticLeaseDebug("replace_called", lease);
               const replaceResult = player.replace(audioAsset);
               this._traceStaticPlayer("speech.static_audio_replace", {
                 leaseId: lease.id,
@@ -1080,9 +1573,14 @@ class SpeechManager {
           })
           .then(() => {
             if (!this._isStaticLeaseCurrent(lease)) return undefined;
+            lease.replaceCompleted = true;
+            this._traceStaticLeaseDebug("replace_completed", lease);
             player.volume = volume;
             if (startAtSeconds > 0 && typeof player.seekTo === "function") {
               playbackStage = "seek";
+              this._traceStaticLeaseDebug("seek_called", lease, {
+                startAtSeconds,
+              });
               return player.seekTo(startAtSeconds, 0, 0);
             }
             return undefined;
@@ -1092,6 +1590,10 @@ class SpeechManager {
             playbackStage = "play";
             this._beginSpeechAudio();
             lease.speechAudioBegun = true;
+            lease.playCalled = true;
+            this._traceStaticLeaseDebug("play_called", lease, {
+              startAtSeconds,
+            });
             player.play();
             markPlaybackStarted();
             this._traceStaticPlayer("speech.static_audio_start", {
@@ -1116,9 +1618,17 @@ class SpeechManager {
               error: error?.message || String(error),
               playSuccess: false,
             });
+            this._traceStaticLeaseDebug("lease_rejected", lease, {
+              stage: playbackStage,
+              error: error?.message || String(error),
+            });
             finish({ reason: "playback_error", nativeFailure: true });
           });
       } catch (e) {
+        this._traceStaticLeaseDebug("lease_rejected", lease, {
+          stage: playbackStage,
+          error: e?.message || String(e),
+        });
         finish({ reason: "setup_error", nativeFailure: true });
       }
     });
@@ -1220,6 +1730,7 @@ class SpeechManager {
       }
       this._stopSpeechPlayback({ clearQueues: true });
       this.isProcessingQueue = false;
+      this.isProcessingCabinQueue = false;
     } else {
       if (this.boardingMusic) {
         try {
@@ -1307,14 +1818,14 @@ class SpeechManager {
     return profiles[tone] || profiles.default;
   }
 
-  async speak(text, options = {}) {
+  async _speakOnChannel(text, options = {}, channel = "cockpit") {
     options = normalizeSpeechOptions(options);
     const tone = options.tone || "default";
     const now = Date.now();
     const spokenText = this.formatText(text, tone);
 
     // De-duplicate rapid identical announcements
-    if (spokenText === this.lastSpokenText && now - this.lastSpokenAt < 900) return;
+    if (!options.bypassDedupe && spokenText === this.lastSpokenText && now - this.lastSpokenAt < 900) return;
 
     this.lastSpokenText = spokenText;
     this.lastSpokenAt = now;
@@ -1333,107 +1844,47 @@ class SpeechManager {
       return;
     }
 
-    this._enqueueSpeech({ spokenText, options, profile });
+    this._enqueueSpeech({ spokenText, options, profile }, channel);
     if (typeof options.afterSpeech === "function") {
       this._enqueueAction(options.afterSpeech, {
         priority: options.priority,
         actionTimeoutMs: options.afterSpeechTimeoutMs,
-      });
+        detached: options.afterSpeechDetached,
+      }, channel);
       return;
     }
-    this.processQueue();
+    this._scheduleQueues();
+  }
+
+  async speak(text, options = {}) {
+    return this._speakOnChannel(text, options, "cockpit");
+  }
+
+  async speakCabin(text, options = {}) {
+    return this._speakOnChannel(text, { ...options, channel: "cabin" }, "cabin");
+  }
+
+  async speakAndWait(text, options = {}) {
+    return new Promise((resolve) => {
+      if (!this.voiceEnabled) {
+        resolve(false);
+        return;
+      }
+      this._speakOnChannel(text, {
+        ...options,
+        bypassDedupe: true,
+        afterSpeech: () => resolve(true),
+        afterSpeechTimeoutMs: options.afterSpeechTimeoutMs ?? 8000,
+      }, options.channel === "cabin" ? "cabin" : "cockpit");
+    });
   }
 
   async processQueue() {
-    if (this.isProcessingQueue) return;
-    const generation = this._playbackGeneration;
-    this.isProcessingQueue = true;
-    runtimeTrace("speech.queue_start", {
-      source: "speechManager.processQueue",
-      owner: "SpeechManager",
-      generation,
-      ...this.getDiagnostics(),
-    }, { throttleMs: 0 });
+    return this._scheduleQueues();
+  }
 
-    try {
-      while (this.speechQueue.length > 0 && generation === this._playbackGeneration) {
-        const { spokenText, options = {}, profile, action } = this.speechQueue.shift();
-        runtimeTrace("speech.queue_item_start", {
-          source: action ? "queue-action" : "speech-queue",
-          owner: "SpeechManager",
-          generation,
-          tone: options.tone,
-          priority: Boolean(options.priority),
-          hasAction: typeof action === "function",
-          staticAudio: Boolean(spokenText && staticAudioMap[spokenText]),
-          queueSize: this.speechQueue.length,
-          playerCount: this._getActivePlayerCount(),
-        }, { throttleMs: 0 });
-
-        try {
-          if (typeof action === "function") {
-            await this._runQueueAction(action, options);
-            continue;
-          }
-
-          if (!options._logged) {
-            this._logSpeech(spokenText, options);
-          }
-
-          await this._withForegroundPlayback(async () => {
-            if (options.withChime && this._isSignChimeRequest(options)) {
-              await this._playChimeNow();
-              if (generation !== this._playbackGeneration) return;
-            }
-
-            // ── If there is a pre-recorded audio file for this exact text ────────
-            const staticAudioEntry = staticAudioMap[spokenText];
-            if (staticAudioEntry) {
-              const audioAsset = staticAudioEntry[this.voicePreference] || staticAudioEntry.female;
-              const startedStaticPlayback = await this._playStaticAudio(
-                audioAsset,
-                profile.volume * this.masterVolume * this.coPilotVolume,
-                {
-                  owner: options._staticOwner || "announcement",
-                  maxWaitMs:
-                    options._staticOwner === "callout"
-                      ? this._getCalloutMaxWaitMs(spokenText)
-                      : this._getStaticAudioMaxWaitMs(spokenText, options.tone),
-                }
-              );
-              if (!startedStaticPlayback) {
-                await this._speakWithExpoSpeech(spokenText, profile);
-              }
-            }
-            // ── If this queue item was routed through Polly, use speakPolly ────────
-            else if (options._pollyVoiceId) {
-              await this.speakPolly(spokenText, options._pollyVoiceId, profile);
-            } else {
-              await this._speakWithExpoSpeech(spokenText, profile);
-            }
-          });
-        } catch (e) {
-          console.log("[Speech] Queue item failed:", e);
-          runtimeTrace("speech.queue_item_error", {
-            source: "speech-queue",
-            owner: "SpeechManager",
-            error: e?.message || String(e),
-            queueSize: this.speechQueue.length,
-            playerCount: this._getActivePlayerCount(),
-          }, { throttleMs: 0 });
-        }
-      }
-    } finally {
-      if (generation === this._playbackGeneration) {
-        this.isProcessingQueue = false;
-        runtimeTrace("speech.queue_idle", {
-          source: "speechManager.processQueue",
-          owner: "SpeechManager",
-          generation,
-          ...this.getDiagnostics(),
-        }, { throttleMs: 0 });
-      }
-    }
+  async processCabinQueue() {
+    return this._scheduleQueues();
   }
 
   // ─── Amazon Polly TTS ─────────────────────────────────────────────────────
@@ -1446,11 +1897,12 @@ class SpeechManager {
    * @param {string} voiceId    - "Ruth" (female) or "Matthew" (male).
    * @param {object} profile    - Voice profile from getVoiceProfile().
    */
-  async speakPolly(text, voiceId, profile) {
+  async speakPolly(text, voiceId, profile, { fallback } = {}) {
+    const fallbackToSpeech = fallback || (() => this._speakExpofallback(text, profile));
     if (!POLLY_BACKEND_URL) {
       // No backend configured — fall back immediately
       console.log("[Polly] No backend URL configured, using expo-speech fallback.");
-      return this._speakExpofallback(text, profile);
+      return fallbackToSpeech();
     }
 
     const cacheKey = `${voiceId}|${text}`;
@@ -1460,7 +1912,7 @@ class SpeechManager {
       console.log("[Polly] Cache hit, playing from memory.");
       const dataUri = this.pollyCache.get(cacheKey);
       const started = await this._playPollyAudio(dataUri, profile);
-      return started ? undefined : this._speakExpofallback(text, profile);
+      return started ? undefined : fallbackToSpeech();
     }
 
     // ── Fetch from backend with 3-second timeout ───────────────────────────
@@ -1495,7 +1947,7 @@ class SpeechManager {
       this.pollyCache.set(cacheKey, dataUri);
 
       const started = await this._playPollyAudio(dataUri, profile);
-      return started ? undefined : this._speakExpofallback(text, profile);
+      return started ? undefined : fallbackToSpeech();
     } catch (err) {
       clearTimeout(timeoutId);
       if (err.name === "AbortError") {
@@ -1503,7 +1955,7 @@ class SpeechManager {
       } else {
         console.warn("[Polly] Request failed:", err.message, "— falling back to expo-speech.");
       }
-      return this._speakExpofallback(text, profile);
+      return fallbackToSpeech();
     }
   }
 
@@ -1649,6 +2101,7 @@ class SpeechManager {
   async speakWithPollyFallback(text, voiceId, options = {}) {
     options = normalizeSpeechOptions(options);
     const tone = options.tone || "default";
+    const channel = options.channel === "cabin" ? "cabin" : "cockpit";
     const now = Date.now();
     const spokenText = this.formatText(text, tone);
 
@@ -1663,26 +2116,16 @@ class SpeechManager {
     options = this._markLoggedOptions(spokenText, options);
 
     // Use polly-aware queue entry
-    if (options.detachedFromQueue) {
-      this.speakPolly(spokenText, voiceId, profile)
-        .then(() => {
-          if (typeof options.afterSpeech === "function") options.afterSpeech();
-        })
-        .catch((error) => {
-          console.log("[Speech] Detached Polly failed:", error?.message || error);
-        });
-      return;
-    }
-
-    this._enqueueSpeech({ spokenText, options: { ...options, _pollyVoiceId: voiceId }, profile });
+    this._enqueueSpeech({ spokenText, options: { ...options, _pollyVoiceId: voiceId }, profile }, channel);
     if (typeof options.afterSpeech === "function") {
       this._enqueueAction(options.afterSpeech, {
         priority: options.priority,
         actionTimeoutMs: options.afterSpeechTimeoutMs,
-      });
+        detached: options.afterSpeechDetached,
+      }, channel);
       return;
     }
-    this.processQueue();
+    this._scheduleQueues();
   }
 
   async playChime() {
@@ -1714,17 +2157,13 @@ class SpeechManager {
     }
   }
 
-  async playBoardingAnnouncement(livery, { fadeBoardingMusic = true, onFinish } = {}) {
+  async playBoardingAnnouncement(livery, { onFinish } = {}) {
     if (this.boardingAnnounceFinish) {
       await new Promise((resolve) => this._enqueueAction(resolve));
       return;
     }
     if (this.boardingAnnouncePlayer) return;
     if (this._isFetchingBoardingAnnounce && this._fetchingBoardingAnnounceFor === livery) return;
-
-    if (fadeBoardingMusic) {
-      this.stopBoardingMusic({ fade: true });
-    }
 
     this._isFetchingBoardingAnnounce = true;
     this._fetchingBoardingAnnounceFor = livery;
@@ -1992,8 +2431,8 @@ class SpeechManager {
     const fade = options.fade !== false; // Default true
     const durationMs = options.durationMs || BOARDING_MUSIC_FADE_MS;
 
-    if (this.boardingMusic) return;
-    if (this._isFetchingBoardingMusic && this._fetchingBoardingMusicFor === livery) return;
+    if (this.boardingMusic) return true;
+    if (this._isFetchingBoardingMusic && this._fetchingBoardingMusicFor === livery) return false;
 
     this._isFetchingBoardingMusic = true;
     this._fetchingBoardingMusicFor = livery;
@@ -2011,20 +2450,24 @@ class SpeechManager {
         if (this._fetchingBoardingMusicFor === livery) {
           this._fetchingBoardingMusicFor = "";
         }
-        return;
+        return false;
       }
 
       if (!audioUri) {
         console.warn("[Speech] Could not get cached audio for boarding music.");
-        return;
+        return false;
       }
 
       if (this.boardingMusic) {
         this._disposePlayer(this.boardingMusic);
       }
       if (this._boardingMusicFadeTimer) {
-        clearInterval(this._boardingMusicFadeTimer);
-        this._boardingMusicFadeTimer = null;
+        if (this._boardingMusicFadeFinish) {
+          this._boardingMusicFadeFinish();
+        } else {
+          clearInterval(this._boardingMusicFadeTimer);
+          this._boardingMusicFadeTimer = null;
+        }
       }
       this.boardingMusic = createAudioPlayer(audioUri, EFFECT_AUDIO_PLAYER_OPTIONS);
       this.boardingMusic.loop = true;
@@ -2064,8 +2507,10 @@ class SpeechManager {
           }
         }, intervalMs);
       }
+      return Boolean(this.boardingMusic);
     } catch (e) {
       console.log("[Speech] Boarding music failed:", e);
+      return false;
     } finally {
       if (this._boardingMusicRequestId === playRequestId) {
         this._isFetchingBoardingMusic = false;
@@ -2079,59 +2524,74 @@ class SpeechManager {
     this._isFetchingBoardingMusic = false;
     this._fetchingBoardingMusicFor = "";
     const player = this.boardingMusic;
-    if (!player) return;
+    if (!player) return Promise.resolve(false);
 
     if (this._boardingMusicFadeTimer) {
-      clearInterval(this._boardingMusicFadeTimer);
-      this._boardingMusicFadeTimer = null;
-    }
-
-    const cleanup = () => {
-      if (this._boardingMusicFadeTimer) {
+      if (this._boardingMusicFadeFinish) {
+        this._boardingMusicFadeFinish();
+      } else {
         clearInterval(this._boardingMusicFadeTimer);
         this._boardingMusicFadeTimer = null;
       }
-      if (this.boardingMusic === player) {
-        this.boardingMusic = null;
-      }
-      this._disposePlayer(player);
-      this._scheduleBackgroundMediaRefresh();
-      runtimeTrace("speech.boarding_music_stop", {
-        source: "expo-audio",
-        owner: "SpeechManager",
-        fade,
-        queueSize: this.speechQueue.length,
-        playerCount: this._getActivePlayerCount(),
-      }, { throttleMs: 0 });
-    };
-
-    if (fade && this.voiceEnabled) {
-      const steps = 14;
-      const intervalMs = Math.max(50, Math.round(durationMs / steps));
-      const startVolume =
-        typeof player.volume === "number"
-          ? player.volume
-          : this.masterVolume * this.boardingMusicVolume;
-      let step = 0;
-
-      this._boardingMusicFadeTimer = setInterval(() => {
-        step += 1;
-        try {
-          player.volume = Math.max(0, startVolume * (1 - step / steps));
-        } catch (e) {
-          cleanup();
-          return;
-        }
-        if (step >= steps) cleanup();
-      }, intervalMs);
-    } else {
-      cleanup();
     }
+
+    return new Promise((resolve) => {
+      let resolved = false;
+      const cleanup = () => {
+        if (resolved) return;
+        resolved = true;
+        if (this._boardingMusicFadeTimer) {
+          clearInterval(this._boardingMusicFadeTimer);
+          this._boardingMusicFadeTimer = null;
+        }
+        if (this._boardingMusicFadeFinish === cleanup) {
+          this._boardingMusicFadeFinish = null;
+        }
+        if (this.boardingMusic === player) {
+          this.boardingMusic = null;
+        }
+        this._disposePlayer(player);
+        this._scheduleBackgroundMediaRefresh();
+        runtimeTrace("speech.boarding_music_stop", {
+          source: "expo-audio",
+          owner: "SpeechManager",
+          fade,
+          queueSize: this.speechQueue.length,
+          playerCount: this._getActivePlayerCount(),
+        }, { throttleMs: 0 });
+        resolve(true);
+      };
+
+      if (fade && this.voiceEnabled) {
+        const steps = 14;
+        const intervalMs = Math.max(50, Math.round(durationMs / steps));
+        const startVolume =
+          typeof player.volume === "number"
+            ? player.volume
+            : this.masterVolume * this.boardingMusicVolume;
+        let step = 0;
+        this._boardingMusicFadeFinish = cleanup;
+
+        this._boardingMusicFadeTimer = setInterval(() => {
+          step += 1;
+          try {
+            player.volume = Math.max(0, startVolume * (1 - step / steps));
+          } catch (e) {
+            cleanup();
+            return;
+          }
+          if (step >= steps) cleanup();
+        }, intervalMs);
+      } else {
+        cleanup();
+      }
+    });
   }
 
   stopAll() {
     this._stopSpeechPlayback({ clearQueues: true });
     this.isProcessingQueue = false;
+    this.isProcessingCabinQueue = false;
     this.stopBoardingMusic();
     if (this.chimePlayer) {
       this._disposePlayer(this.chimePlayer);

@@ -14,7 +14,7 @@ import { AppState } from "react-native";
 import dgram from "react-native-udp";
 import ifConnect from "../utils/ifConnectClient";
 import androidFlightRuntime from "../runtime/androidFlightRuntime";
-import { speechManager } from "../utils/speech";
+import { announcementCoordinator } from "./AnnouncementCoordinator";
 import { runtimeTrace } from "../utils/runtimeTrace";
 import { calculatePerformance, getFlapString } from "../utils/calculatePerformance";
 import { formatTime } from "../utils/flightMath";
@@ -267,8 +267,6 @@ const createAnnouncementFlags = () => ({
   alt24k_armedForClimb: true,
   alt24k_armedForDescent: false,
   boardingAnnouncementPlayed: false,
-  boardingMusicStarted: false,
-  boardingMusicStopped: false,
   welcomeMessagePlayed: false,
   pendingAnnouncements: [],
   seatbeltHydrated: false,
@@ -296,6 +294,8 @@ class FlightSession {
     this.verifyTimer = null;
     this.androidRuntimeSessionRetained = false;
     this.androidRuntimeStartPromise = null;
+    this.disconnectPromise = null;
+    this.disconnectReason = "";
     this.appState = AppState.currentState || "active";
     this.phaseTracker = createPhaseTracker();
     this.phaseSync = createPhaseSyncState();
@@ -370,7 +370,7 @@ class FlightSession {
   }
 
   _syncBackgroundSessionState() {
-    speechManager.setBackgroundSessionState({
+    announcementCoordinator.setBackgroundSessionState({
       active: this._isBackgroundSessionActive(),
       connectedIp: this.state.connectedIp,
     });
@@ -416,7 +416,7 @@ class FlightSession {
       msl: telemetry.msl,
       agl: telemetry.agl,
       onGround: telemetry.onGround,
-      speech: speechManager.getDiagnostics?.(),
+      speech: announcementCoordinator.getDiagnostics?.(),
       ifConnect: ifConnect.getDiagnostics?.(),
     });
     this._notify();
@@ -456,7 +456,7 @@ class FlightSession {
 
     this.verifyTimer = setTimeout(() => {
       if (this.isConnected) {
-        this.disconnect(true);
+        this.disconnect(true, "verify_timeout");
       }
     }, 5000);
   }
@@ -477,6 +477,7 @@ class FlightSession {
     });
     flags.pendingAnnouncements = [];
     flags.isManualConnection = manualState;
+    announcementCoordinator.resetFlightState();
     return flags;
   }
 
@@ -504,6 +505,12 @@ class FlightSession {
       owner: "FlightSession",
       startCount: this.startCount,
     }, { throttleMs: 0 });
+    runtimeTrace("flightSession.runtime_released", {
+      source: "Notifee.foregroundService",
+      owner: "FlightSession",
+      startCount: this.startCount,
+      disconnectReason: this.disconnectReason,
+    }, { throttleMs: 0 });
     this.stop();
   }
 
@@ -529,14 +536,22 @@ class FlightSession {
     return this.androidRuntimeStartPromise;
   }
 
-  _stopAndroidRuntime() {
+  async _stopAndroidRuntime(reason = "unspecified") {
     runtimeTrace("flightSession.android_stop_request", {
       source: "FlightSession.disconnect/stop",
       owner: "FlightSession",
+      reason,
     }, { throttleMs: 0 });
-    androidFlightRuntime.stopMonitoring().catch((error) => {
+    try {
+      await androidFlightRuntime.stopMonitoring();
+      runtimeTrace("flightSession.foreground_service_stopped", {
+        source: "FlightSession.disconnect/stop",
+        owner: "FlightSession",
+        reason,
+      }, { throttleMs: 0 });
+    } catch (error) {
       console.log("[FlightSession] Android runtime stop failed:", error?.message || error);
-    });
+    }
   }
 
   handleAppStateChange(state) {
@@ -547,30 +562,30 @@ class FlightSession {
       state,
       telemetryPacketSeq: this.telemetryPacketSeq,
       telemetryUpdateSeq: this.telemetryUpdateSeq,
-      speech: speechManager.getDiagnostics?.(),
+      speech: announcementCoordinator.getDiagnostics?.(),
       ifConnect: ifConnect.getDiagnostics?.(),
     }, { throttleMs: 0 });
-    speechManager.handleAppStateChange(state);
+    announcementCoordinator.handleAppStateChange(state);
   }
 
   whenAudioReady() {
-    return speechManager.whenReady();
+    return announcementCoordinator.whenReady();
   }
 
   setSpeechLogger(loggerFn) {
-    speechManager.setLogger(loggerFn);
+    announcementCoordinator.setLogger(loggerFn);
   }
 
   getVoicePreference() {
-    return speechManager.voicePreference;
+    return announcementCoordinator.voicePreference;
   }
 
   toggleVoice() {
-    return speechManager.toggleVoice();
+    return announcementCoordinator.toggleVoice();
   }
 
   setVoicePreference(preference) {
-    return speechManager.setVoicePreference(preference);
+    return announcementCoordinator.setVoicePreference(preference);
   }
 
   start({ disableAutoConnect = false } = {}) {
@@ -657,8 +672,17 @@ class FlightSession {
             }
           } else if (this.isConnected && isMenu) {
             // Simulator explicitly broadcasted that it's in the menu! Instant disconnect.
+            runtimeTrace("flightSession.main_menu_detected", {
+              source: "udp-discovery",
+              owner: "FlightSession",
+              state: stateStr,
+            }, { throttleMs: 0 });
             if (this.disconnect) {
-              this.disconnect(true);
+              runtimeTrace("flightSession.main_menu_immediate_disconnect", {
+                source: "udp-discovery",
+                owner: "FlightSession",
+              }, { throttleMs: 0 });
+              this.disconnect(true, "main_menu_udp");
             }
           }
         } catch (e) {
@@ -688,7 +712,7 @@ class FlightSession {
         telemetryPacketSeq: this.telemetryPacketSeq,
         telemetryUpdateSeq: this.telemetryUpdateSeq,
         pendingAnnouncements: flags.pendingAnnouncements.length,
-        speech: speechManager.getDiagnostics?.(),
+        speech: announcementCoordinator.getDiagnostics?.(),
         ifConnect: ifConnect.getDiagnostics?.(),
       });
 
@@ -710,7 +734,7 @@ class FlightSession {
             command,
             tone: opts.tone,
             pendingAnnouncements: flags.pendingAnnouncements.length,
-            speech: speechManager.getDiagnostics?.(),
+            speech: announcementCoordinator.getDiagnostics?.(),
           }, { throttleMs: 0 });
           return;
         }
@@ -723,9 +747,18 @@ class FlightSession {
           command,
           tone: opts.tone,
           priority: Boolean(opts.priority),
-          speech: speechManager.getDiagnostics?.(),
+          speech: announcementCoordinator.getDiagnostics?.(),
         }, { throttleMs: 0 });
-        speechManager.speak(msg, opts);
+        runtimeTrace("flightSession.announcement_submitted", {
+          source: "flight-event-detection",
+          owner: "FlightSession",
+          announcementSeq: this.announcementSeq,
+          telemetryPacketSeq: this.telemetryPacketSeq,
+          command,
+          tone: opts.tone,
+          channel: opts.channel === "cabin" ? "cabin" : "cockpit",
+        }, { throttleMs: 0 });
+        announcementCoordinator.speak(msg, opts);
       };
 
       const flushPendingAnnouncements = () => {
@@ -736,10 +769,17 @@ class FlightSession {
           owner: "FlightSession",
           flushedCount: pending.length,
           telemetryPacketSeq: this.telemetryPacketSeq,
-          speech: speechManager.getDiagnostics?.(),
+          speech: announcementCoordinator.getDiagnostics?.(),
         }, { throttleMs: 0 });
         pending.forEach(({ msg, options }) => {
-          speechManager.speak(msg, options);
+          runtimeTrace("flightSession.announcement_submitted", {
+            source: "pending-flush",
+            owner: "FlightSession",
+            telemetryPacketSeq: this.telemetryPacketSeq,
+            tone: options?.tone,
+            channel: options?.channel === "cabin" ? "cabin" : "cockpit",
+          }, { throttleMs: 0 });
+          announcementCoordinator.speak(msg, options);
         });
       };
 
@@ -760,9 +800,18 @@ class FlightSession {
           updateNext("appState", data);
           if (data !== "Playing" && data !== 1) {
             // Client is in main menu!
+            runtimeTrace("flightSession.main_menu_detected", {
+              source: "telemetry-app-state",
+              owner: "FlightSession",
+              state: data,
+            }, { throttleMs: 0 });
             setTimeout(() => {
               if (this.disconnect) {
-                this.disconnect(true); // Pass true to indicate main menu exit
+                runtimeTrace("flightSession.main_menu_immediate_disconnect", {
+                  source: "telemetry-app-state",
+                  owner: "FlightSession",
+                }, { throttleMs: 0 });
+                this.disconnect(true, "main_menu_telemetry"); // Pass true to indicate main menu exit
               }
             }, 0);
             return prev;
@@ -847,12 +896,12 @@ class FlightSession {
               `Ladies and gentlemen, welcome to ${cityName}. We have safely landed, and the local time is currently ${state.time} with an outside temperature of${oatCelsius !== null ? ` ${oatCelsius}°C` : " --"}.${tempPhrase}${airlinePhrase} We hope you enjoyed the cruise, and we look forward to welcoming you on board again soon.`;
             // Route through Amazon Polly Neural TTS (Ruth for female, Matthew for male)
             // Automatically falls back to expo-speech if the backend is unreachable.
-            const pollyVoice = speechManager.voicePreference === "male" ? "Matthew" : "Ruth";
-            speechManager.speakWithPollyFallback(welcomeText, pollyVoice, {
+            const pollyVoice = announcementCoordinator.voicePreference === "male" ? "Matthew" : "Ruth";
+            announcementCoordinator.speakWithPollyFallback(welcomeText, pollyVoice, {
               tone: "briefing",
+              channel: "cabin",
               afterSpeech: () => {
-                flags.arrivalWelcomeEnded = true;
-                this._handleAmbientBoardingMusic();
+                announcementCoordinator.onArrivalWelcomeEnded();
               }
             });
             flags.welcome = true;
@@ -976,7 +1025,7 @@ class FlightSession {
               "Please remain seated until the seatbelt sign has been switched off. " +
               "We apologize for the inconvenience and appreciate your cooperation.";
 
-            speak(announcement, { tone: "briefing" });
+            speak(announcement, { tone: "briefing", channel: "cabin" });
 
           } else if (canAnnounceTurbulence && isModerate && !flags.moderateTurbulenceAnnounced) {
             // ── Moderate turbulence announcement ──────────────────────────
@@ -996,7 +1045,7 @@ class FlightSession {
               "We will do our best to find a smoother altitude. " +
               "Thank you for your patience.";
 
-            speak(announcement, { tone: "briefing" });
+            speak(announcement, { tone: "briefing", channel: "cabin" });
 
           } else if (factor < 0.10) {
             // Turbulence has cleared — reset flags so the next bout can be announced
@@ -1006,7 +1055,7 @@ class FlightSession {
                   flags.suppressNextAutoSeatbeltOff = true;
                   ifConnect.set("aircraft/0/systems/signs/seatbelt", false);
                 }
-                speak(POST_TURBULENCE_ANNOUNCEMENT, { tone: "briefing" });
+                speak(POST_TURBULENCE_ANNOUNCEMENT, { tone: "briefing", channel: "cabin" });
               }
               flags.moderateTurbulenceAnnounced = false;
               flags.severeTurbulenceAnnounced = false;
@@ -1273,7 +1322,7 @@ class FlightSession {
             val !== state.seatbelt;
           const inBoardingAnnouncementPhase =
             isPhaseActive(state, this.phaseTracker, BOARDING_ANNOUNCEMENT_PHASES) ||
-            (flags.boardingMusicStarted && !flags.boardingMusicStopped);
+            announcementCoordinator.isBoardingMusicExpected();
           const shouldPlayBoardingAnnouncement =
             on &&
             state.onGround &&
@@ -1284,21 +1333,16 @@ class FlightSession {
             if (!on && flags.suppressNextAutoSeatbeltOff) {
               flags.suppressNextAutoSeatbeltOff = false;
             } else if (shouldPlayBoardingAnnouncement) {
-              flags.boardingMusicStopped = true;
               flags.boardingAnnouncementPlayed = true;
               speak("Seatbelt signs on.", {
                 tone: "notice",
                 withChime: true,
                 chimeReason: "seatbelt_sign",
                 priority: true,
+                afterSpeechTimeoutMs: false,
+                afterSpeechDetached: true,
                 afterSpeech: () => {
-                  speechManager.playBoardingAnnouncement(state.livery, {
-                    fadeBoardingMusic: true,
-                    onFinish: () => {
-                      flags.safetyBriefingEnded = true;
-                      this._handleAmbientBoardingMusic();
-                    }
-                  });
+                  return announcementCoordinator.playSafetyBriefing(state.livery);
                 },
               });
             } else {
@@ -1396,8 +1440,7 @@ class FlightSession {
           // next.time !== "---"
         ) {
           flags.welcomeMessagePlayed = true;
-          speechManager.stopAll();
-          speechManager.speak(
+          announcementCoordinator.playSessionWelcome(
             next.onGround
               ? "Welcome to the flight Captain."
               : "Welcome back to the flight Captain.",
@@ -1406,8 +1449,7 @@ class FlightSession {
               priority: true,
               allowBeforeWelcome: true,
               afterSpeech: () => {
-                flags.departureWelcomeEnded = true;
-                this._handleAmbientBoardingMusic();
+                announcementCoordinator.onDepartureWelcomeEnded();
               }
             }
           );
@@ -1447,35 +1489,17 @@ class FlightSession {
     // ─── 3. IF Connect error handler ──────────────────────────────────────
     this.errorHandler = (err) => {
       console.log("[FlightSession] Connection error:", err.message);
-      this._setConnectionStatus("AWAITING SIMULATOR LINK...");
-      this._setConnectedIp("");
-      this._resetPhaseState();
-      this._setTelemetry({ ...INITIAL_TELEMETRY });
-      this.isConnected = false;
-      ifConnect.close(() => {});
-      this._resetAnnouncementState({ isManualConnection: false });
-      this._resetPtuState();
-      this._stopAndroidRuntime();
-      speechManager.stopAll();
-      setTimeout(() => {
-        speechManager.speak("Client disconnected.", { tone: "notice" });
-      }, 500);
+      this._requestDisconnect({
+        isMainMenuExit: false,
+        reason: "network_error",
+      });
     };
 
     this.disconnectHandler = () => {
-      this._setConnectionStatus("AWAITING SIMULATOR LINK...");
-      this._setConnectedIp("");
-      this._resetPhaseState();
-      this._setTelemetry({ ...INITIAL_TELEMETRY });
-      this.isConnected = false;
-      ifConnect.close(() => {});
-      this._resetAnnouncementState({ isManualConnection: false });
-      this._resetPtuState();
-      this._stopAndroidRuntime();
-      speechManager.stopAll();
-      setTimeout(() => {
-        speechManager.speak("Client disconnected.", { tone: "notice" });
-      }, 500);
+      this._requestDisconnect({
+        isMainMenuExit: false,
+        reason: "socket_disconnected",
+      });
     };
 
     this.reconnectHandler = () => {
@@ -1504,7 +1528,7 @@ class FlightSession {
       owner: "FlightSession",
       connectedIp: ip,
       startCount: this.startCount,
-      speech: speechManager.getDiagnostics?.(),
+      speech: announcementCoordinator.getDiagnostics?.(),
       ifConnect: ifConnect.getDiagnostics?.(),
     }, { throttleMs: 0 });
     this._startAndroidRuntime(ip).catch(() => {});
@@ -1526,7 +1550,7 @@ class FlightSession {
           this._setConnectionStatus("VERIFYING STATE...");
           flags.connectedAt = Date.now();
           this.phaseSync.connectedAt = flags.connectedAt;
-          speechManager.stopBoardingMusic();
+          announcementCoordinator.onConnectionPollingStarted();
           runtimeTrace("flightSession.poll_register_start", {
             source: "ifConnect.successCallback",
             owner: "FlightSession",
@@ -1555,11 +1579,19 @@ class FlightSession {
     runtimeTrace("flightSession.stop", {
       source: "useTelemetry/androidRuntime",
       owner: "FlightSession",
+      reason: this.isConnected ? "active_session_stop_requested" : "inactive_session_stop_requested",
       telemetryPacketSeq: this.telemetryPacketSeq,
       telemetryUpdateSeq: this.telemetryUpdateSeq,
-      speech: speechManager.getDiagnostics?.(),
+      speech: announcementCoordinator.getDiagnostics?.(),
       ifConnect: ifConnect.getDiagnostics?.(),
     }, { throttleMs: 0 });
+
+    if (this.isConnected) {
+      this._requestDisconnect({
+        isMainMenuExit: false,
+        reason: "stop_requested",
+      });
+    }
 
     try {
       if (this.discoverySocket) this.discoverySocket.close();
@@ -1580,7 +1612,9 @@ class FlightSession {
     if (this.disconnectHandler) ifConnect.off("disconnect", this.disconnectHandler);
     if (this.reconnectingHandler) ifConnect.off("reconnecting", this.reconnectingHandler);
     if (this.reconnectHandler) ifConnect.off("connect", this.reconnectHandler);
-    ifConnect.close(() => {});
+    if (!this.isConnected) {
+      ifConnect.close(() => {});
+    }
 
     this.dataHandler = null;
     this.errorHandler = null;
@@ -1592,78 +1626,11 @@ class FlightSession {
   // ─── Ambient Boarding Music Logic ─────────────────────────────────────────
   _handleAmbientBoardingMusic() {
     const { telemetry } = this.state;
-    if (!telemetry.name || !this.isConnected) return;
-
-    const isDeparturePhase = ["preflight", "boarding", "pushback", "taxi_out"].includes(telemetry.phase);
-    const isArrivalPhase = ["taxi_in", "deboarding"].includes(telemetry.phase);
-
-    // Stop music on strobe lights on or takeoff phase
-    if (telemetry.strobe === 1 || telemetry.phase === "takeoff") {
-      if (this.flags.boardingMusicStarted && !this.flags.boardingMusicStopped) {
-        this.flags.boardingMusicStopped = true;
-        runtimeTrace("flightSession.boarding_music_stop_event", {
-          source: "telemetry-effects",
-          owner: "FlightSession",
-          reason: telemetry.strobe === 1 ? "strobe_on" : "takeoff_phase",
-          phase: telemetry.phase,
-          telemetryPacketSeq: this.telemetryPacketSeq,
-          speech: speechManager.getDiagnostics?.(),
-        }, { throttleMs: 0 });
-        speechManager.stopBoardingMusic({ fade: true });
-      }
-    }
-
-    // 1. Departure music: start after welcome message ends, but ONLY when livery is fetched
-    if (this.flags.departureWelcomeEnded && isDeparturePhase && telemetry.livery) {
-      if (!this.flags.boardingMusicStarted && !this.flags.boardingMusicStopped) {
-        this.flags.boardingMusicStarted = true;
-        runtimeTrace("flightSession.boarding_music_start_event", {
-          source: "telemetry-effects",
-          owner: "FlightSession",
-          reason: "departure_phase",
-          phase: telemetry.phase,
-          telemetryPacketSeq: this.telemetryPacketSeq,
-          speech: speechManager.getDiagnostics?.(),
-        }, { throttleMs: 0 });
-        speechManager.playBoardingMusic(telemetry.livery);
-      }
-    }
-
-    // 2. Resume departure music after safety briefing ends
-    if (this.flags.safetyBriefingEnded) {
-      this.flags.safetyBriefingEnded = false; // consume flag
-      if (isDeparturePhase && telemetry.livery) {
-        this.flags.boardingMusicStopped = false;
-        this.flags.boardingMusicStarted = true;
-        runtimeTrace("flightSession.boarding_music_start_event", {
-          source: "telemetry-effects",
-          owner: "FlightSession",
-          reason: "safety_briefing_finished",
-          phase: telemetry.phase,
-          telemetryPacketSeq: this.telemetryPacketSeq,
-          speech: speechManager.getDiagnostics?.(),
-        }, { throttleMs: 0 });
-        speechManager.playBoardingMusic(telemetry.livery);
-      }
-    }
-
-    // 3. Arrival music after welcome to airport announcement
-    if (this.flags.arrivalWelcomeEnded) {
-      this.flags.arrivalWelcomeEnded = false; // consume flag
-      if (isArrivalPhase && telemetry.livery) {
-        this.flags.boardingMusicStopped = false;
-        this.flags.boardingMusicStarted = true;
-        runtimeTrace("flightSession.boarding_music_start_event", {
-          source: "telemetry-effects",
-          owner: "FlightSession",
-          reason: "arrival_welcome_finished",
-          phase: telemetry.phase,
-          telemetryPacketSeq: this.telemetryPacketSeq,
-          speech: speechManager.getDiagnostics?.(),
-        }, { throttleMs: 0 });
-        speechManager.playBoardingMusic(telemetry.livery);
-      }
-    }
+    announcementCoordinator.evaluateAmbientBoardingMusic({
+      telemetry,
+      isConnected: this.isConnected,
+      reason: "telemetry_effects",
+    });
   }
 
   // ─── Siren logic (brake + throttle + engines) ──────────────────────────────
@@ -1671,7 +1638,7 @@ class FlightSession {
     const { telemetry } = this.state;
     const anyRunning = Object.values(telemetry.engines || {}).some((s) => s === 2);
     if (anyRunning && telemetry.brakes === 1 && telemetry.throttle > 0.05) {
-      speechManager.playSiren();
+      announcementCoordinator.playSiren();
     }
   }
 
@@ -1722,18 +1689,76 @@ class FlightSession {
     }
 
     if (shouldPlay) {
-      speechManager.playPTUBurst();
+      announcementCoordinator.playPTUBurst();
     }
 
     this.ptuPreviousEngines = currEng;
     this.ptuPreviousGroundSpeed = currGs;
   }
 
+  _requestDisconnect({ isMainMenuExit = false, reason = "user_requested" } = {}) {
+    runtimeTrace("flightSession.disconnect_requested", {
+      source: isMainMenuExit ? "simulator-main-menu" : "session-lifecycle",
+      owner: "FlightSession",
+      reason,
+      isMainMenuExit,
+      telemetryPacketSeq: this.telemetryPacketSeq,
+      telemetryUpdateSeq: this.telemetryUpdateSeq,
+      speech: announcementCoordinator.getDiagnostics?.(),
+      ifConnect: ifConnect.getDiagnostics?.(),
+    }, { throttleMs: 0 });
+
+    if (this.disconnectPromise) return this.disconnectPromise;
+
+    this.disconnectReason = reason;
+    this.disconnectPromise = this._terminateMonitoringSession({
+      isMainMenuExit,
+      reason,
+    }).finally(() => {
+      this.disconnectPromise = null;
+      this.disconnectReason = "";
+    });
+    return this.disconnectPromise;
+  }
+
+  async _terminateMonitoringSession({ isMainMenuExit = false, reason = "unknown" } = {}) {
+    runtimeTrace("flightSession.disconnect", {
+      source: isMainMenuExit ? "simulator-main-menu" : "session-lifecycle",
+      owner: "FlightSession",
+      reason,
+      telemetryPacketSeq: this.telemetryPacketSeq,
+      telemetryUpdateSeq: this.telemetryUpdateSeq,
+      speech: announcementCoordinator.getDiagnostics?.(),
+      ifConnect: ifConnect.getDiagnostics?.(),
+    }, { throttleMs: 0 });
+
+    this._setConnectionStatus("AWAITING SIMULATOR LINK...");
+    this._setConnectedIp("");
+    this.phaseTracker = createPhaseTracker();
+    this.phaseSync = createPhaseSyncState();
+    this._setTelemetry({ ...INITIAL_TELEMETRY });
+    this.isConnected = false;
+    ifConnect.close(() => {});
+
+    if (isMainMenuExit && this.flags.isManualConnection) {
+      this._emitEvent({
+        type: "alert",
+        title: "Simulator in Main Menu",
+        message: "Client is in the main menu. Please enter the game first before connecting.",
+      });
+    }
+
+    this._resetAnnouncementState({ isManualConnection: false });
+    this._resetPtuState();
+    await announcementCoordinator.onClientDisconnected({ reason });
+    await this._stopAndroidRuntime(reason);
+  }
+
   // ─── Public API ────────────────────────────────────────────────────────────
 
   manualConnect(ip) {
     if (!ip) return;
-    speechManager.speak("Connecting to client.", { tone: "notice" });
+    announcementCoordinator.speak("Connecting to client.", { tone: "notice" });
     this.isConnected = false; // Allow new connection
     if (this.connect) {
       this.connect(ip, true);
@@ -1750,38 +1775,8 @@ class FlightSession {
     }
   }
 
-  disconnect(isMainMenuExit = false) {
-    runtimeTrace("flightSession.disconnect", {
-      source: isMainMenuExit ? "simulator-main-menu" : "user/runtime",
-      owner: "FlightSession",
-      telemetryPacketSeq: this.telemetryPacketSeq,
-      telemetryUpdateSeq: this.telemetryUpdateSeq,
-      speech: speechManager.getDiagnostics?.(),
-      ifConnect: ifConnect.getDiagnostics?.(),
-    }, { throttleMs: 0 });
-    this._setConnectionStatus("AWAITING SIMULATOR LINK...");
-    this._setConnectedIp("");
-    this.phaseTracker = createPhaseTracker();
-    this.phaseSync = createPhaseSyncState();
-    this._setTelemetry({ ...INITIAL_TELEMETRY });
-    this.isConnected = false;
-    ifConnect.close(() => {});
-    this._stopAndroidRuntime();
-
-    if (isMainMenuExit && this.flags.isManualConnection) {
-      this._emitEvent({
-        type: "alert",
-        title: "Simulator in Main Menu",
-        message: "Client is in the main menu. Please enter the game first before connecting.",
-      });
-    }
-    
-    this._resetAnnouncementState({ isManualConnection: false });
-    this._resetPtuState();
-    speechManager.stopAll();
-    setTimeout(() => {
-      speechManager.speak("Client disconnected.", { tone: "notice" });
-    }, 500);
+  disconnect(isMainMenuExit = false, reason = "user_requested") {
+    return this._requestDisconnect({ isMainMenuExit, reason });
   }
 
   resetForConnectingFlight() {
@@ -1791,7 +1786,7 @@ class FlightSession {
     const flags = this._resetAnnouncementState();
     flags.connectedAt = now;
     this._resetPhaseState(now);
-    speechManager.stopBoardingMusic({ fade: true });
+    announcementCoordinator.onConnectingFlightReset();
     this._setTelemetry((prev) => ({ ...prev, phase: PHASE_SYNCING }));
   }
 }

@@ -34,7 +34,7 @@ import { speechManager } from '../../utils/speech';
 import Slider from './Slider';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.5.0';
 const DISCORD_URL = 'https://discord.gg/hb3HkrfBEK';
 
 // ─── Theme Swatch ─────────────────────────────────────────────────────────────
