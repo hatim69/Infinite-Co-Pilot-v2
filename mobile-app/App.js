@@ -26,6 +26,7 @@ import {
   Platform,
   Image,
   useWindowDimensions,
+  Switch,
 } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -556,6 +557,14 @@ function AppInner() {
       <Text style={[styles.splashSubtitle, responsive.isTinyWidth && styles.splashSubtitleCompact, { color: theme.textMuted, textAlign: 'center', lineHeight: 20, marginTop: 8 }]}>
         UI rendering is minimized to conserve resources. Callouts and telemetry are running perfectly in the background.
       </Text>
+      
+      <TouchableOpacity 
+        style={{ marginTop: 32, paddingVertical: 12, paddingHorizontal: 24, backgroundColor: '#3B82F6', borderRadius: 8 }}
+        onPress={() => setIsBackgroundMode(false)}
+        activeOpacity={0.8}
+      >
+        <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '600' }}>Exit Background Mode</Text>
+      </TouchableOpacity>
     </View>
   );
 
@@ -596,6 +605,19 @@ function AppInner() {
                 layoutMode={responsive.isTinyWidth ? "compact" : responsive.isTablet ? "tablet" : "default"}
               />
               <BackgroundReliability />
+              <View style={[styles.card, responsive.isShort && styles.cardCompact, { backgroundColor: theme.surfaceMid, borderColor: theme.border, flexDirection: 'row', alignItems: 'center' }]}>
+                <View style={{ flex: 1, paddingRight: 16 }}>
+                  <Text style={[styles.cardTitle, { color: theme.textLabel || theme.textDim }]} numberOfLines={1}>Background Mode</Text>
+
+                </View>
+                <Switch
+                  value={isBackgroundMode}
+                  onValueChange={setIsBackgroundMode}
+                  trackColor={{ false: theme.borderMid, true: theme.switchTrack || '#10B981' }}
+                  thumbColor="#FFFFFF"
+                  ios_backgroundColor={theme.sliderTrack || '#333'}
+                />
+              </View>
               <View style={[styles.card, responsive.isShort && styles.cardCompact, { backgroundColor: theme.surfaceMid, borderColor: theme.border }]}>
                 <TouchableOpacity style={styles.cardHeader} onPress={() => setShowLogs((v) => !v)} activeOpacity={0.8}>
                   <View style={styles.cardHeaderLeft}>
