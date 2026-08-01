@@ -287,6 +287,7 @@ class FlightSession {
     this.listeners = new Set();
     this.eventListeners = new Set();
     this.disableAutoConnect = false;
+    this.isAutoActionsEnabled = false;
     this.started = false;
     this.startCount = 0;
     this.isConnected = false;
@@ -340,6 +341,10 @@ class FlightSession {
 
   setAutoConnectDisabled(disableAutoConnect) {
     this.disableAutoConnect = disableAutoConnect;
+  }
+
+  setAutoActionsEnabled(isAutoActionsEnabled) {
+    this.isAutoActionsEnabled = isAutoActionsEnabled;
   }
 
   _notify() {
@@ -935,7 +940,7 @@ class FlightSession {
 
             const HYSTERESIS = 300;
 
-            const checkAltitudeCallout = (alt, flagPrefix, climbText, descentText, options) => {
+            const checkAltitudeCallout = (alt, flagPrefix, climbText, descentText, options, onClimb, onDescent) => {
               // Hysteresis Arming
               if (currentAlt > alt + HYSTERESIS) {
                 flags[`${flagPrefix}_armedForDescent`] = true;
@@ -948,15 +953,29 @@ class FlightSession {
               if (allowClimbAltitudeCallout && crossing.ascending && flags[`${flagPrefix}_armedForClimb`]) {
                 speak(climbText, options.climb || "notice");
                 flags[`${flagPrefix}_armedForClimb`] = false;
+                if (onClimb) onClimb();
               }
               if (allowDescentAltitudeCallout && crossing.descending && flags[`${flagPrefix}_armedForDescent`]) {
                 speak(descentText, options.descent || "notice");
                 flags[`${flagPrefix}_armedForDescent`] = false;
+                if (onDescent) onDescent();
               }
             };
 
-            checkAltitudeCallout(5000, 'alt5k', "Passing five thousand.", "Passing five thousand.", {});
-            checkAltitudeCallout(10000, 'alt10k', "Ten thousand. Landing lights off.", "Ten thousand. Landing lights on.", { climb: { tone: "caution", priority: true }, descent: { tone: "notice", priority: true } });
+            checkAltitudeCallout(5000, 'alt5k', "Passing five thousand.", "Passing five thousand.", {}, () => {
+              if (this.isAutoActionsEnabled && state.spoilers === 2) {
+                ifConnect.set("aircraft/0/systems/spoilers/state", 0);
+              }
+            });
+            checkAltitudeCallout(10000, 'alt10k', "Ten thousand. Landing lights off.", "Ten thousand. Landing lights on.", { climb: { tone: "caution", priority: true }, descent: { tone: "notice", priority: true } }, () => {
+              if (this.isAutoActionsEnabled && state.landing !== 0) {
+                ifConnect.set("aircraft/0/systems/landing_lights_switch", false);
+              }
+            }, () => {
+              if (this.isAutoActionsEnabled && state.landing !== 1) {
+                ifConnect.set("aircraft/0/systems/landing_lights_switch", true);
+              }
+            });
             checkAltitudeCallout(15000, 'alt15k', "Passing one-five thousand.", "Passing one-five thousand.", {});
             checkAltitudeCallout(24000, 'alt24k', "Passing Flight Level two-four-zero.", "Descending Flight Level two-four-zero.", {});
           }
@@ -979,6 +998,12 @@ class FlightSession {
             ) {
               speak("Positive rate. Gear up.", { tone: "callout", ignoreConnectGate: true });
               flags.positiveRate = true;
+              if (this.isAutoActionsEnabled) {
+                const isUp = state.gear === 2 || state.gear === 5 || state.gear === 0;
+                if (!isUp) {
+                  ifConnect.set("aircraft/0/systems/landing_gear/lever_state", false);
+                }
+              }
             }
           }
         }
@@ -1011,7 +1036,9 @@ class FlightSession {
 
             // Turn on seatbelt sign if it isn't already
             if (state.seatbelt !== 1) {
-              ifConnect.set("aircraft/0/systems/signs/seatbelt", true);
+              if (this.isAutoActionsEnabled) {
+                ifConnect.set("aircraft/0/systems/signs/seatbelt", true);
+              }
             }
 
             const announcement =
@@ -1028,7 +1055,9 @@ class FlightSession {
               if (canAnnounceTurbulence) {
                 if (state.seatbelt !== 0) {
                   flags.suppressNextAutoSeatbeltOff = true;
-                  ifConnect.set("aircraft/0/systems/signs/seatbelt", false);
+                  if (this.isAutoActionsEnabled) {
+                    ifConnect.set("aircraft/0/systems/signs/seatbelt", false);
+                  }
                 }
                 speak(POST_TURBULENCE_ANNOUNCEMENT, { tone: "briefing", channel: "cabin" });
               }
@@ -1145,6 +1174,13 @@ class FlightSession {
           if (next.engines[engNum] !== nextState) {
             next.engines = { ...next.engines, [engNum]: nextState };
             updated = true;
+
+            if (this.isAutoActionsEnabled && nextState === 2) {
+              const allRunning = Object.keys(next.engines).length > 0 && Object.values(next.engines).every(s => s === 2);
+              if (allRunning && next.apu !== 0 && next.apu !== -1) {
+                ifConnect.set("aircraft/0/systems/apu/apu/state", 0);
+              }
+            }
           }
         }
 

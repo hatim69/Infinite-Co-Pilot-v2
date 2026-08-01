@@ -8,7 +8,7 @@
 import { useEffect, useMemo, useState } from "react";
 import flightSession from "../session/FlightSession";
 
-export function useTelemetry(disableAutoConnect = false) {
+export function useTelemetry(disableAutoConnect = false, isAutoActionsEnabled = false) {
   const [sessionState, setSessionState] = useState(() => flightSession.getState());
 
   useEffect(() => {
@@ -24,6 +24,10 @@ export function useTelemetry(disableAutoConnect = false) {
   useEffect(() => {
     flightSession.setAutoConnectDisabled(disableAutoConnect);
   }, [disableAutoConnect]);
+
+  useEffect(() => {
+    flightSession.setAutoActionsEnabled(isAutoActionsEnabled);
+  }, [isAutoActionsEnabled]);
 
   return useMemo(
     () => ({

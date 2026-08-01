@@ -34,7 +34,7 @@ import { speechManager } from '../../utils/speech';
 import Slider from './Slider';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const APP_VERSION = '1.5.3';
+const APP_VERSION = '1.5.4';
 const DISCORD_URL = 'https://discord.gg/hb3HkrfBEK';
 
 // ─── Theme Swatch ─────────────────────────────────────────────────────────────
@@ -126,7 +126,7 @@ function SidebarSection({ icon: Icon, title, theme, children }) {
 
 // ─── Main Sidebar ─────────────────────────────────────────────────────────────
 
-export default function Sidebar({ visible, onClose, isBackgroundMode, setIsBackgroundMode, disableAutoConnect, setDisableAutoConnect, voicePreference, toggleVoiceGender }) {
+export default function Sidebar({ visible, onClose, isBackgroundMode, setIsBackgroundMode, disableAutoConnect, setDisableAutoConnect, isAutoActionsEnabled, setIsAutoActionsEnabled, voicePreference, toggleVoiceGender }) {
   const { theme, activeTheme, setTheme } = useTheme();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
@@ -320,6 +320,22 @@ export default function Sidebar({ visible, onClose, isBackgroundMode, setIsBackg
                   <Switch
                     value={disableAutoConnect}
                     onValueChange={setDisableAutoConnect}
+                    trackColor={{ false: theme.borderMid, true: theme.switchTrack }}
+                    thumbColor="#FFFFFF"
+                    ios_backgroundColor={theme.sliderTrack}
+                  />
+                </View>
+
+                <View style={[styles.toggleRow, { borderTopColor: theme.borderMid }]}>
+                  <View style={{ flex: 1, paddingRight: 16 }}>
+                    <Text style={[styles.sliderLabel, { color: theme.textLabel }]}>Automated Actions</Text>
+                    <Text style={[styles.toggleSub, { color: theme.textMuted }]}>
+                      Allow the app to automatically perform actions in the simulator.
+                    </Text>
+                  </View>
+                  <Switch
+                    value={isAutoActionsEnabled}
+                    onValueChange={setIsAutoActionsEnabled}
                     trackColor={{ false: theme.borderMid, true: theme.switchTrack }}
                     thumbColor="#FFFFFF"
                     ios_backgroundColor={theme.sliderTrack}

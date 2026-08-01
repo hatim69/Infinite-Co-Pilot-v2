@@ -190,16 +190,25 @@ function AppInner() {
   }, [window.width, window.height, window.fontScale]);
 
   const [disableAutoConnect, setDisableAutoConnectState] = useState(false);
+  const [isAutoActionsEnabled, setIsAutoActionsEnabledState] = useState(false);
 
   useEffect(() => {
     AsyncStorage.getItem('disableAutoConnect').then(val => {
       if (val === 'true') setDisableAutoConnectState(true);
+    });
+    AsyncStorage.getItem('isAutoActionsEnabled').then(val => {
+      if (val === 'true') setIsAutoActionsEnabledState(true);
     });
   }, []);
 
   const setDisableAutoConnect = async (val) => {
     setDisableAutoConnectState(val);
     await AsyncStorage.setItem('disableAutoConnect', val.toString());
+  };
+
+  const setIsAutoActionsEnabled = async (val) => {
+    setIsAutoActionsEnabledState(val);
+    await AsyncStorage.setItem('isAutoActionsEnabled', val.toString());
   };
 
   const [logs, setLogs] = useState([
@@ -233,7 +242,7 @@ function AppInner() {
     getVoicePreference,
     toggleVoice: toggleSessionVoice,
     setVoicePreference: setSessionVoicePreference,
-  } = useTelemetry(disableAutoConnect || !isBetaVerified);
+  } = useTelemetry(disableAutoConnect || !isBetaVerified, isAutoActionsEnabled);
 
   useEffect(() => {
     let isMounted = true;
@@ -894,6 +903,8 @@ function AppInner() {
         setIsBackgroundMode={setIsBackgroundMode}
         disableAutoConnect={disableAutoConnect}
         setDisableAutoConnect={setDisableAutoConnect}
+        isAutoActionsEnabled={isAutoActionsEnabled}
+        setIsAutoActionsEnabled={setIsAutoActionsEnabled}
         voicePreference={voicePreference}
         toggleVoiceGender={toggleVoiceGender}
       />
