@@ -162,6 +162,7 @@ const POLL_COMMANDS = [
   "aircraft/0/ground_services/gpu/state",
   "aircraft/0/ground_services/pallet_loader/state",
   "aircraft/0/ground_services/stairs/state",
+  "aircraft/0/ground_services/fuel_truck/state",
   "aircraft/0/ground_services/pushback/state",
 
   "aircraft/0/systems/beacon_lights_switch",
@@ -222,6 +223,7 @@ const INITIAL_TELEMETRY = {
   gpu: -1,
   palletLoader: -1,
   stairs: -1,
+  fuelTruck: -1,
   seatbelt: -1,
   smoking: -1,
   beacon: -1,
@@ -275,8 +277,7 @@ const createAnnouncementFlags = () => ({
   v2Announced: false,
   connectedAt: 0,
   isManualConnection: false,
-  moderateTurbulenceAnnounced: false,
-  severeTurbulenceAnnounced: false,
+  turbulenceAnnounced: false,
   suppressNextAutoSeatbeltOff: false,
 });
 
@@ -994,42 +995,19 @@ class FlightSession {
 
         // ── Turbulence ───────────────────────────────────────────────────
         // Thresholds:
-        //   ≥ 0.25 — moderate turbulence (announce once; reset when it drops below 0.10)
-        //   ≥ 0.50 — severe  turbulence (announce once on top of moderate; same reset)
+        //   ≥ 0.25 — turbulence (announce once; reset when it drops below 0.10)
         if (command === "environment/turbulence_factor") {
           const factor = typeof data === "number" ? data : 0;
           updateNext("turbulence", factor);
 
-          const isSevere   = factor >= 0.50;
-          const isModerate = factor >= 0.25;
+          const isTurbulent = factor >= 0.25;
           const canAnnounceTurbulence =
             state.onGround === false &&
             isPhaseActive(state, this.phaseTracker, TURBULENCE_ANNOUNCEMENT_PHASES);
 
-          if (canAnnounceTurbulence && isSevere && !flags.severeTurbulenceAnnounced) {
-            // ── Severe turbulence announcement ────────────────────────────
-            flags.severeTurbulenceAnnounced = true;
-            flags.moderateTurbulenceAnnounced = true; // absorb the moderate flag too
-
-            // Turn on seatbelt sign if it isn't already
-            if (state.seatbelt !== 1) {
-              ifConnect.set("aircraft/0/systems/signs/seatbelt", true);
-            }
-
-            const announcement =
-              "Ladies and gentlemen, this is your captain speaking. " +
-              "We are currently experiencing severe turbulence. " +
-              "For your safety, the seatbelt sign has been turned on. " +
-              "Please return to your seats immediately, fasten your seatbelts securely, " +
-              "and stow any tray tables and loose items. " +
-              "Please remain seated until the seatbelt sign has been switched off. " +
-              "We apologize for the inconvenience and appreciate your cooperation.";
-
-            speak(announcement, { tone: "briefing", channel: "cabin" });
-
-          } else if (canAnnounceTurbulence && isModerate && !flags.moderateTurbulenceAnnounced) {
-            // ── Moderate turbulence announcement ──────────────────────────
-            flags.moderateTurbulenceAnnounced = true;
+          if (canAnnounceTurbulence && isTurbulent && !flags.turbulenceAnnounced) {
+            // ── Turbulence announcement ──────────────────────────
+            flags.turbulenceAnnounced = true;
 
             // Turn on seatbelt sign if it isn't already
             if (state.seatbelt !== 1) {
@@ -1049,7 +1027,7 @@ class FlightSession {
 
           } else if (factor < 0.10) {
             // Turbulence has cleared — reset flags so the next bout can be announced
-            if (flags.moderateTurbulenceAnnounced || flags.severeTurbulenceAnnounced) {
+            if (flags.turbulenceAnnounced) {
               if (canAnnounceTurbulence) {
                 if (state.seatbelt !== 0) {
                   flags.suppressNextAutoSeatbeltOff = true;
@@ -1057,8 +1035,7 @@ class FlightSession {
                 }
                 speak(POST_TURBULENCE_ANNOUNCEMENT, { tone: "briefing", channel: "cabin" });
               }
-              flags.moderateTurbulenceAnnounced = false;
-              flags.severeTurbulenceAnnounced = false;
+              flags.turbulenceAnnounced = false;
               console.log("[Turbulence] Factor dropped below 0.10 — announcement flags reset.");
             }
           }
@@ -1274,6 +1251,11 @@ class FlightSession {
             key: "stairs",
             onMsg: "Stairs connected.",
             offMsg: "Stairs disconnected.",
+          },
+          "aircraft/0/ground_services/fuel_truck/state": {
+            key: "fuelTruck",
+            onMsg: "Fuel truck connected.",
+            offMsg: "Fuel truck disconnected.",
           },
         };
         if (gsMap[command]) {

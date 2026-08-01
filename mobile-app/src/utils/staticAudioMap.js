@@ -172,12 +172,8 @@ export const staticAudioMap = {
     male: require("../../assets/audio/male_crew_prepare_for_takeoff.mp3")
   },
   "Ladies and gentlemen, this is your captain speaking. We are currently experiencing some turbulence. The seatbelt sign has been switched on. We ask that you please return to your seats and fasten your seatbelts. Please also ensure your tray tables are stowed and any overhead bins are secure. We will do our best to find a smoother altitude. Thank you for your patience.": {
-    female: require("../../assets/audio/female_crew_moderate_turbulence.mp3"),
-    male: require("../../assets/audio/male_crew_moderate_turbulence.mp3")
-  },
-  "Ladies and gentlemen, this is your captain speaking. We are currently experiencing severe turbulence. For your safety, the seatbelt sign has been turned on. Please return to your seats immediately, fasten your seatbelts securely, and stow any tray tables and loose items. Please remain seated until the seatbelt sign has been switched off. We apologize for the inconvenience and appreciate your cooperation.": {
-    female: require("../../assets/audio/female_crew_severe_turbulence.mp3"),
-    male: require("../../assets/audio/male_crew_severe_turbulence.mp3")
+    female: require("../../assets/audio/female_crew_turbulence.mp3"),
+    male: require("../../assets/audio/male_crew_turbulence.mp3")
   },
   "Ladies and gentlemen, we've now returned to smooth air and the seat belt sign has been switched off. You are free to move around the cabin if needed, though we recommend keeping your seat belt fastened whenever you're seated. Thank you.": {
     female: require("../../assets/audio/female_crew_post_turbulence.mp3"),
@@ -198,6 +194,14 @@ export const staticAudioMap = {
   "Catering truck disconnected.": {
     female: require("../../assets/audio/female_service_catering_truck_disconnected.mp3"),
     male: require("../../assets/audio/male_service_catering_truck_disconnected.mp3")
+  },
+  "Fuel truck connected.": {
+    female: require("../../assets/audio/female_service_fuel_truck_connected.mp3"),
+    male: require("../../assets/audio/male_service_fuel_truck_connected.mp3")
+  },
+  "Fuel truck disconnected.": {
+    female: require("../../assets/audio/female_service_fuel_truck_disconnected.mp3"),
+    male: require("../../assets/audio/male_service_fuel_truck_disconnected.mp3")
   },
   "GPU connected.": {
     female: require("../../assets/audio/female_service_gpu_connected.mp3"),
