@@ -1015,13 +1015,10 @@ class FlightSession {
             }
 
             const announcement =
-              "Ladies and gentlemen, this is your captain speaking. " +
-              "We are currently experiencing some turbulence. " +
-              "The seatbelt sign has been switched on. " +
-              "We ask that you please return to your seats and fasten your seatbelts. " +
-              "Please also ensure your tray tables are stowed and any overhead bins are secure. " +
-              "We will do our best to find a smoother altitude. " +
-              "Thank you for your patience.";
+              "Ladies and gentlemen, we're currently experiencing some turbulence. " +
+              "We ask that you return to your seats and ensure your seatbelts are securely fastened. " +
+              "The seatbelt sign will remain on until we're clear of the area. " +
+              "Thank you for your cooperation.";
 
             speak(announcement, { tone: "briefing", channel: "cabin" });
 

@@ -44,7 +44,7 @@ const mappings = {
   "Welcome to the flight Captain.": "crew_welcome_captain_ground",
   "Welcome back to the flight Captain.": "crew_welcome_back_captain_airborne",
   "Cabin crew prepare for take off.": "crew_prepare_for_takeoff",
-  "Ladies and gentlemen, this is your captain speaking. We are currently experiencing some turbulence. The seatbelt sign has been switched on. We ask that you please return to your seats and fasten your seatbelts. Please also ensure your tray tables are stowed and any overhead bins are secure. We will do our best to find a smoother altitude. Thank you for your patience.": "crew_turbulence",
+  "Ladies and gentlemen, we're currently experiencing some turbulence. We ask that you return to your seats and ensure your seatbelts are securely fastened. The seatbelt sign will remain on until we're clear of the area. Thank you for your cooperation.": "crew_turbulence",
   "Ladies and gentlemen, we've now returned to smooth air and the seat belt sign has been switched off. You are free to move around the cabin if needed, though we recommend keeping your seat belt fastened whenever you're seated. Thank you.": "crew_post_turbulence",
   
   "Belt loader connected.": "service_belt_loader_connected",
