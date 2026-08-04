@@ -2400,7 +2400,7 @@ class SpeechManager {
     if (lower.includes("vietnam")) return "music/vietnam-airlines.mp3";
     if (lower.includes("virgin atlantic")) return "music/virgin-atlantic.mp3";
     if (lower.includes("westjet")) return "music/westjet.mp3";
-    return "music/american-airlines.mp3";
+    return "music/fallback.mp3";
   }
 
   _getBoardingMusicUri(livery) {
