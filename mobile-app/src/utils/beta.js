@@ -12,5 +12,5 @@ export const BETA_EXPIRY_DATE = "2026-08-07T23:59:59Z";
 // export const MASTER_KEY = "X9Q-MASTER-12";
 
 // Supabase Configuration
-export const SUPABASE_URL = "https://zjqmkuarzxeutpaqxmxa.supabase.co";
-export const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpqcW1rdWFyenhldXRwYXF4bXhhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ0NzM1ODgsImV4cCI6MjEwMDA0OTU4OH0.HcBR2JaL8g4Fla6fGqHfPpuqyBPGxRyWmmVoixwMa_E";
+export const SUPABASE_URL = "https://xmadffegtlhkhavgragx.supabase.co";
+export const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhtYWRmZmVndGxoa2hhdmdyYWd4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU4MTA5MjUsImV4cCI6MjEwMTM4NjkyNX0.5Rg-A5cAMTm419pfs1gJlyaW2qZr6D3X_p9-BSYYpHY";
