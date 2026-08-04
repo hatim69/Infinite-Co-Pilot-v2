@@ -398,7 +398,7 @@ export const aircraftPerformanceData = [
   {
     "aircraft": "Embraer E175",
     "engine": "GE CF34-8E",
-    "flaps": ["0", "1", "2", "3", "4", "5"],
+    "flaps": ["0", "1", "2", "3", "4", "5", "FULL"],
     "takeoffLogic": { "threshold": 36.0, "low": "1", "high": "2", "short": "3" },
     "landingFlaps": "5",
     "vrScale": 1.35, "vrBase": 82, "v1Offset": 4, "v2Offset": 4,
@@ -409,7 +409,7 @@ export const aircraftPerformanceData = [
   {
     "aircraft": "Embraer E190",
     "engine": "GE CF34-10E",
-    "flaps": ["0", "1", "2", "3", "4", "5"],
+    "flaps": ["0", "1", "2", "3", "4", "5", "FULL"],
     "takeoffLogic": { "threshold": 44.0, "low": "1", "high": "2", "short": "3" },
     "landingFlaps": "5",
     "vrScale": 1.12, "vrBase": 86, "v1Offset": 4, "v2Offset": 4,

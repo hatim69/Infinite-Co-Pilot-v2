@@ -71,6 +71,7 @@ const isPhaseActive = (telemetry, phaseTracker, phases) =>
 
 const PHASE_SYNCING = "syncing";
 const PHASE_SYNC_MIN_MS = 2500;
+const VERIFY_TIMEOUT_MS = 5000;
 const CLIMB_CALLOUT_MIN_VS_FPM = 150;
 const DESCENT_CALLOUT_MAX_VS_FPM = -150;
 const POSITIVE_RATE_MIN_AGL_FT = 50;
@@ -100,6 +101,17 @@ const isActiveStateValue = (value) =>
   value === true ||
   value === 1 ||
   (typeof value === "number" && value > 0);
+
+const normalizeConnectionIp = (ip) => {
+  const value = String(ip || "").trim();
+  if (value === "localhost") return "127.0.0.1";
+  if (value.startsWith("::ffff:")) return value.slice(7);
+  return value;
+};
+
+const isSameConnectionIp = (left, right) =>
+  normalizeConnectionIp(left) !== "" &&
+  normalizeConnectionIp(left) === normalizeConnectionIp(right);
 
 const isClimbingForCallout = (telemetry) =>
   telemetry.onGround === false &&
@@ -294,6 +306,7 @@ class FlightSession {
     this.discoveredDevices = [];
     this.autoConnectTimer = null;
     this.verifyTimer = null;
+    this.verifyMode = "initial";
     this.androidRuntimeSessionRetained = false;
     this.androidRuntimeStartPromise = null;
     this.disconnectPromise = null;
@@ -345,6 +358,7 @@ class FlightSession {
 
   setAutoActionsEnabled(isAutoActionsEnabled) {
     this.isAutoActionsEnabled = isAutoActionsEnabled;
+    console.log(`[AutoActions] isAutoActionsEnabled set to: ${isAutoActionsEnabled}`);
   }
 
   _notify() {
@@ -388,7 +402,7 @@ class FlightSession {
     if (connectionStatus === prev) return;
 
     this.state = { ...this.state, connectionStatus };
-    this._scheduleVerificationTimeout(connectionStatus);
+    this._scheduleVerificationTimeout(connectionStatus, prev);
     this._syncBackgroundSessionState();
     this._notify();
   }
@@ -452,7 +466,7 @@ class FlightSession {
     if (ptuChanged) this._handlePtuBurst(next);
   }
 
-  _scheduleVerificationTimeout(connectionStatus) {
+  _scheduleVerificationTimeout(connectionStatus, previousStatus) {
     if (this.verifyTimer) {
       clearTimeout(this.verifyTimer);
       this.verifyTimer = null;
@@ -461,10 +475,26 @@ class FlightSession {
     if (connectionStatus !== "VERIFYING STATE...") return;
 
     this.verifyTimer = setTimeout(() => {
-      if (this.isConnected) {
-        this.disconnect(true, "verify_timeout");
+      this.verifyTimer = null;
+      if (!this.isConnected || this.state.connectionStatus !== "VERIFYING STATE...") return;
+
+      if (this.verifyMode === "reconnect" || previousStatus === "RECONNECTING...") {
+        runtimeTrace("flightSession.verify_timeout_recover", {
+          source: "verification-timeout",
+          owner: "FlightSession",
+          verifyMode: this.verifyMode,
+          previousStatus,
+          connectedIp: this.state.connectedIp,
+          ifConnect: ifConnect.getDiagnostics?.(),
+        }, { throttleMs: 0 });
+        if (ifConnect.recoverPollSocket?.("verify_timeout_reconnect")) {
+          this._setConnectionStatus("RECONNECTING...");
+          return;
+        }
       }
-    }, 5000);
+
+      this.disconnect(true, "verify_timeout");
+    }, VERIFY_TIMEOUT_MS);
   }
 
   _resetPhaseState(connectedAt = 0) {
@@ -654,6 +684,7 @@ class FlightSession {
           const stateStr = stateVal !== undefined ? String(stateVal) : undefined;
           const isReady = stateStr === "1" || stateStr === "Playing";
           const isMenu = stateStr === "0" || stateStr === "Menu";
+          const isConnectedDevice = isSameConnectionIp(this.state.connectedIp, ip);
 
           // Auto-connect after 1.5s only if there's exactly 1 device discovered
           if (!this.isConnected && this.connect && isReady) {
@@ -676,12 +707,14 @@ class FlightSession {
                 this.autoConnectTimer = null;
               }, 1500);
             }
-          } else if (this.isConnected && isMenu) {
+          } else if (this.isConnected && isMenu && isConnectedDevice) {
             // Simulator explicitly broadcasted that it's in the menu! Instant disconnect.
             runtimeTrace("flightSession.main_menu_detected", {
               source: "udp-discovery",
               owner: "FlightSession",
               state: stateStr,
+              senderIp: ip,
+              connectedIp: this.state.connectedIp,
             }, { throttleMs: 0 });
             if (this.disconnect) {
               runtimeTrace("flightSession.main_menu_immediate_disconnect", {
@@ -822,6 +855,7 @@ class FlightSession {
             }, 0);
             return prev;
           } else if (data === "Playing" || data === 1) {
+            this.verifyMode = "verified";
             this._setConnectionStatus(prevStatus => prevStatus !== "FLIGHT LINK ACTIVE" ? "FLIGHT LINK ACTIVE" : prevStatus);
           }
         }
@@ -829,6 +863,7 @@ class FlightSession {
         if (command === "aircraft/0/name") {
           updateNext("name", data);
           if (data && typeof data === "string" && data.trim() !== "") {
+            this.verifyMode = "verified";
             this._setConnectionStatus(prevStatus => prevStatus !== "FLIGHT LINK ACTIVE" ? "FLIGHT LINK ACTIVE" : prevStatus);
           }
         }
@@ -964,15 +999,21 @@ class FlightSession {
 
             checkAltitudeCallout(5000, 'alt5k', "Passing five thousand.", "Passing five thousand.", {}, () => {
               if (this.isAutoActionsEnabled && state.spoilers === 2) {
+                /*
+                // Temporarily disabled until official solution is available
+                console.log(`[AutoActions] Passing 5k climb. Spoilers ARMED (${state.spoilers}). Sending spoilers/state=0 (retract).`);
                 ifConnect.set("aircraft/0/systems/spoilers/state", 0);
+                */
               }
             });
             checkAltitudeCallout(10000, 'alt10k', "Ten thousand. Landing lights off.", "Ten thousand. Landing lights on.", { climb: { tone: "caution", priority: true }, descent: { tone: "notice", priority: true } }, () => {
               if (this.isAutoActionsEnabled && state.landing !== 0) {
+                console.log(`[AutoActions] Passing 10k climb. Lights ON (${state.landing}). Sending landing_lights_switch=false.`);
                 ifConnect.set("aircraft/0/systems/landing_lights_switch", false);
               }
             }, () => {
               if (this.isAutoActionsEnabled && state.landing !== 1) {
+                console.log(`[AutoActions] Passing 10k descent. Lights OFF (${state.landing}). Sending landing_lights_switch=true.`);
                 ifConnect.set("aircraft/0/systems/landing_lights_switch", true);
               }
             });
@@ -999,10 +1040,16 @@ class FlightSession {
               speak("Positive rate. Gear up.", { tone: "callout", ignoreConnectGate: true });
               flags.positiveRate = true;
               if (this.isAutoActionsEnabled) {
-                const isUp = state.gear === 2 || state.gear === 5 || state.gear === 0;
+                /*
+                // Temporarily disabled until official solution is available
+                const isUp = state.gear === 2 || state.gear === 5;
+                console.log(`[AutoActions] Positive rate. Gear isUp=${isUp} (state.gear=${state.gear}). Sending gear_button/on=true`);
                 if (!isUp) {
-                  ifConnect.set("aircraft/0/systems/landing_gear/lever_state", false);
+                  ifConnect.set("simulator/ui_helpers/gear_button/on", true);
                 }
+                */
+              } else {
+                console.log(`[AutoActions] Positive rate. Automation disabled.`);
               }
             }
           }
@@ -1037,6 +1084,7 @@ class FlightSession {
             // Turn on seatbelt sign if it isn't already
             if (state.seatbelt !== 1) {
               if (this.isAutoActionsEnabled) {
+                console.log(`[AutoActions] Turbulence encountered. Seatbelts OFF (${state.seatbelt}). Sending signs/seatbelt=true.`);
                 ifConnect.set("aircraft/0/systems/signs/seatbelt", true);
               }
             }
@@ -1056,6 +1104,7 @@ class FlightSession {
                 if (state.seatbelt !== 0) {
                   flags.suppressNextAutoSeatbeltOff = true;
                   if (this.isAutoActionsEnabled) {
+                    console.log(`[AutoActions] Turbulence cleared. Seatbelts ON (${state.seatbelt}). Sending signs/seatbelt=false.`);
                     ifConnect.set("aircraft/0/systems/signs/seatbelt", false);
                   }
                 }
@@ -1175,11 +1224,24 @@ class FlightSession {
             next.engines = { ...next.engines, [engNum]: nextState };
             updated = true;
 
+            // Auto APU Shutoff: Trigger when at least 2 engines are running. 
+            // (Most airliners have >=2 engines. If 3 or 4, cross-bleed start is used).
             if (this.isAutoActionsEnabled && nextState === 2) {
-              const allRunning = Object.keys(next.engines).length > 0 && Object.values(next.engines).every(s => s === 2);
-              if (allRunning && next.apu !== 0 && next.apu !== -1) {
-                ifConnect.set("aircraft/0/systems/apu/apu/state", 0);
+              /*
+              // Temporarily disabled until official solution is available
+              const runningCount = Object.values(next.engines).filter(s => s === 2).length;
+              console.log(`[AutoActions] Engine ${engNum} running. Total running: ${runningCount}. APU=${next.apu}`);
+              if (runningCount >= 2) {
+                if (next.apu !== 0 && next.apu !== -1 && next.apu !== 3) {
+                  console.log(`[AutoActions] Turning APU off (via button press).`);
+                  ifConnect.set("simulator/ui_helpers/systems/electrical/apu_button/on", true);
+                } else {
+                  console.log(`[AutoActions] APU already off, shutting down, or not set (${next.apu}).`);
+                }
               }
+              */
+            } else if (!this.isAutoActionsEnabled && nextState === 2) {
+              console.log(`[AutoActions] Engine ${engNum} running, but automation disabled.`);
             }
           }
         }
@@ -1188,7 +1250,8 @@ class FlightSession {
           updateNext("allEnginesOff", data === 1 || data === true ? 1 : 0);
         }
         if (command === "aircraft/0/systems/engines/are_all_engines_on") {
-          updateNext("allEnginesOn", data === 1 || data === true ? 1 : 0);
+          const isOn = data === 1 || data === true ? 1 : 0;
+          updateNext("allEnginesOn", isOn);
         }
 
         const n1Match = command.match(/^aircraft\/0\/systems\/engines\/(\d+)\/n1$/);
@@ -1518,6 +1581,7 @@ class FlightSession {
     };
 
     this.reconnectHandler = () => {
+      this.verifyMode = "reconnect";
       this._setConnectionStatus("VERIFYING STATE...");
       const now = Date.now();
       this.flags.connectedAt = now;
@@ -1526,6 +1590,7 @@ class FlightSession {
     };
 
     this.reconnectingHandler = () => {
+      this.verifyMode = "reconnect";
       this._setConnectionStatus("RECONNECTING...");
     };
 
@@ -1537,18 +1602,21 @@ class FlightSession {
 
   connect(ip, isManual = false) {
     if (this.isConnected) return;
+    const targetIp = normalizeConnectionIp(ip);
+    if (!targetIp) return;
     this.isConnected = true;
     runtimeTrace("flightSession.connect", {
       source: isManual ? "manualConnect" : "autoConnect",
       owner: "FlightSession",
-      connectedIp: ip,
+      connectedIp: targetIp,
       startCount: this.startCount,
       speech: announcementCoordinator.getDiagnostics?.(),
       ifConnect: ifConnect.getDiagnostics?.(),
     }, { throttleMs: 0 });
-    this._startAndroidRuntime(ip).catch(() => {});
+    this.verifyMode = "initial";
+    this._startAndroidRuntime(targetIp).catch(() => {});
     this._setConnectionStatus("CONNECTING...");
-    this._setConnectedIp(ip);
+    this._setConnectedIp(targetIp);
 
     // Reset displayed telemetry and phase memory. A short sync gate below
     // prevents stale phases from leaking into a fresh flight.
@@ -1562,6 +1630,7 @@ class FlightSession {
       ifConnect.init(
         () => {
           // Success - register all poll commands, but stay in VERIFYING until app_state or aircraft name is received
+          this.verifyMode = "initial";
           this._setConnectionStatus("VERIFYING STATE...");
           flags.connectedAt = Date.now();
           this.phaseSync.connectedAt = flags.connectedAt;
@@ -1578,7 +1647,7 @@ class FlightSession {
             ifConnect.pollRegister(cmd);
           });
         },
-        { host: ip, port: 10112 }
+        { host: targetIp, port: 10112 }
       );
     });
   }
@@ -1751,6 +1820,7 @@ class FlightSession {
     this._setConnectedIp("");
     this.phaseTracker = createPhaseTracker();
     this.phaseSync = createPhaseSyncState();
+    this.verifyMode = "initial";
     this._setTelemetry({ ...INITIAL_TELEMETRY });
     this.isConnected = false;
     ifConnect.close(() => {});

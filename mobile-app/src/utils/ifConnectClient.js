@@ -66,10 +66,12 @@ class IFConnectClient {
     this._reconnectTimer = null;
     this._watchdogTimer = null;
     this._mTimeout = null;
+    this._manifestPollTimer = null;
     this._lastDataTime = 0;
     this._reconnectAttempt = 0;
     this._pollRequestSeq = 0;
     this._pollResponseSeq = 0;
+    this._connectionGeneration = 0;
   }
 
   // ─── Event Emitter ───────────────────────────────────────────────────────────
@@ -109,6 +111,7 @@ class IFConnectClient {
       pollResponseSeq: this._pollResponseSeq,
       lastDataAgeMs: this._lastDataTime ? Date.now() - this._lastDataTime : null,
       reconnectAttempt: this._reconnectAttempt,
+      connectionGeneration: this._connectionGeneration,
     };
   }
 
@@ -120,6 +123,8 @@ class IFConnectClient {
    * @param {{ host: string, port?: number }} params
    */
   init(successCallback, params = {}) {
+    this._connectionGeneration += 1;
+    const generation = this._connectionGeneration;
     this._successCallback = successCallback;
     let h = params.host ? params.host.trim() : '127.0.0.1';
     if (h === 'localhost') h = '127.0.0.1';
@@ -131,8 +136,9 @@ class IFConnectClient {
       host: this._host,
       port: this._port,
       pollQueueSize: this._pollQ.length,
+      connectionGeneration: generation,
     }, { throttleMs: 0 });
-    this._fetchManifest();
+    this._fetchManifest(generation);
   }
 
   /**
@@ -231,11 +237,14 @@ class IFConnectClient {
       source: "FlightSession/ifConnect",
       ...this.getDiagnostics(),
     }, { throttleMs: 0 });
+    this._connectionGeneration += 1;
     this._isConnected = false;
     clearTimeout(this._reconnectTimer);
     this._reconnectTimer = null;
     clearInterval(this._watchdogTimer);
     clearTimeout(this._mTimeout);
+    clearTimeout(this._manifestPollTimer);
+    this._manifestPollTimer = null;
 
     const oldSocket = this._pollSocket;
     if (oldSocket) {
@@ -258,40 +267,64 @@ class IFConnectClient {
 
   // ─── Internal: Manifest Phase ─────────────────────────────────────────────
 
-  _fetchManifest() {
+  _isCurrentGeneration(generation) {
+    return generation === this._connectionGeneration;
+  }
+
+  recoverPollSocket(reason = 'manual-recovery') {
+    if (!this._isConnected || !this._pollSocket) return false;
+    this._reconnectPollSocket(reason, this._connectionGeneration);
+    return true;
+  }
+
+  _fetchManifest(generation) {
     this._mSocket = null;
     let mBuffer = null;
     let mStringLength = 0;
     let done = false;
-    this._mTimeout = null;
+    let manifestSocket = null;
+    let manifestTimeout = null;
 
     const cleanup = () => {
-      clearTimeout(this._mTimeout);
-      if (this._mSocket) {
+      clearTimeout(manifestTimeout);
+      if (this._mTimeout === manifestTimeout) {
+        this._mTimeout = null;
+      }
+      if (manifestSocket) {
         try {
-          this._mSocket.destroy();
+          manifestSocket.destroy();
         } catch (e) {}
+      }
+      if (this._mSocket === manifestSocket) {
         this._mSocket = null;
       }
     };
 
     try {
-      this._mSocket = TcpSocket.createConnection(
+      manifestSocket = TcpSocket.createConnection(
         { port: this._port, host: this._host },
         () => {
+          if (!this._isCurrentGeneration(generation) || this._mSocket !== manifestSocket || done) {
+            try {
+              manifestSocket.destroy();
+            } catch (e) {}
+            return;
+          }
           console.log('[IFConnect] Manifest socket connected, requesting manifest...');
           runtimeTrace("ifconnect.manifest_connected", {
             source: "react-native-tcp-socket",
             host: this._host,
             port: this._port,
+            connectionGeneration: generation,
           }, { throttleMs: 0 });
           // Send manifest request: command -1, GET flag 0
           const buf = Buffer.alloc(5);
           buf.writeInt32LE(-1, 0);
           buf.writeInt8(0, 4);
-          if (this._mSocket) this._mSocket.write(buf);
+          manifestSocket.write(buf);
         }
       );
+      this._mSocket = manifestSocket;
     } catch (e) {
       console.log('[IFConnect] TCP Manifest socket creation error (unsupported environment):', e);
       if (!done) {
@@ -302,8 +335,8 @@ class IFConnectClient {
       return;
     }
 
-    this._mSocket.on('data', (rawData) => {
-      if (done) return;
+    manifestSocket.on('data', (rawData) => {
+      if (done || !this._isCurrentGeneration(generation) || this._mSocket !== manifestSocket) return;
       const chunk = Buffer.isBuffer(rawData) ? rawData : Buffer.from(rawData);
       mBuffer = mBuffer ? Buffer.concat([mBuffer, chunk]) : chunk;
 
@@ -321,40 +354,46 @@ class IFConnectClient {
           source: "tcp.data",
           manifestBytes: mStringLength,
           commandsAvailable: Object.keys(this._manifestByName).length,
+          connectionGeneration: generation,
         }, { throttleMs: 0 });
         cleanup();
         // Proceed to open the poll socket after a brief delay
         // This ensures the simulator's TCP server has time to properly close the manifest session
-        setTimeout(() => {
-          if (this._isConnected || !done) return;
-          this._openPollSocket();
+        const pollTimer = setTimeout(() => {
+          if (this._manifestPollTimer === pollTimer) {
+            this._manifestPollTimer = null;
+          }
+          if (!this._isCurrentGeneration(generation) || this._isConnected || !done) return;
+          this._openPollSocket(generation);
         }, 500);
+        this._manifestPollTimer = pollTimer;
       }
     });
 
-    this._mSocket.on('error', (err) => {
-      if (done) return;
+    manifestSocket.on('error', (err) => {
+      if (done || !this._isCurrentGeneration(generation) || this._mSocket !== manifestSocket) return;
       console.log('[IFConnect] Manifest error:', err.message);
       done = true;
       cleanup();
       this._emit('error', { message: err.message });
     });
 
-    this._mSocket.on('close', () => {
-      if (!done) {
+    manifestSocket.on('close', () => {
+      if (!done && this._isCurrentGeneration(generation) && this._mSocket === manifestSocket) {
         console.log('[IFConnect] Manifest socket closed prematurely');
       }
     });
 
     // Abort if manifest takes too long
-    this._mTimeout = setTimeout(() => {
-      if (!done) {
+    manifestTimeout = setTimeout(() => {
+      if (!done && this._isCurrentGeneration(generation) && this._mSocket === manifestSocket) {
         done = true;
         console.log('[IFConnect] Manifest fetch timed out');
         cleanup();
         this._emit('error', { message: 'Manifest fetch timed out. Is Infinite Flight running?' });
       }
     }, MANIFEST_TIMEOUT_MS);
+    this._mTimeout = manifestTimeout;
   }
 
   _parseManifest(str) {
@@ -379,14 +418,35 @@ class IFConnectClient {
 
   // ─── Internal: Poll Phase ─────────────────────────────────────────────────
 
-  _openPollSocket() {
+  _openPollSocket(generation = this._connectionGeneration) {
+    if (!this._isCurrentGeneration(generation)) return;
     console.log('[IFConnect] Opening poll socket...');
 
     let socket;
+    let pollConnected = false;
+    let preConnectFailureEmitted = false;
+    const emitPreConnectFailure = (message) => {
+      if (preConnectFailureEmitted || pollConnected || !this._isCurrentGeneration(generation)) return;
+      preConnectFailureEmitted = true;
+      if (this._pollSocket === socket) {
+        this._pollSocket = null;
+      }
+      this._receiveBuffer = null;
+      this._isPollWaiting = false;
+      this._emit('error', { message });
+    };
+
     try {
       socket = TcpSocket.createConnection(
         { port: this._port, host: this._host },
         () => {
+          if (!this._isCurrentGeneration(generation) || this._pollSocket !== socket) {
+            try {
+              socket.destroy();
+            } catch (e) {}
+            return;
+          }
+          pollConnected = true;
           console.log('[IFConnect] Poll socket connected. Starting telemetry stream.');
           this._isConnected = true;
           this._receiveBuffer = null;
@@ -397,6 +457,7 @@ class IFConnectClient {
             host: this._host,
             port: this._port,
             pollQueueSize: this._pollQ.length,
+            connectionGeneration: generation,
           }, { throttleMs: 0 });
 
           // Fire success callback
@@ -410,10 +471,10 @@ class IFConnectClient {
           }
 
           // Start polling
-          this._sendNextPoll();
+          this._sendNextPoll(generation);
 
           // Start watchdog to detect silent drops
-          this._startWatchdog();
+          this._startWatchdog(generation);
         }
       );
       this._pollSocket = socket;
@@ -424,31 +485,39 @@ class IFConnectClient {
     }
 
     socket.on('data', (rawData) => {
+      if (!this._isCurrentGeneration(generation) || this._pollSocket !== socket) return;
       this._lastDataTime = Date.now();
       this._reconnectAttempt = 0;
       const chunk = Buffer.isBuffer(rawData) ? rawData : Buffer.from(rawData);
       this._receiveBuffer = this._receiveBuffer
         ? Buffer.concat([this._receiveBuffer, chunk])
         : chunk;
-      this._processReceivedData();
+      this._processReceivedData(generation);
     });
 
     socket.on('error', (err) => {
+      if (!this._isCurrentGeneration(generation) || this._pollSocket !== socket) return;
       console.log('[IFConnect] Poll socket error:', err.message);
-      if (this._pollSocket === socket && this._isConnected) {
-        this._scheduleReconnect();
+      if (this._isConnected) {
+        this._scheduleReconnect('poll-socket-error', generation);
+      } else {
+        emitPreConnectFailure(err.message || 'Poll socket failed before connection');
       }
     });
 
     socket.on('close', () => {
+      if (!this._isCurrentGeneration(generation) || this._pollSocket !== socket) return;
       console.log('[IFConnect] Poll socket closed');
-      if (this._pollSocket === socket && this._isConnected) {
-        this._scheduleReconnect();
+      if (this._isConnected) {
+        this._scheduleReconnect('poll-socket-closed', generation);
+      } else {
+        emitPreConnectFailure('Poll socket closed before connection');
       }
     });
   }
 
-  _processReceivedData() {
+  _processReceivedData(generation = this._connectionGeneration) {
+    if (!this._isCurrentGeneration(generation)) return;
     // Process all complete messages in the receive buffer
     while (this._receiveBuffer && this._receiveBuffer.length >= 8) {
       const dataLen = this._receiveBuffer.readInt32LE(4);
@@ -485,7 +554,7 @@ class IFConnectClient {
       // Mark as ready and schedule next poll on next tick
       this._isPollWaiting = false;
       // Use setImmediate-style via setTimeout(0) for non-blocking
-      setTimeout(() => this._sendNextPoll(), 0);
+      setTimeout(() => this._sendNextPoll(generation), 0);
       break; // Process one message per tick to avoid blocking
     }
   }
@@ -517,8 +586,9 @@ class IFConnectClient {
     }
   }
 
-  _sendNextPoll() {
+  _sendNextPoll(generation = this._connectionGeneration) {
     if (
+      !this._isCurrentGeneration(generation) ||
       !this._isConnected ||
       !this._pollSocket ||
       this._isPollWaiting ||
@@ -559,16 +629,16 @@ class IFConnectClient {
     } catch (e) {
       console.log('[IFConnect] Write error:', e);
       this._isPollWaiting = false;
-      this._scheduleReconnect();
+      this._scheduleReconnect('poll-write-error', generation);
     }
   }
 
   // ─── Internal: Resilience ─────────────────────────────────────────────────
 
-  _startWatchdog() {
+  _startWatchdog(generation = this._connectionGeneration) {
     clearInterval(this._watchdogTimer);
     this._watchdogTimer = setInterval(() => {
-      if (!this._isConnected) return;
+      if (!this._isCurrentGeneration(generation) || !this._isConnected) return;
       const staleTime = Date.now() - this._lastDataTime;
       runtimeTrace("ifconnect.watchdog_tick", {
         source: "setInterval",
@@ -578,16 +648,16 @@ class IFConnectClient {
 
       if (staleTime > WATCHDOG_STALE_FORCE_RECONNECT_MS) {
         console.log('[IFConnect] Watchdog: data stale for 15s — forcing poll socket recovery...');
-        this._reconnectPollSocket('watchdog-stale-timeout');
+        this._reconnectPollSocket('watchdog-stale-timeout', generation);
       } else if (staleTime > WATCHDOG_STALE_RECONNECT_MS) {
         console.log('[IFConnect] Watchdog: data stale — scheduling reconnect...');
-        this._scheduleReconnect('watchdog-stale');
+        this._scheduleReconnect('watchdog-stale', generation);
       }
     }, WATCHDOG_INTERVAL_MS);
   }
 
-  _reconnectPollSocket(reason = 'unknown') {
-    if (!this._isConnected) return;
+  _reconnectPollSocket(reason = 'unknown', generation = this._connectionGeneration) {
+    if (!this._isCurrentGeneration(generation) || !this._isConnected) return;
     clearTimeout(this._reconnectTimer);
     this._reconnectTimer = null;
     this._reconnectAttempt += 1;
@@ -611,16 +681,17 @@ class IFConnectClient {
     }
 
     // Keep the manifest; just reopen the poll socket
-    this._openPollSocket();
+    this._openPollSocket(generation);
   }
 
-  _scheduleReconnect(reason = 'unknown') {
+  _scheduleReconnect(reason = 'unknown', generation = this._connectionGeneration) {
+    if (!this._isCurrentGeneration(generation)) return;
     if (this._reconnectTimer) return; // Only one pending reconnect at a time
 
     this._reconnectTimer = setTimeout(() => {
       this._reconnectTimer = null;
-      if (!this._isConnected) return;
-      this._reconnectPollSocket(reason);
+      if (!this._isCurrentGeneration(generation) || !this._isConnected) return;
+      this._reconnectPollSocket(reason, generation);
     }, RECONNECT_DELAY_MS);
   }
 
