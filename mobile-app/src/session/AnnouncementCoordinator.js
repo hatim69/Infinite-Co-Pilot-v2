@@ -614,14 +614,14 @@ class AnnouncementCoordinator {
     return result;
   }
 
-  async playPTUBurst() {
+  async playPTUBurst(durationMs) {
     this._logDecision([
       "Request: PTU Burst",
       "Decision: Accepted",
     ], "ptu-accepted");
     this._trace("announcementCoordinator.ptu_requested");
     try {
-      const result = await this.engine.playPTUBurst();
+      const result = await this.engine.playPTUBurst(durationMs);
       this._logDecision([
         "PTU Burst",
         "Completed",

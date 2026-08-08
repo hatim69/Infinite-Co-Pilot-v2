@@ -1007,12 +1007,12 @@ class FlightSession {
               }
             });
             checkAltitudeCallout(10000, 'alt10k', "Ten thousand. Landing lights off.", "Ten thousand. Landing lights on.", { climb: { tone: "caution", priority: true }, descent: { tone: "notice", priority: true } }, () => {
-              if (this.isAutoActionsEnabled && state.landing !== 0) {
+              if (this.isAutoActionsEnabled && state.landing !== false) {
                 console.log(`[AutoActions] Passing 10k climb. Lights ON (${state.landing}). Sending landing_lights_switch=false.`);
                 ifConnect.set("aircraft/0/systems/landing_lights_switch", false);
               }
             }, () => {
-              if (this.isAutoActionsEnabled && state.landing !== 1) {
+              if (this.isAutoActionsEnabled && state.landing !== true) {
                 console.log(`[AutoActions] Passing 10k descent. Lights OFF (${state.landing}). Sending landing_lights_switch=true.`);
                 ifConnect.set("aircraft/0/systems/landing_lights_switch", true);
               }
@@ -1082,7 +1082,7 @@ class FlightSession {
             flags.turbulenceAnnounced = true;
 
             // Turn on seatbelt sign if it isn't already
-            if (state.seatbelt !== 1) {
+            if (state.seatbelt !== true) {
               if (this.isAutoActionsEnabled) {
                 console.log(`[AutoActions] Turbulence encountered. Seatbelts OFF (${state.seatbelt}). Sending signs/seatbelt=true.`);
                 ifConnect.set("aircraft/0/systems/signs/seatbelt", true);
@@ -1101,7 +1101,7 @@ class FlightSession {
             // Turbulence has cleared — reset flags so the next bout can be announced
             if (flags.turbulenceAnnounced) {
               if (canAnnounceTurbulence) {
-                if (state.seatbelt !== 0) {
+                if (state.seatbelt !== false) {
                   flags.suppressNextAutoSeatbeltOff = true;
                   if (this.isAutoActionsEnabled) {
                     console.log(`[AutoActions] Turbulence cleared. Seatbelts ON (${state.seatbelt}). Sending signs/seatbelt=false.`);
@@ -1736,18 +1736,10 @@ class FlightSession {
       return;
     }
 
-    const cargoDoorsOpen = telemetry.cargoDoorsOpen === 1;
-    const brakesSet = telemetry.brakes === 1;
-
-    if (cargoDoorsOpen || brakesSet) {
-      this.ptuPreviousEngines = telemetry.engines || {};
-      this.ptuPreviousGroundSpeed = telemetry.gs || 0;
-      return;
-    }
-
     const prevEng = this.ptuPreviousEngines || {};
     const currEng = telemetry.engines || {};
     const currGs = telemetry.gs || 0;
+    const onGround = telemetry.onGround !== false; // Default to true if undefined
 
     const eng1Prev = prevEng[1] || 0;
     const eng1Curr = currEng[1] || 0;
@@ -1755,25 +1747,38 @@ class FlightSession {
     const eng2Curr = currEng[2] || 0;
 
     let shouldPlay = false;
+    let duration = 8500;
 
+    // 1. Second engine start
+    // An engine is already running (2), and the other engine goes from off (0) to starting (1)
     if (
       (eng1Curr === 2 && eng2Prev === 0 && eng2Curr === 1) ||
       (eng2Curr === 2 && eng1Prev === 0 && eng1Curr === 1)
     ) {
       shouldPlay = true;
+      duration = 10000;
     }
-
-    if (currGs < 30) {
-      if (
-        (eng1Prev === 2 && eng1Curr === 0 && eng2Curr === 2) ||
-        (eng2Prev === 2 && eng2Curr === 0 && eng1Curr === 2)
-      ) {
+    // 2. Engine shutdown
+    // An engine goes from running (2) to off (0) while the other is running (2)
+    else if (
+      onGround && 
+      ((eng1Prev === 2 && eng1Curr === 0 && eng2Curr === 2) ||
+      (eng2Prev === 2 && eng2Curr === 0 && eng1Curr === 2))
+    ) {
+      shouldPlay = true;
+      duration = 15000;
+    }
+    // 3. Single-engine taxi
+    // Moving on the ground with only one engine running
+    else if (onGround && currGs > 2 && currGs < 35) {
+      if ((eng1Curr === 2 && eng2Curr === 0) || (eng2Curr === 2 && eng1Curr === 0)) {
         shouldPlay = true;
+        duration = 55000; // Let the full audio play, will loop naturally via the engine 
       }
     }
 
     if (shouldPlay) {
-      announcementCoordinator.playPTUBurst();
+      announcementCoordinator.playPTUBurst(duration);
     }
 
     this.ptuPreviousEngines = currEng;

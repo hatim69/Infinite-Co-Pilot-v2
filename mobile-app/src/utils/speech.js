@@ -2132,7 +2132,7 @@ class SpeechManager {
     await this._playChimeNow();
   }
 
-  async playPTUBurst() {
+  async playPTUBurst(durationMs = 8500) {
     if (this.ptuPlaying) return;
     this.ptuPlaying = true;
     try {
@@ -2146,9 +2146,8 @@ class SpeechManager {
       player.volume = this.masterVolume;
       player.play();
       
-      // The audio file is ~8 seconds long. Let it play entirely.
-      // We wait 8500ms to ensure it finishes before disposing.
-      await new Promise((resolve) => setTimeout(resolve, 8500));
+      const waitTime = Math.min(durationMs, 55000);
+      await new Promise((resolve) => setTimeout(resolve, waitTime));
       this._disposePlayer(player, { pause: true });
     } catch (err) {
       console.warn("Failed to play PTU burst", err);

@@ -242,7 +242,7 @@ function AppInner() {
     getVoicePreference,
     toggleVoice: toggleSessionVoice,
     setVoicePreference: setSessionVoicePreference,
-  } = useTelemetry(disableAutoConnect || !isBetaVerified, isAutoActionsEnabled);
+  } = useTelemetry(disableAutoConnect || !isBetaVerified || isBetaExpired || betaNetworkError, isAutoActionsEnabled);
 
   useEffect(() => {
     let isMounted = true;
