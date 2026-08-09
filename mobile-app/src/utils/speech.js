@@ -2188,7 +2188,7 @@ class SpeechManager {
       if (lower.includes("garuda indonesia")) return "announcements/garuda-indonesia.mp3";
       if (lower.includes("indigo")) return "announcements/indigo.mp3";
       if (lower.includes("japan airlines") || lower.includes("jal")) return "announcements/japan-airlines.mp3";
-      if (lower.includes("lot")) return "announcements/lot.mp3";
+      if (lower.includes("lot") && !lower.includes("aeroflot")) return "announcements/lot.mp3";
       if (lower.includes("lufthansa")) return "announcements/lufthansa.mp3";
       if (lower.includes("malaysia")) return "announcements/malaysia-airlines.mp3";
       if (lower.includes("qatar")) return "announcements/qatar.mp3";
