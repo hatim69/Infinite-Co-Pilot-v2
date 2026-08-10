@@ -25,6 +25,14 @@ const MANIFEST_TIMEOUT_MS = 15000;
 const WATCHDOG_INTERVAL_MS = 3000;
 const WATCHDOG_STALE_RECONNECT_MS = 5000;
 const WATCHDOG_STALE_FORCE_RECONNECT_MS = 15000;
+// Previously there was no ceiling here at all: _reconnectPollSocket() would
+// rebuild the poll socket forever without ever telling the rest of the app
+// that Infinite Flight is actually gone (see _declareDisconnected below).
+// 45s gives real transient stalls (Wi-Fi blip, IF briefly paused/loading a
+// scene) generous room to self-heal via the existing rebuild path, while
+// still surfacing a real disconnect in well under a minute if IF has
+// genuinely closed or the network is actually down.
+const WATCHDOG_GIVE_UP_MS = 45000;
 const RECONNECT_DELAY_MS = 2000;
 
 /** IF Connect v2 data type codes */
@@ -68,6 +76,13 @@ class IFConnectClient {
     this._mTimeout = null;
     this._manifestPollTimer = null;
     this._lastDataTime = 0;
+    // Set once when a stale period begins, cleared on genuine recovery. Unlike
+    // _lastDataTime (which _reconnectPollSocket resets on every rebuild
+    // attempt so its own short-term "is this attempt hanging" checks work),
+    // this anchor is untouched by rebuild attempts, so the watchdog can tell
+    // "stale for 45s total across N rebuild attempts" apart from "stale for
+    // 3s since the last attempt" and actually give up on a sustained outage.
+    this._outageStartedAt = null;
     this._reconnectAttempt = 0;
     this._pollRequestSeq = 0;
     this._pollResponseSeq = 0;
@@ -110,6 +125,7 @@ class IFConnectClient {
       pollRequestSeq: this._pollRequestSeq,
       pollResponseSeq: this._pollResponseSeq,
       lastDataAgeMs: this._lastDataTime ? Date.now() - this._lastDataTime : null,
+      outageAgeMs: this._outageStartedAt !== null ? Date.now() - this._outageStartedAt : null,
       reconnectAttempt: this._reconnectAttempt,
       connectionGeneration: this._connectionGeneration,
     };
@@ -424,6 +440,7 @@ class IFConnectClient {
 
     let socket;
     let pollConnected = false;
+    let hasReceivedData = false;
     let preConnectFailureEmitted = false;
     const emitPreConnectFailure = (message) => {
       if (preConnectFailureEmitted || pollConnected || !this._isCurrentGeneration(generation)) return;
@@ -448,6 +465,7 @@ class IFConnectClient {
           }
           pollConnected = true;
           console.log('[IFConnect] Poll socket connected. Starting telemetry stream.');
+          console.log('[CONNECT] Connected to Infinite Flight');
           this._isConnected = true;
           this._receiveBuffer = null;
           this._isPollWaiting = false;
@@ -486,6 +504,13 @@ class IFConnectClient {
 
     socket.on('data', (rawData) => {
       if (!this._isCurrentGeneration(generation) || this._pollSocket !== socket) return;
+      if (this._outageStartedAt !== null) {
+        console.log(`[CONNECT] Reconnected (telemetry resumed after ${Date.now() - this._outageStartedAt}ms)`);
+        this._outageStartedAt = null;
+      } else if (!hasReceivedData) {
+        console.log('[CONNECT] Telemetry received');
+      }
+      hasReceivedData = true;
       this._lastDataTime = Date.now();
       this._reconnectAttempt = 0;
       const chunk = Buffer.isBuffer(rawData) ? rawData : Buffer.from(rawData);
@@ -637,14 +662,47 @@ class IFConnectClient {
 
   _startWatchdog(generation = this._connectionGeneration) {
     clearInterval(this._watchdogTimer);
+    let lastHeartbeatLog = 0;
     this._watchdogTimer = setInterval(() => {
       if (!this._isCurrentGeneration(generation) || !this._isConnected) return;
-      const staleTime = Date.now() - this._lastDataTime;
+      const now = Date.now();
+      const staleTime = now - this._lastDataTime;
       runtimeTrace("ifconnect.watchdog_tick", {
         source: "setInterval",
         staleTimeMs: staleTime,
+        outageMs: this._outageStartedAt !== null ? now - this._outageStartedAt : null,
         ...this.getDiagnostics(),
       }, { throttleMs: 30000 });
+
+      // Proves the JS timer loop itself is still alive, independent of
+      // whether telemetry is currently flowing. Throttled to once a minute —
+      // this fires every 3s otherwise, which is too noisy for production.
+      if (now - lastHeartbeatLog > 60000) {
+        lastHeartbeatLog = now;
+        console.log(`[BACKGROUND] Service heartbeat (telemetry ${staleTime}ms ago)`);
+      }
+
+      // Give-up ceiling: _outageStartedAt is set once when staleness first
+      // crosses WATCHDOG_STALE_RECONNECT_MS below and is untouched by
+      // individual rebuild attempts (unlike _lastDataTime, which
+      // _reconnectPollSocket intentionally resets each attempt). So this
+      // correctly measures the TOTAL outage duration across every rebuild
+      // attempt, not just the most recent one — without it, a sustained
+      // outage (IF actually closed, Wi-Fi actually down) would cause
+      // _reconnectPollSocket to retry every few seconds forever, since each
+      // attempt's own failure looked like "stale for a few seconds" rather
+      // than "stale for 45+ seconds total".
+      if (this._outageStartedAt !== null && now - this._outageStartedAt > WATCHDOG_GIVE_UP_MS) {
+        console.log(`[CONNECT] No telemetry for ${now - this._outageStartedAt}ms despite reconnect attempts — declaring Infinite Flight disconnected.`);
+        this._declareDisconnected('watchdog-give-up', generation);
+        return;
+      }
+
+      if (staleTime > WATCHDOG_STALE_RECONNECT_MS && this._outageStartedAt === null) {
+        this._outageStartedAt = this._lastDataTime;
+        console.log(`[CONNECT] Last telemetry: ${staleTime}ms ago`);
+        console.log('[CONNECT] Connection stale');
+      }
 
       if (staleTime > WATCHDOG_STALE_FORCE_RECONNECT_MS) {
         console.log('[IFConnect] Watchdog: data stale for 15s — forcing poll socket recovery...');
@@ -656,12 +714,58 @@ class IFConnectClient {
     }, WATCHDOG_INTERVAL_MS);
   }
 
+  /**
+   * Terminal disconnect: unlike _reconnectPollSocket (which silently rebuilds
+   * the poll socket and keeps _isConnected true so long transient stalls
+   * don't end an 8+ hour session), this actually tears the client down and
+   * emits 'disconnect' — the signal FlightSession needs to stop treating
+   * frozen telemetry as live, stop automation/callouts, and return to
+   * "AWAITING SIMULATOR LINK..." so UDP auto-discovery can pick a real
+   * reconnect back up when Infinite Flight is actually reachable again.
+   */
+  _declareDisconnected(reason = 'unknown', generation = this._connectionGeneration) {
+    if (!this._isCurrentGeneration(generation)) return;
+    console.log(`[CONNECT] Infinite Flight disconnected (${reason})`);
+    runtimeTrace("ifconnect.declared_disconnected", {
+      source: "watchdog-give-up",
+      reason,
+      ...this.getDiagnostics(),
+    }, { throttleMs: 0 });
+
+    this._connectionGeneration += 1; // invalidate this generation's timers/callbacks
+    this._isConnected = false;
+    clearTimeout(this._reconnectTimer);
+    this._reconnectTimer = null;
+    clearInterval(this._watchdogTimer);
+    clearTimeout(this._mTimeout);
+    clearTimeout(this._manifestPollTimer);
+    this._manifestPollTimer = null;
+
+    const oldSocket = this._pollSocket;
+    if (oldSocket) {
+      this._pollSocket = null;
+      try {
+        oldSocket.destroy();
+      } catch (e) {}
+    }
+    if (this._mSocket) {
+      try {
+        this._mSocket.destroy();
+      } catch (e) {}
+      this._mSocket = null;
+    }
+
+    this._resetState();
+    this._emit('disconnect', { reason });
+  }
+
   _reconnectPollSocket(reason = 'unknown', generation = this._connectionGeneration) {
     if (!this._isCurrentGeneration(generation) || !this._isConnected) return;
     clearTimeout(this._reconnectTimer);
     this._reconnectTimer = null;
     this._reconnectAttempt += 1;
     console.log(`[IFConnect] Rebuilding poll socket (reason: ${reason}, attempt ${this._reconnectAttempt})...`);
+    console.log(`[CONNECT] Reconnection attempt ${this._reconnectAttempt}`);
     runtimeTrace("ifconnect.poll_socket_rebuild", {
       source: "watchdog/socket",
       reason,
@@ -703,6 +807,7 @@ class IFConnectClient {
     this._manifestByName = {};
     this._manifestByCommand = {};
     this._lastDataTime = 0;
+    this._outageStartedAt = null;
     this._successCallback = null;
     this._reconnectAttempt = 0;
     this._pollRequestSeq = 0;

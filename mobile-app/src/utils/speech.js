@@ -343,6 +343,10 @@ class SpeechManager {
       if (duplicateIndex !== -1) queue.splice(duplicateIndex, 1);
     }
 
+    if (entry.spokenText) {
+      console.log(`[AUDIO] Queued: ${entry.spokenText} (channel=${channel}, position=${entry.options?.priority ? "priority" : queue.length}, queueSize=${queue.length + 1})`);
+    }
+
     if (!entry.options?.priority) {
       queue.push(entry);
       this._traceQueue("speech.queue_item_queued", channel, {
@@ -372,8 +376,8 @@ class SpeechManager {
     const queue = this._getQueue(channel);
     while (queue.length > MAX_SPEECH_QUEUE_LENGTH) {
       const dropIndex = queue.findIndex((queued) => !queued.options?.priority);
-      queue.splice(dropIndex === -1 ? 0 : dropIndex, 1);
-      console.warn("[Speech] Speech queue overflow; dropped the oldest queued announcement.");
+      const [dropped] = queue.splice(dropIndex === -1 ? 0 : dropIndex, 1);
+      console.warn(`[AUDIO] Queue overflow (channel=${channel}, max=${MAX_SPEECH_QUEUE_LENGTH}); dropped oldest non-priority item: ${dropped?.spokenText || "(action)"}`);
     }
   }
 
@@ -671,6 +675,7 @@ class SpeechManager {
     }
 
     options._onPlaybackStart?.({ channel, spokenText });
+    if (spokenText) console.log(`[AUDIO] Playback started: ${spokenText}`);
     this._traceQueue("speech.playback_started", channel, {
       text: spokenText,
       tone: options.tone,
@@ -734,6 +739,7 @@ class SpeechManager {
       }
     } finally {
       options._onPlaybackFinish?.({ channel, spokenText });
+      if (spokenText) console.log(`[AUDIO] Playback finished: ${spokenText}`);
       this._traceQueue("speech.playback_finished", channel, {
         text: spokenText,
         tone: options.tone,
@@ -829,6 +835,10 @@ class SpeechManager {
   _stopSpeechPlayback({ clearQueues = false } = {}) {
     this._playbackGeneration += 1;
     if (clearQueues) {
+      const discarded = this.speechQueue.length + this.cabinQueue.length;
+      if (discarded > 0) {
+        console.log(`[AUDIO] Queue cleared: ${discarded} pending item(s) discarded (${this.speechQueue.map((e) => e.spokenText || "(action)").concat(this.cabinQueue.map((e) => e.spokenText || "(action)")).join(", ")})`);
+      }
       this.speechQueue = [];
       this.cabinQueue = [];
     }
@@ -1461,6 +1471,11 @@ class SpeechManager {
           player._infiniteCoPilotCurrentStaticLeaseId = lease.id;
         } catch (e) { }
         if (this.activeStaticLease && this.activeStaticLease !== lease) {
+          // The resource lock (STATIC_AUDIO) normally guarantees only one
+          // lease is ever active, so this should be rare. Log it loudly if
+          // it does happen, since a lease forced to finish here never
+          // reaches its own natural completion event.
+          console.warn(`[AUDIO] Lease superseded before completion: ${this._describeAudioSource(this.activeStaticLease.audioAsset)} (owner=${this.activeStaticLease.owner})`);
           this.activeStaticLease.finish?.({ interrupted: true, reason: "superseded" });
         }
         this.activeStaticLease = lease;
@@ -1551,10 +1566,13 @@ class SpeechManager {
         }, maxWaitMs);
 
         Promise.resolve()
-          .then(() => {
+          .then(async () => {
             if (!this._isStaticLeaseCurrent(lease)) return undefined;
             try {
-              if (typeof player.pause === "function") player.pause();
+              // Awaited (not fire-and-forget): on the reused player, replace()
+              // must not be issued while a native pause() from the previous
+              // lease is still in flight, or the two native calls can race.
+              if (typeof player.pause === "function") await player.pause();
             } catch (e) { }
             if (!this._isStaticLeaseCurrent(lease)) return undefined;
             playbackStage = "replace";
@@ -1824,9 +1842,18 @@ class SpeechManager {
     const now = Date.now();
     const spokenText = this.formatText(text, tone);
 
-    // De-duplicate rapid identical announcements
-    if (!options.bypassDedupe && spokenText === this.lastSpokenText && now - this.lastSpokenAt < 900) return;
+    // De-duplicate rapid identical announcements. This only ever compares
+    // spokenText against the single most recent spokenText, so two DIFFERENT
+    // announcements fired back to back (e.g. "Strobe lights on." then
+    // "Cabin crew prepare for take off.") are never affected by this check —
+    // only a literal repeat of the same text (e.g. a duplicate telemetry
+    // frame re-reporting the same switch flip) is suppressed here.
+    if (!options.bypassDedupe && spokenText === this.lastSpokenText && now - this.lastSpokenAt < 900) {
+      console.log(`[AUDIO] Duplicate suppressed: ${spokenText} (${now - this.lastSpokenAt}ms after previous)`);
+      return;
+    }
 
+    console.log(`[AUDIO] Event triggered: ${spokenText}`);
     this.lastSpokenText = spokenText;
     this.lastSpokenAt = now;
 

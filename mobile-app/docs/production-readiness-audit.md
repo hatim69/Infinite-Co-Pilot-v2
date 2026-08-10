@@ -76,6 +76,50 @@ Why this is recovery, not only detection:
   cause is Expo Audio media-session state outliving an individual player. Player
   disposal now explicitly clears lock-screen controls before release.
 
+## Android Media Notification / Transport Controls (Investigated)
+
+Confirmed by static audit plus the Expo SDK 57 `expo-audio` reference:
+
+- `setActiveForLockScreen` is the only API in this codebase that activates an
+  interactive lock-screen/notification media session with transport controls.
+  It is called in exactly one place (`speech.js`, inside
+  `_activateBackgroundMediaSession`), and only on `this.silentPlayer` — the
+  keep-alive player that Phase 3 of the Android runtime migration already
+  disabled on Android (`usesBackgroundAudioAnchor()` returns `false` on
+  Android, and the silent player is never created there). No announcement,
+  callout, boarding-music, or safety-briefing player calls it. The app's own
+  code is not what's activating the interactive media session.
+- The visible Play/Pause/Next/Previous controls instead come from
+  `expo-audio`'s own Android background-playback implementation, which the
+  `enableBackgroundPlayback: true` plugin option in `app.json` enables. Per
+  Expo's SDK 57 docs, this unconditionally registers a media-style foreground
+  service (`AudioControlsService`) and its notification; there is no plugin
+  option or `setActiveForLockScreen` parameter that suppresses the transport
+  buttons while keeping playback capability. `AudioLockScreenOptions` only
+  toggles the seek-forward/seek-backward buttons — Play/Pause cannot be
+  hidden independently, and no config exists to hide the notification itself.
+- Expo's docs also state that Android background audio "will stop after
+  approximately 3 minutes" unless `setActiveForLockScreen(true)` is active —
+  described as an OS limitation, not an app-level timeout.
+- This app already runs a *second*, independent foreground service (Notifee,
+  started by `FlightSession.connect()`) declaring both
+  `FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE` and
+  `FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK`. The `mediaPlayback` type on that
+  service only makes sense if it was already intended to cover audio, which
+  suggests `enableBackgroundPlayback`'s own redundant service (and its
+  uncontrollable notification) may not be necessary here — but this could not
+  be confirmed without a physical device, and disabling it risks silencing
+  all announcements in the background if the hypothesis is wrong. Given the
+  explicit priority on never breaking background audio, this was **not**
+  changed; it is recorded here as the primary candidate fix for a follow-up
+  device-validated pass.
+  - **Experiment to run on-device**: set `enableBackgroundPlayback: false` in
+    `app.json`, rebuild, and specifically verify a callout still plays audibly
+    after 5+ minutes backgrounded with Infinite Flight foregrounded and the
+    Notifee monitoring notification visible. If audio keeps working and the
+    transport-control notification disappears, keep the change. If audio
+    stops, revert this one line — nothing else depends on it.
+
 ## Requires Runtime / Device Validation
 
 - Whether Notifee's foreground-service JavaScript task remains active for a full
