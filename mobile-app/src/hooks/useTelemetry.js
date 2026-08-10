@@ -46,6 +46,8 @@ export function useTelemetry(disableAutoConnect = false, isAutoActionsEnabled = 
       getVoicePreference: () => flightSession.getVoicePreference(),
       toggleVoice: () => flightSession.toggleVoice(),
       setVoicePreference: (preference) => flightSession.setVoicePreference(preference),
+      toggleLandingGear: () => flightSession.toggleLandingGear(),
+      setLandingGear: (desired) => flightSession.setLandingGear(desired),
     }),
     [sessionState]
   );

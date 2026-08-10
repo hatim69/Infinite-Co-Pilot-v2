@@ -242,6 +242,7 @@ function AppInner() {
     getVoicePreference,
     toggleVoice: toggleSessionVoice,
     setVoicePreference: setSessionVoicePreference,
+    toggleLandingGear,
   } = useTelemetry(disableAutoConnect || !isBetaVerified || isBetaExpired || betaNetworkError, isAutoActionsEnabled);
 
   useEffect(() => {
@@ -716,7 +717,13 @@ function AppInner() {
               <>
                 <SectionHeader title="Flight Systems" icon={Settings} color="#60A5FA" />
                 <View style={styles.gridContainer}>
-                  <SystemStatus label="Gear" value={telemetry.gear === 1 ? "DOWN" : telemetry.gear === 2 || telemetry.gear === 5 || telemetry.gear === 0 ? "UP" : telemetry.gear !== -1 && telemetry.gear !== null ? "MOVING" : null} icon={Crosshair} />
+                  <SystemStatus
+                    label="Gear (tap to toggle)"
+                    value={telemetry.gear === 1 ? "DOWN" : telemetry.gear === 2 || telemetry.gear === 5 || telemetry.gear === 0 ? "UP" : telemetry.gear !== -1 && telemetry.gear !== null ? "MOVING" : null}
+                    icon={Crosshair}
+                    disabled={telemetry.gear !== 1 && telemetry.gear !== 2 && telemetry.gear !== 5 && telemetry.gear !== 0}
+                    onPress={() => toggleLandingGear?.()}
+                  />
                   <SystemStatus label="Flaps" value={getFlapString(telemetry.name, telemetry.flaps)} icon={ShieldAlert} />
                   <SystemStatus label="Spoilers" value={telemetry.spoilers === 0 ? "OFF" : telemetry.spoilers === 1 ? "FLIGHT" : telemetry.spoilers === 2 ? "ARMED" : null} icon={Droplet} />
                   <SystemStatus label="Brakes" value={telemetry.brakes === 1 ? "SET" : telemetry.brakes === 0 ? "REL" : null} icon={ShieldAlert} />

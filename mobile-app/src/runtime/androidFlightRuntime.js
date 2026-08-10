@@ -1,4 +1,4 @@
-import { Platform } from "react-native";
+import { NativeModules, Platform } from "react-native";
 import notifee, {
   AndroidForegroundServiceType,
   AndroidImportance,
@@ -7,6 +7,21 @@ import { runtimeTrace } from "../utils/runtimeTrace";
 
 const CHANNEL_ID = "flight_monitoring";
 const NOTIFICATION_ID = "flight_monitoring";
+
+// A running foreground service (below) keeps the Android *process* alive and
+// satisfies the Android 14+ requirement to declare a service type, but it
+// does not by itself stop the CPU from suspending once the screen turns off
+// — that's PowerManager's job, a separate subsystem. Without a held
+// PARTIAL_WAKE_LOCK, OEM power managers can suspend CPU scheduling for a
+// backgrounded app's JS timers/sockets (the IF Connect poll loop in
+// ifConnectClient.js) to different degrees: this is the most likely
+// explanation for monitoring surviving for hours on iQOO/Vivo but dying in
+// the background on Samsung even with battery optimization disabled.
+// WakeLockModule is a small native module registered by withWakeLock.js; it
+// is undefined until the app is rebuilt with that plugin applied (e.g. in
+// Expo Go, or a stale dev-client build), so every call site here must
+// degrade gracefully rather than throw.
+const WakeLockModule = NativeModules.InfiniteCoPilotWakeLock;
 
 class AndroidFlightRuntime {
   constructor() {
@@ -88,6 +103,29 @@ class AndroidFlightRuntime {
     this.handlers.onReleaseSession?.();
   }
 
+  async _acquireWakeLock() {
+    if (!WakeLockModule?.acquire) {
+      console.log("[BACKGROUND] Wake lock module unavailable (native app not rebuilt with withWakeLock.js yet) — skipping.");
+      return;
+    }
+    try {
+      await WakeLockModule.acquire();
+      console.log("[BACKGROUND] Wake lock acquired");
+    } catch (error) {
+      console.log("[BACKGROUND] Wake lock acquire failed:", error?.message || error);
+    }
+  }
+
+  async _releaseWakeLock() {
+    if (!WakeLockModule?.release) return;
+    try {
+      await WakeLockModule.release();
+      console.log("[BACKGROUND] Wake lock released");
+    } catch (error) {
+      console.log("[BACKGROUND] Wake lock release failed:", error?.message || error);
+    }
+  }
+
   async _ensureChannel() {
     if (this.channelId) return this.channelId;
     this.channelId = await notifee.createChannel({
@@ -138,6 +176,7 @@ class AndroidFlightRuntime {
   async _startMonitoring({ connectedIp }) {
     const startedAt = Date.now();
     this.monitoringActive = true;
+    console.log("[BACKGROUND] Service started");
     runtimeTrace("androidRuntime.start", {
       source: "FlightSession",
       owner: "AndroidFlightRuntime",
@@ -155,6 +194,7 @@ class AndroidFlightRuntime {
 
     const channelId = await this._ensureChannel();
     await notifee.displayNotification(this._createNotification({ channelId, connectedIp }));
+    await this._acquireWakeLock();
     console.log(`[AndroidRuntime] Foreground service start requested in ${Date.now() - startedAt}ms`);
     runtimeTrace("androidRuntime.notification_displayed", {
       source: "notifee.displayNotification",
@@ -210,6 +250,7 @@ class AndroidFlightRuntime {
 
   async _stopMonitoring() {
     this.monitoringActive = false;
+    console.log("[BACKGROUND] Service stopped");
     runtimeTrace("androidRuntime.stop", {
       source: "FlightSession",
       owner: "AndroidFlightRuntime",
@@ -223,6 +264,8 @@ class AndroidFlightRuntime {
       this._releaseSession();
       this.serviceActive = false;
     }
+
+    await this._releaseWakeLock();
 
     try {
       await notifee.stopForegroundService();

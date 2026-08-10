@@ -1,13 +1,15 @@
 import React from 'react';
-import { View, Text, StyleSheet, Platform, useWindowDimensions } from 'react-native';
+import { View, Text, StyleSheet, Platform, TouchableOpacity, useWindowDimensions } from 'react-native';
 import { useTheme } from '../../context/ThemeContext';
 
 /**
  * SystemStatus — a data cell used in the systems grid.
  * Shows a label + icon on the left, value on the right.
  * Supports an optional 'highlight' prop for values that are active/on.
+ * Pass 'onPress' to make the cell tappable (e.g. for manual gear control);
+ * cells without it remain the plain read-only display they've always been.
  */
-const SystemStatus = ({ label, value, icon: Icon, highlight }) => {
+const SystemStatus = ({ label, value, icon: Icon, highlight, onPress, disabled }) => {
   const { theme } = useTheme();
   const { width } = useWindowDimensions();
 
@@ -16,14 +18,21 @@ const SystemStatus = ({ label, value, icon: Icon, highlight }) => {
   const isSingleColumn = width < 360;
   const isThreeColumn = width >= 760;
   const itemWidth = isSingleColumn ? '100%' : isThreeColumn ? '32%' : '48%';
+  const Container = onPress ? TouchableOpacity : View;
+  const containerProps = onPress
+    ? { onPress, disabled, activeOpacity: 0.7 }
+    : {};
 
   return (
-    <View style={[
+    <Container
+      {...containerProps}
+      style={[
       styles.container,
       { width: itemWidth },
       { backgroundColor: theme.surface, borderColor: theme.border },
       isActive && { borderColor: theme.accentActiveBorder, backgroundColor: theme.accentActive },
       isWarning && styles.containerWarning,
+      onPress && !disabled && styles.containerPressable,
     ]}>
       <View style={styles.left}>
         {Icon && <Icon size={12} color={theme.textDim} style={styles.icon} />}
@@ -40,7 +49,7 @@ const SystemStatus = ({ label, value, icon: Icon, highlight }) => {
       >
         {value !== undefined && value !== null && value !== '' ? value : '...'}
       </Text>
-    </View>
+    </Container>
   );
 };
 
@@ -59,6 +68,9 @@ const styles = StyleSheet.create({
   containerWarning: {
     borderColor: 'rgba(245, 158, 11, 0.4)',
     backgroundColor: 'rgba(245, 158, 11, 0.08)',
+  },
+  containerPressable: {
+    borderStyle: 'dashed',
   },
   left: {
     flexDirection: 'row',

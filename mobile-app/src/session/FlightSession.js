@@ -77,6 +77,13 @@ const DESCENT_CALLOUT_MAX_VS_FPM = -150;
 const POSITIVE_RATE_MIN_AGL_FT = 50;
 const POSITIVE_RATE_MAX_AGL_FT = 1500;
 const POSITIVE_RATE_MIN_VS_FPM = 150;
+// Ceiling for a single LandingGear command to reach its target physical
+// state before the pending flag is released without an auto-retry. Real
+// gear transit is a few seconds; this is intentionally generous so it
+// doesn't fire during a normal transit, while still recovering (rather than
+// staying stuck refusing all future commands) if the command was lost —
+// e.g. sent right as the connection dropped.
+const GEAR_COMMAND_TIMEOUT_MS = 15000;
 const PHASE_READY_COMMANDS = [
   "infiniteflight/app_state",
   "aircraft/0/is_on_ground",
@@ -123,6 +130,22 @@ const isDescendingForCallout = (telemetry) =>
   typeof telemetry.vs === "number" &&
   telemetry.vs < DESCENT_CALLOUT_MAX_VS_FPM;
 
+// aircraft/0/systems/landing_gear/state (Int32) is the ACTUAL physical
+// deployment state, distinct from the lever position. 1 = fully extended,
+// {0, 2, 5} = fully retracted (observed values across aircraft in IF
+// Connect), and this is the SAME classification the existing UI already
+// used (App.js's "DOWN"/"UP"/"MOVING" system-status cell), reused here
+// rather than re-deriving it. Any other value (including the transitional
+// in-between values IF reports while the gear is actually moving) means the
+// gear has not reached either end state yet.
+const GEAR_STATE_UP_VALUES = new Set([0, 2, 5]);
+const classifyGearState = (data) => {
+  if (data === -1 || data === null || data === undefined) return "unknown";
+  if (data === 1) return "down";
+  if (GEAR_STATE_UP_VALUES.has(data)) return "up";
+  return "transit";
+};
+
 const isAirbusA320Family = (name) => {
   if (!name) return false;
   const lower = name.toLowerCase();
@@ -149,6 +172,7 @@ const POLL_COMMANDS = [
   "aircraft/0/altitude_msl",
   "aircraft/0/altitude_agl",
   "aircraft/0/systems/landing_gear/state",
+  "aircraft/0/systems/landing_gear/lever_state",
   // "aircraft/0/systems/apu/apu/amp_draw",
   "aircraft/0/systems/electrical_switch/master_switch/state",
   "aircraft/0/aircraft_id",
@@ -216,6 +240,8 @@ const INITIAL_TELEMETRY = {
   throttle: 0,
   onGround: true,
   gear: -1,
+  gearLever: null, // true = lever DOWN, false = lever UP, null = not yet known
+  gearInTransit: false,
   flaps: -1,
   brakes: -1,
   spoilers: -1,
@@ -316,6 +342,9 @@ class FlightSession {
     this.phaseSync = createPhaseSyncState();
     this.boardingMusicPrefetchLivery = "";
     this.flags = createAnnouncementFlags();
+    this._gearCommandPending = false;
+    this._gearCommandTargetClass = null;
+    this._gearCommandTimer = null;
     this.discoverySocket = null;
     this.ptuPreviousEngines = {};
     this.ptuPreviousGroundSpeed = 0;
@@ -522,6 +551,91 @@ class FlightSession {
     this.ptuPreviousGroundSpeed = 0;
   }
 
+  _resetGearCommandState() {
+    clearTimeout(this._gearCommandTimer);
+    this._gearCommandTimer = null;
+    this._gearCommandPending = false;
+    this._gearCommandTargetClass = null;
+  }
+
+  /**
+   * Called whenever a fresh, changed landing_gear/state classification
+   * (down/up/transit) arrives. If a command is pending and the aircraft has
+   * now genuinely reached the requested end state, this is the ONLY thing
+   * that clears the pending flag on success — never the lever position
+   * (lever_state), and never just "a command was sent".
+   */
+  _resolveGearCommand(nextClass) {
+    if (!this._gearCommandPending) return;
+    if (nextClass === this._gearCommandTargetClass) {
+      console.log(`[GEAR] Command confirmed: reached ${nextClass.toUpperCase()}`);
+      this._resetGearCommandState();
+    }
+  }
+
+  /**
+   * Requests the landing gear move to `desired` ("down" or "up") via the
+   * commands/LandingGear toggle. commands/LandingGear flips gear state
+   * rather than setting it directly, so this refuses to send unless it can
+   * establish that a toggle will actually move the gear the intended
+   * direction: current state must be a known, settled end state (not
+   * "transit", not "unknown"), it must differ from `desired`, and no other
+   * gear command may already be in flight. Returns { sent, reason }.
+   */
+  setLandingGear(desired) {
+    if (desired !== "down" && desired !== "up") {
+      return { sent: false, reason: "invalid_target" };
+    }
+    if (!this.isConnected) {
+      console.log(`[GEAR] Ignoring ${desired} request — not connected.`);
+      return { sent: false, reason: "not_connected" };
+    }
+
+    const currentClass = classifyGearState(this.state.telemetry.gear);
+
+    if (this._gearCommandPending) {
+      console.log(`[GEAR] Ignoring ${desired} request — a gear command is already in flight (target=${this._gearCommandTargetClass}).`);
+      return { sent: false, reason: "command_in_flight" };
+    }
+    if (currentClass === "transit") {
+      console.log(`[GEAR] Ignoring ${desired} request — gear is already in transit.`);
+      return { sent: false, reason: "already_in_transit" };
+    }
+    if (currentClass === "unknown") {
+      console.log(`[GEAR] Ignoring ${desired} request — current gear state is not yet known.`);
+      return { sent: false, reason: "state_unknown" };
+    }
+    if (currentClass === desired) {
+      console.log(`[GEAR] Ignoring ${desired} request — gear is already ${desired}.`);
+      return { sent: false, reason: "already_at_target" };
+    }
+
+    this._gearCommandPending = true;
+    this._gearCommandTargetClass = desired;
+    console.log(`[GEAR] LandingGear command sent (${currentClass} -> ${desired})`);
+    ifConnect.set("commands/LandingGear", true);
+
+    clearTimeout(this._gearCommandTimer);
+    this._gearCommandTimer = setTimeout(() => {
+      if (!this._gearCommandPending) return;
+      console.log(`[GEAR] No confirmed state change ${GEAR_COMMAND_TIMEOUT_MS}ms after command — clearing pending flag without retrying (state may be ambiguous).`);
+      this._resetGearCommandState();
+    }, GEAR_COMMAND_TIMEOUT_MS);
+
+    return { sent: true };
+  }
+
+  /** Convenience wrapper: extend if currently up, retract if currently down. */
+  toggleLandingGear() {
+    const currentClass = classifyGearState(this.state.telemetry.gear);
+    if (currentClass === "down") return this.setLandingGear("up");
+    if (currentClass === "up") return this.setLandingGear("down");
+    // "transit" or "unknown": setLandingGear rejects either direction with
+    // the correct log/reason, so which placeholder direction we pass here
+    // doesn't change the outcome.
+    return this.setLandingGear("down");
+  }
+
   _retainAndroidRuntimeSession() {
     if (this.androidRuntimeSessionRetained) return;
     this.androidRuntimeSessionRetained = true;
@@ -591,7 +705,15 @@ class FlightSession {
   }
 
   handleAppStateChange(state) {
+    const previousState = this.appState;
     this.appState = state;
+    if (state !== previousState) {
+      if (state === "background") {
+        console.log("[BACKGROUND] App moved to background");
+      } else if (previousState === "background") {
+        console.log(`[BACKGROUND] App returned to foreground (${state})`);
+      }
+    }
     runtimeTrace("flightSession.app_state", {
       source: "React.AppState",
       owner: "FlightSession",
@@ -975,24 +1097,52 @@ class FlightSession {
 
             const HYSTERESIS = 300;
 
+            // Threshold-crossing detector with hysteresis + immediate cross-arming.
+            //
+            // `crossedThreshold` only fires when prevMsl/currentAlt straddle the exact
+            // `alt` line, so a single climb or descent produces exactly one event per
+            // direction — noise that never reaches the line can never fire at all.
+            //
+            // The `_armedForClimb`/`_armedForDescent` flags exist on top of that to stop
+            // a *direction* from firing again until the aircraft has genuinely been on
+            // the other side. Previously each flag was only re-armed by traveling
+            // `HYSTERESIS` (300ft) past the line on its own side, which meant a climb
+            // that reversed into a fresh descent (or vice versa — a go-around, step
+            // climb/descent, holding pattern, missed approach) without first traveling
+            // 300ft past the *original* line silently failed to re-fire: the flag for
+            // the new direction was never set back to true. That reproduced exactly as
+            // reported — descent-through-10,000 (ON) kept working because cruise spends
+            // a long time above the band re-arming it, while climb-through-10,000 (OFF)
+            // stayed unreliable after any reversal because nothing re-armed it.
+            //
+            // Fix: the moment a crossing fires, immediately re-arm the *opposite*
+            // direction (we know for a fact which side we're now on). Firing still
+            // requires an actual crossedThreshold() straddle, so this cannot by itself
+            // cause chatter from telemetry that hovers without ever reaching `alt`.
             const checkAltitudeCallout = (alt, flagPrefix, climbText, descentText, options, onClimb, onDescent) => {
-              // Hysteresis Arming
+              const armedForClimbKey = `${flagPrefix}_armedForClimb`;
+              const armedForDescentKey = `${flagPrefix}_armedForDescent`;
+
+              // Hysteresis arming — bootstraps readiness before the first crossing,
+              // and re-arms after a sustained excursion even if the immediate
+              // cross-arm below was somehow missed (e.g. a dropped announcement).
               if (currentAlt > alt + HYSTERESIS) {
-                flags[`${flagPrefix}_armedForDescent`] = true;
+                flags[armedForDescentKey] = true;
               } else if (currentAlt < alt - HYSTERESIS) {
-                flags[`${flagPrefix}_armedForClimb`] = true;
+                flags[armedForClimbKey] = true;
               }
 
-              // Callouts
               const crossing = crossedThreshold(prevMsl, currentAlt, alt);
-              if (allowClimbAltitudeCallout && crossing.ascending && flags[`${flagPrefix}_armedForClimb`]) {
+              if (allowClimbAltitudeCallout && crossing.ascending && flags[armedForClimbKey]) {
                 speak(climbText, options.climb || "notice");
-                flags[`${flagPrefix}_armedForClimb`] = false;
+                flags[armedForClimbKey] = false;
+                flags[armedForDescentKey] = true;
                 if (onClimb) onClimb();
               }
-              if (allowDescentAltitudeCallout && crossing.descending && flags[`${flagPrefix}_armedForDescent`]) {
+              if (allowDescentAltitudeCallout && crossing.descending && flags[armedForDescentKey]) {
                 speak(descentText, options.descent || "notice");
-                flags[`${flagPrefix}_armedForDescent`] = false;
+                flags[armedForDescentKey] = false;
+                flags[armedForClimbKey] = true;
                 if (onDescent) onDescent();
               }
             };
@@ -1007,13 +1157,19 @@ class FlightSession {
               }
             });
             checkAltitudeCallout(10000, 'alt10k', "Ten thousand. Landing lights off.", "Ten thousand. Landing lights on.", { climb: { tone: "caution", priority: true }, descent: { tone: "notice", priority: true } }, () => {
+              console.log(`[LIGHTS] Previous altitude: ${Math.round(prevMsl)} ft`);
+              console.log(`[LIGHTS] Current altitude: ${Math.round(currentAlt)} ft`);
+              console.log("[LIGHTS] Climbing through 10,000 ft");
               if (this.isAutoActionsEnabled && state.landing !== false) {
-                console.log(`[AutoActions] Passing 10k climb. Lights ON (${state.landing}). Sending landing_lights_switch=false.`);
+                console.log(`[LIGHTS] Landing lights OFF (was ${state.landing}). Sending landing_lights_switch=false.`);
                 ifConnect.set("aircraft/0/systems/landing_lights_switch", false);
               }
             }, () => {
+              console.log(`[LIGHTS] Previous altitude: ${Math.round(prevMsl)} ft`);
+              console.log(`[LIGHTS] Current altitude: ${Math.round(currentAlt)} ft`);
+              console.log("[LIGHTS] Descending through 10,000 ft");
               if (this.isAutoActionsEnabled && state.landing !== true) {
-                console.log(`[AutoActions] Passing 10k descent. Lights OFF (${state.landing}). Sending landing_lights_switch=true.`);
+                console.log(`[LIGHTS] Landing lights ON (was ${state.landing}). Sending landing_lights_switch=true.`);
                 ifConnect.set("aircraft/0/systems/landing_lights_switch", true);
               }
             });
@@ -1453,7 +1609,7 @@ class FlightSession {
         // ── Landing Gear ──────────────────────────────────────────────────
         if (command === "aircraft/0/systems/landing_gear/state") {
           const isDown = data === 1;
-          const isUp = data === 2 || data === 5 || data === 0;
+          const isUp = GEAR_STATE_UP_VALUES.has(data);
           if (state.gear !== -1 && data !== state.gear) {
             if (
               isDown &&
@@ -1463,13 +1619,27 @@ class FlightSession {
               speak("Gears down.", "callout");
             } else if (
               isUp &&
-              !(state.gear === 2 || state.gear === 5 || state.gear === 0) &&
+              !GEAR_STATE_UP_VALUES.has(state.gear) &&
               isPhaseActive(state, this.phaseTracker, GEAR_UP_PHASES)
             ) {
               speak("Landing gear up.", "callout");
             }
           }
+          const nextClass = classifyGearState(data);
+          if (nextClass !== classifyGearState(state.gear)) {
+            console.log(`[GEAR] Physical state: ${nextClass.toUpperCase()}`);
+            this._resolveGearCommand(nextClass);
+          }
           updateNext("gear", data);
+          updateNext("gearInTransit", nextClass === "transit");
+        }
+
+        if (command === "aircraft/0/systems/landing_gear/lever_state") {
+          const leverDown = data === true || data === 1;
+          if (state.gearLever !== null && state.gearLever !== leverDown) {
+            console.log(`[GEAR] Lever state: ${leverDown ? "DOWN" : "UP"}`);
+          }
+          updateNext("gearLever", leverDown);
         }
 
         // ── Cargo Doors ───────────────────────────────────────────────────
@@ -1623,6 +1793,7 @@ class FlightSession {
     this._setTelemetry({ ...INITIAL_TELEMETRY });
     this._resetPhaseState();
     this._resetPtuState();
+    this._resetGearCommandState();
     const flags = this._resetAnnouncementState({ isManualConnection: isManual });
 
     // Close any existing connection, then connect fresh
@@ -1840,6 +2011,7 @@ class FlightSession {
 
     this._resetAnnouncementState({ isManualConnection: false });
     this._resetPtuState();
+    this._resetGearCommandState();
     await announcementCoordinator.onClientDisconnected({ reason });
     await this._stopAndroidRuntime(reason);
   }
