@@ -127,6 +127,7 @@ class SpeechManager {
     this._staticPlayerRebuildCount = 0;
     this.currentAnnouncementPlayer = null;
     this.currentAnnouncementFinish = null;
+    this.currentAnnouncementTone = "default";
     this.currentCalloutPlayer = null;
     this.currentCalloutFinish = null;
     this.currentChimeFinish = null;
@@ -666,6 +667,8 @@ class SpeechManager {
       return;
     }
 
+    this.currentAnnouncementTone = options.tone || "default";
+
     if (!options._logged) {
       this._logSpeech(spokenText, options);
     }
@@ -688,7 +691,7 @@ class SpeechManager {
         const audioAsset = staticAudioEntry[this.voicePreference] || staticAudioEntry.female;
         const startedStaticPlayback = await this._playStaticAudio(
           audioAsset,
-          profile.volume * this.masterVolume * this.coPilotVolume,
+          profile.volume * this.masterVolume * (this.currentAnnouncementTone === "briefing" ? this.safetyBriefingVolume : this.coPilotVolume),
           {
             owner: options._staticOwner || "announcement",
             maxWaitMs:
@@ -898,7 +901,7 @@ class SpeechManager {
               voice: voiceId,
               rate: profile.rate,
               pitch,
-              volume: profile.volume * this.masterVolume * this.coPilotVolume,
+              volume: profile.volume * this.masterVolume * (this.currentAnnouncementTone === "briefing" ? this.safetyBriefingVolume : this.coPilotVolume),
               onDone: finish,
               onStopped: finish,
               onError: finish,
@@ -1787,6 +1790,12 @@ class SpeechManager {
     if (this.chimePlayer) {
       this.chimePlayer.volume = this.masterVolume;
     }
+    if (this.currentAnnouncementPlayer) {
+      this.currentAnnouncementPlayer.volume = this.masterVolume * (this.currentAnnouncementTone === "briefing" ? this.safetyBriefingVolume : this.coPilotVolume);
+    }
+    if (this.currentCalloutPlayer) {
+      this.currentCalloutPlayer.volume = this.masterVolume * this.coPilotVolume;
+    }
   }
 
   formatText(text, tone) {
@@ -2028,7 +2037,7 @@ class SpeechManager {
         this.pollyPlayer = null;
 
         player = createAudioPlayer({ uri: dataUri }, EFFECT_AUDIO_PLAYER_OPTIONS);
-        player.volume = profile.volume * this.masterVolume * this.coPilotVolume;
+        player.volume = profile.volume * this.masterVolume * (this.currentAnnouncementTone === "briefing" ? this.safetyBriefingVolume : this.coPilotVolume);
         this.pollyPlayer = player;
         this.currentAnnouncementPlayer = player;
         this.currentAnnouncementFinish = finish;
