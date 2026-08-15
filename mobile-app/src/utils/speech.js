@@ -124,6 +124,7 @@ class SpeechManager {
     this.staticAudioPlayerHealth = STATIC_PLAYER_HEALTH.HEALTHY;
     this.activeStaticLease = null;
     this._staticPlaybackId = 0;
+    this._staticSourceGeneration = 0;
     this._staticPlayerRebuildCount = 0;
     this.currentAnnouncementPlayer = null;
     this.currentAnnouncementFinish = null;
@@ -1345,6 +1346,7 @@ class SpeechManager {
       let playbackStage = "setup";
       const lease = {
         id: ++this._staticPlaybackId,
+        sourceGeneration: ++this._staticSourceGeneration,
         generation: requestGeneration,
         owner,
         audioAsset,
@@ -1356,10 +1358,15 @@ class SpeechManager {
         resolved: false,
         started: false,
         speechAudioBegun: false,
+        replaceStarted: false,
         replaceCompleted: false,
+        seekStarted: false,
+        seekCompleted: false,
         playCalled: false,
+        playbackStarted: false,
         playbackAdvanced: false,
         lastPositionMillis: null,
+        playbackBaselineMillis: null,
         retryCount,
       };
       this._traceStaticLeaseDebug("lease_created", lease, {
@@ -1379,6 +1386,7 @@ class SpeechManager {
           this._traceStaticLeaseDebug("listener_removed", lease, {
             reason,
             interrupted,
+            completionReason: reason,
           });
           try { lease.subscription.remove(); } catch (e) { }
         }
@@ -1403,9 +1411,11 @@ class SpeechManager {
           interrupted,
           started: lease.started,
           reason,
+          completionReason: reason,
           nativeFailure,
           leaseId: lease.id,
           generation: lease.generation,
+          sourceGeneration: lease.sourceGeneration,
           retryCount,
           queueSize: this.speechQueue.length,
         });
@@ -1416,9 +1426,12 @@ class SpeechManager {
             reason,
             nativeFailure,
             started: lease.started,
+            playbackStarted: lease.playbackStarted,
             replaceCompleted: lease.replaceCompleted,
+            seekCompleted: lease.seekCompleted,
             playCalled: lease.playCalled,
             playbackAdvanced: lease.playbackAdvanced,
+            sourceGeneration: lease.sourceGeneration,
           }
         );
         resolve({
@@ -1429,31 +1442,152 @@ class SpeechManager {
           shouldRetry: Boolean(nativeFailure && !lease.started && !interrupted),
           leaseId: lease.id,
           generation: lease.generation,
+          sourceGeneration: lease.sourceGeneration,
         });
       };
 
       lease.finish = finish;
 
-      const markPlaybackStarted = (status) => {
-        const positionMillis = this._statusTimeMillis(status, "positionMillis");
-        if (
-          lease.playCalled &&
+      const getPlaybackSnapshot = (status) => {
+        const statusPositionMillis = this._statusTimeMillis(status, "positionMillis");
+        const statusDurationMillis = this._statusTimeMillis(status, "durationMillis");
+        const playerPositionMillis =
+          typeof player?.currentTime === "number"
+            ? Math.round(player.currentTime * 1000)
+            : null;
+        const playerDurationMillis =
+          typeof player?.duration === "number"
+            ? Math.round(player.duration * 1000)
+            : null;
+        const positionMillis =
+          typeof statusPositionMillis === "number"
+            ? statusPositionMillis
+            : playerPositionMillis;
+        const durationMillis =
+          typeof statusDurationMillis === "number"
+            ? statusDurationMillis
+            : playerDurationMillis;
+        const isPlaying = Boolean(status?.playing ?? status?.isPlaying ?? player?.playing);
+        const didJustFinish = Boolean(status?.didJustFinish);
+        const isNearEnd =
           typeof positionMillis === "number" &&
-          (lease.lastPositionMillis === null || positionMillis > lease.lastPositionMillis + 20)
+          typeof durationMillis === "number" &&
+          durationMillis > 0 &&
+          positionMillis >= durationMillis - 100;
+
+        return {
+          positionMillis,
+          durationMillis,
+          isPlaying,
+          didJustFinish,
+          isNearEnd,
+          isLoaded: status?.isLoaded ?? player?.isLoaded ?? null,
+          playbackState: status?.playbackState ?? null,
+        };
+      };
+
+      const tracePlaybackEstablished = (snapshot, trigger) => {
+        if (lease.playbackStarted) return;
+        lease.playbackStarted = true;
+        lease.started = true;
+        this._traceStaticLeaseDebug("playback_established", lease, {
+          trigger,
+          positionMillis: snapshot.positionMillis,
+          durationMillis: snapshot.durationMillis,
+          isPlaying: snapshot.isPlaying,
+          didJustFinish: snapshot.didJustFinish,
+          playCalled: lease.playCalled,
+          playbackAdvanced: lease.playbackAdvanced,
+          sourceGeneration: lease.sourceGeneration,
+        });
+      };
+
+      const markPlaybackStarted = (status, trigger = "status") => {
+        const snapshot = getPlaybackSnapshot(status);
+        const { positionMillis } = snapshot;
+        if (!lease.playCalled) return snapshot;
+
+        if (lease.playbackBaselineMillis === null) {
+          lease.playbackBaselineMillis =
+            typeof lease.lastPositionMillis === "number"
+              ? lease.lastPositionMillis
+              : Math.round(startAtSeconds * 1000);
+        }
+
+        if (
+          typeof positionMillis === "number" &&
+          positionMillis > lease.playbackBaselineMillis + 20
         ) {
-          lease.playbackAdvanced = true;
+          if (!lease.playbackAdvanced) {
+            lease.playbackAdvanced = true;
+            this._traceStaticLeaseDebug("first_playback_progress", lease, {
+              trigger,
+              positionMillis,
+              durationMillis: snapshot.durationMillis,
+              playbackBaselineMillis: lease.playbackBaselineMillis,
+              isPlaying: snapshot.isPlaying,
+              didJustFinish: snapshot.didJustFinish,
+              sourceGeneration: lease.sourceGeneration,
+            });
+          }
         }
         if (typeof positionMillis === "number") lease.lastPositionMillis = positionMillis;
-        if (lease.started || !this._isStaticLeaseCurrent(lease)) return;
-        if (
-          status?.playing ||
-          status?.didJustFinish ||
-          status?.currentTime > 0 ||
-          player?.playing ||
-          player?.currentTime > 0
-        ) {
-          lease.started = true;
+
+        if (!this._isStaticLeaseCurrent(lease)) return snapshot;
+        if (snapshot.isPlaying) {
+          tracePlaybackEstablished(snapshot, trigger);
+        } else if (lease.playbackAdvanced) {
+          tracePlaybackEstablished(
+            snapshot,
+            snapshot.didJustFinish
+              ? `${trigger}:finished_after_progress`
+              : `${trigger}:progress`
+          );
         }
+        return snapshot;
+      };
+
+      const handleCompletionCandidate = (status, trigger) => {
+        const snapshot = markPlaybackStarted(status, trigger);
+        const completionSignal = snapshot.didJustFinish
+          ? "didJustFinish"
+          : snapshot.isNearEnd
+            ? "near_end"
+            : null;
+        if (!completionSignal) return false;
+
+        const canComplete =
+          lease.playCalled &&
+          lease.playbackStarted &&
+          lease.playbackAdvanced;
+
+        this._traceStaticLeaseDebug(
+          canComplete ? "completion_accepted" : "completion_ignored",
+          lease,
+          {
+            trigger,
+            completionSignal,
+            completionReason: canComplete ? "complete" : "insufficient_playback_evidence",
+            positionMillis: snapshot.positionMillis,
+            durationMillis: snapshot.durationMillis,
+            isPlaying: snapshot.isPlaying,
+            didJustFinish: snapshot.didJustFinish,
+            isNearEnd: snapshot.isNearEnd,
+            isLoaded: snapshot.isLoaded,
+            playbackState: snapshot.playbackState,
+            replaceCompleted: lease.replaceCompleted,
+            seekCompleted: lease.seekCompleted,
+            playCalled: lease.playCalled,
+            playbackStarted: lease.playbackStarted,
+            playbackAdvanced: lease.playbackAdvanced,
+            playbackBaselineMillis: lease.playbackBaselineMillis,
+            sourceGeneration: lease.sourceGeneration,
+          }
+        );
+
+        if (!canComplete) return true;
+        finish({ reason: "complete" });
+        return true;
       };
 
       try {
@@ -1461,7 +1595,10 @@ class SpeechManager {
         try {
           player._infiniteCoPilotPreviousStaticLeaseId =
             player._infiniteCoPilotCurrentStaticLeaseId || null;
+          player._infiniteCoPilotPreviousStaticSourceGeneration =
+            player._infiniteCoPilotCurrentStaticSourceGeneration || null;
           player._infiniteCoPilotCurrentStaticLeaseId = lease.id;
+          player._infiniteCoPilotCurrentStaticSourceGeneration = lease.sourceGeneration;
         } catch (e) { }
         if (this.activeStaticLease && this.activeStaticLease !== lease) {
           this.activeStaticLease.finish?.({ interrupted: true, reason: "superseded" });
@@ -1479,25 +1616,35 @@ class SpeechManager {
           ownerType: owner,
           leaseId: lease.id,
           generation: lease.generation,
+          sourceGeneration: lease.sourceGeneration,
           retryCount,
           queueSize: this.speechQueue.length,
         });
 
         lease.subscription = player.addListener("playbackStatusUpdate", (status) => {
           if (!this._isStaticLeaseCurrent(lease)) return;
-          markPlaybackStarted(status);
-          const positionMillis = this._statusTimeMillis(status, "positionMillis");
-          const durationMillis = this._statusTimeMillis(status, "durationMillis");
+          const snapshot = markPlaybackStarted(status, "status_update");
           this._traceStaticLeaseDebug("status_update", lease, {
             originatingLeaseId: player?._infiniteCoPilotCurrentStaticLeaseId || null,
             previousLeaseId: player?._infiniteCoPilotPreviousStaticLeaseId || null,
-            positionMillis,
-            durationMillis,
-            isPlaying: Boolean(status?.playing ?? status?.isPlaying),
-            didJustFinish: Boolean(status?.didJustFinish),
-            isLoaded: status?.isLoaded ?? null,
+            sourceGeneration: lease.sourceGeneration,
+            originatingSourceGeneration:
+              player?._infiniteCoPilotCurrentStaticSourceGeneration || null,
+            previousSourceGeneration:
+              player?._infiniteCoPilotPreviousStaticSourceGeneration || null,
+            positionMillis: snapshot.positionMillis,
+            durationMillis: snapshot.durationMillis,
+            isPlaying: snapshot.isPlaying,
+            didJustFinish: snapshot.didJustFinish,
+            isNearEnd: snapshot.isNearEnd,
+            isLoaded: snapshot.isLoaded,
+            playbackState: snapshot.playbackState,
             replaceCompleted: lease.replaceCompleted,
+            seekCompleted: lease.seekCompleted,
+            playCalled: lease.playCalled,
+            playbackStarted: lease.playbackStarted,
             playbackAdvanced: lease.playbackAdvanced,
+            playbackBaselineMillis: lease.playbackBaselineMillis,
           });
           if (status?.didJustFinish) {
             this._traceStaticLeaseDebug("did_just_finish_received", lease, {
@@ -1507,23 +1654,21 @@ class SpeechManager {
                   ? lease.id
                   : player?._infiniteCoPilotPreviousStaticLeaseId || null,
               activeLeaseId: this.activeStaticLease?.id || null,
-              positionMillis,
-              durationMillis,
+              positionMillis: snapshot.positionMillis,
+              durationMillis: snapshot.durationMillis,
               playbackAdvanced: lease.playbackAdvanced,
+              playbackStarted: lease.playbackStarted,
+              playCalled: lease.playCalled,
               replaceCompleted: lease.replaceCompleted,
+              sourceGeneration: lease.sourceGeneration,
             });
           }
           if (
             status.error
           ) {
             finish({ reason: "status_error", nativeFailure: true });
-          } else if (
-            status.didJustFinish ||
-            (status.currentTime > 0 &&
-              status.duration > 0 &&
-              status.currentTime >= status.duration - 0.1)
-          ) {
-            finish({ reason: "complete" });
+          } else {
+            handleCompletionCandidate(status, "status_update");
           }
         });
         this._traceStaticLeaseDebug("listener_attached", lease, {
@@ -1533,10 +1678,7 @@ class SpeechManager {
         lease.checkInterval = setInterval(() => {
           if (!this._isStaticLeaseCurrent(lease)) return;
           try {
-            markPlaybackStarted();
-            if (player.duration > 0 && player.currentTime >= player.duration - 0.1) {
-              finish({ reason: "complete" });
-            }
+            handleCompletionCandidate(null, "poll");
           } catch (e) {
             finish({ reason: "poll_error", nativeFailure: true });
           }
@@ -1562,11 +1704,15 @@ class SpeechManager {
             if (!this._isStaticLeaseCurrent(lease)) return undefined;
             playbackStage = "replace";
             if (typeof player.replace === "function") {
-              this._traceStaticLeaseDebug("replace_called", lease);
+              lease.replaceStarted = true;
+              this._traceStaticLeaseDebug("replace_called", lease, {
+                sourceGeneration: lease.sourceGeneration,
+              });
               const replaceResult = player.replace(audioAsset);
               this._traceStaticPlayer("speech.static_audio_replace", {
                 leaseId: lease.id,
                 generation: lease.generation,
+                sourceGeneration: lease.sourceGeneration,
                 retryCount,
                 success: true,
               });
@@ -1577,12 +1723,16 @@ class SpeechManager {
           .then(() => {
             if (!this._isStaticLeaseCurrent(lease)) return undefined;
             lease.replaceCompleted = true;
-            this._traceStaticLeaseDebug("replace_completed", lease);
+            this._traceStaticLeaseDebug("replace_completed", lease, {
+              sourceGeneration: lease.sourceGeneration,
+            });
             player.volume = volume;
             if (startAtSeconds > 0 && typeof player.seekTo === "function") {
               playbackStage = "seek";
+              lease.seekStarted = true;
               this._traceStaticLeaseDebug("seek_called", lease, {
                 startAtSeconds,
+                sourceGeneration: lease.sourceGeneration,
               });
               return player.seekTo(startAtSeconds, 0, 0);
             }
@@ -1590,19 +1740,32 @@ class SpeechManager {
           })
           .then(() => {
             if (!this._isStaticLeaseCurrent(lease)) return;
+            if (lease.seekStarted) {
+              lease.seekCompleted = true;
+            }
+            lease.playbackBaselineMillis = Math.round(startAtSeconds * 1000);
+            this._traceStaticLeaseDebug("seek_completed", lease, {
+              startAtSeconds,
+              positionMillis: getPlaybackSnapshot().positionMillis,
+              durationMillis: getPlaybackSnapshot().durationMillis,
+              sourceGeneration: lease.sourceGeneration,
+            });
             playbackStage = "play";
             this._beginSpeechAudio();
             lease.speechAudioBegun = true;
             lease.playCalled = true;
             this._traceStaticLeaseDebug("play_called", lease, {
               startAtSeconds,
+              playbackBaselineMillis: lease.playbackBaselineMillis,
+              sourceGeneration: lease.sourceGeneration,
             });
             player.play();
-            markPlaybackStarted();
+            markPlaybackStarted(null, "play_call");
             this._traceStaticPlayer("speech.static_audio_start", {
               ownerType: owner,
               leaseId: lease.id,
               generation: lease.generation,
+              sourceGeneration: lease.sourceGeneration,
               retryCount,
               queueSize: this.speechQueue.length,
               playSuccess: true,
@@ -1616,6 +1779,7 @@ class SpeechManager {
               ownerType: owner,
               leaseId: lease.id,
               generation: lease.generation,
+              sourceGeneration: lease.sourceGeneration,
               retryCount,
               stage: playbackStage,
               error: error?.message || String(error),
@@ -1624,6 +1788,7 @@ class SpeechManager {
             this._traceStaticLeaseDebug("lease_rejected", lease, {
               stage: playbackStage,
               error: error?.message || String(error),
+              sourceGeneration: lease.sourceGeneration,
             });
             finish({ reason: "playback_error", nativeFailure: true });
           });
@@ -1631,6 +1796,7 @@ class SpeechManager {
         this._traceStaticLeaseDebug("lease_rejected", lease, {
           stage: playbackStage,
           error: e?.message || String(e),
+          sourceGeneration: lease.sourceGeneration,
         });
         finish({ reason: "setup_error", nativeFailure: true });
       }
