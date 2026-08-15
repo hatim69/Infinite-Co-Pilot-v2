@@ -1750,10 +1750,10 @@ class FlightSession {
     let duration = 8500;
 
     // 1. Second engine start
-    // An engine is already running (2), and the other engine goes from off (0) to starting (1)
+    // An engine is already running (2), and the other engine goes from off (0) to starting (1) or running (2)
     if (
-      (eng1Curr === 2 && eng2Prev === 0 && eng2Curr === 1) ||
-      (eng2Curr === 2 && eng1Prev === 0 && eng1Curr === 1)
+      (eng1Curr === 2 && eng2Prev === 0 && (eng2Curr === 1 || eng2Curr === 2)) ||
+      (eng2Curr === 2 && eng1Prev === 0 && (eng1Curr === 1 || eng1Curr === 2))
     ) {
       shouldPlay = true;
       duration = 10000;

@@ -25,7 +25,8 @@ const MANIFEST_TIMEOUT_MS = 15000;
 const WATCHDOG_INTERVAL_MS = 3000;
 const WATCHDOG_STALE_RECONNECT_MS = 5000;
 const WATCHDOG_STALE_FORCE_RECONNECT_MS = 15000;
-const RECONNECT_DELAY_MS = 2000;
+const RECONNECT_DELAY_BASE_MS = 2000;
+const RECONNECT_MAX_DELAY_MS = 15000;
 
 /** IF Connect v2 data type codes */
 const DataType = {
@@ -688,11 +689,16 @@ class IFConnectClient {
     if (!this._isCurrentGeneration(generation)) return;
     if (this._reconnectTimer) return; // Only one pending reconnect at a time
 
+    const delay = Math.min(
+      RECONNECT_DELAY_BASE_MS * Math.pow(1.5, this._reconnectAttempt),
+      RECONNECT_MAX_DELAY_MS
+    );
+    
     this._reconnectTimer = setTimeout(() => {
       this._reconnectTimer = null;
       if (!this._isCurrentGeneration(generation) || !this._isConnected) return;
       this._reconnectPollSocket(reason, generation);
-    }, RECONNECT_DELAY_MS);
+    }, delay);
   }
 
   _resetState() {
