@@ -105,6 +105,7 @@ class SpeechManager {
     this.lastSpokenAt = 0;
     this.voicePreference = "female";
     this.voiceEnabled = true;
+    this.radioMicEffectEnabled = true;
 
     // Volumes — 100% by default; user adjusts via settings
     this.masterVolume = 1.0;
@@ -207,6 +208,7 @@ class SpeechManager {
       isProcessingCabinQueue: this.isProcessingCabinQueue,
       expoSpeechActive: this.expoSpeechActive,
       voiceEnabled: this.voiceEnabled,
+      radioMicEffectEnabled: this.radioMicEffectEnabled,
       speechPlaybackDepth: this._speechPlaybackDepth,
       playerCount: this._getActivePlayerCount(),
       boardingMusicActive: Boolean(this.boardingMusic),
@@ -246,6 +248,15 @@ class SpeechManager {
     if (typeof audioAsset === "string") return audioAsset;
     if (audioAsset?.uri) return audioAsset.uri;
     return String(audioAsset || "unknown");
+  }
+
+  _selectStaticAudioAsset(staticAudioEntry) {
+    const voice = this.voicePreference === "male" ? "male" : "female";
+    if (this.radioMicEffectEnabled) {
+      const radioKey = `${voice}Radio`;
+      return staticAudioEntry[radioKey] || staticAudioEntry[voice] || staticAudioEntry.female;
+    }
+    return staticAudioEntry[voice] || staticAudioEntry.female;
   }
 
   _statusTimeMillis(status, key) {
@@ -689,7 +700,7 @@ class SpeechManager {
 
       const staticAudioEntry = staticAudioMap[spokenText];
       if (staticAudioEntry) {
-        const audioAsset = staticAudioEntry[this.voicePreference] || staticAudioEntry.female;
+        const audioAsset = this._selectStaticAudioAsset(staticAudioEntry);
         const startedStaticPlayback = await this._playStaticAudio(
           audioAsset,
           profile.volume * this.masterVolume * (this.currentAnnouncementTone === "briefing" ? this.safetyBriefingVolume : this.coPilotVolume),
@@ -1809,6 +1820,11 @@ class SpeechManager {
       const pref = await AsyncStorage.getItem("voicePreference");
       if (pref) this.voicePreference = pref;
 
+      const storedRadioMicEffect = await AsyncStorage.getItem("radioMicEffectEnabled");
+      if (storedRadioMicEffect !== null) {
+        this.radioMicEffectEnabled = storedRadioMicEffect === "true";
+      }
+
       const storedVolumes = await AsyncStorage.getItem("appVolumes");
       if (storedVolumes) {
         const parsed = JSON.parse(storedVolumes);
@@ -1848,6 +1864,8 @@ class SpeechManager {
       for (const entry of Object.values(staticAudioMap)) {
         if (entry.female) preload(entry.female).catch(() => { });
         if (entry.male) preload(entry.male).catch(() => { });
+        if (entry.femaleRadio) preload(entry.femaleRadio).catch(() => { });
+        if (entry.maleRadio) preload(entry.maleRadio).catch(() => { });
       }
     } catch (e) {
       console.log("[Speech] Failed to preload static audio:", e);
@@ -1925,6 +1943,20 @@ class SpeechManager {
   async setVoicePreference(preference) {
     this.voicePreference = preference;
     await AsyncStorage.setItem("voicePreference", preference);
+  }
+
+  async setRadioMicEffectEnabled(enabled) {
+    this.radioMicEffectEnabled = Boolean(enabled);
+    try {
+      await AsyncStorage.setItem("radioMicEffectEnabled", String(this.radioMicEffectEnabled));
+    } catch (e) {
+      console.log("[Speech] Error saving radio mic effect setting:", e);
+    }
+  }
+
+  async toggleRadioMicEffect() {
+    await this.setRadioMicEffectEnabled(!this.radioMicEffectEnabled);
+    return this.radioMicEffectEnabled;
   }
 
   async setVolumes(volumes) {

@@ -1,4 +1,16 @@
 const fs = require('fs');
+const path = require('path');
+
+const RADIO_AUDIO_PREFIXES = ["callout_", "system_", "service_", "crew_", "app_"];
+
+const assertAssetExists = (relativeAssetPath, hint) => {
+  const absoluteAssetPath = path.join(__dirname, relativeAssetPath);
+  if (!fs.existsSync(absoluteAssetPath)) {
+    console.error(`Missing audio asset: ${relativeAssetPath}`);
+    if (hint) console.error(hint);
+    process.exit(1);
+  }
+};
 
 const mappings = {
   "Client disconnected.": "app_client_disconnected",
@@ -105,9 +117,35 @@ const mappings = {
 
 let content = "export const staticAudioMap = {\n";
 for (const [text, filename] of Object.entries(mappings)) {
+  const hasRadioVariant = RADIO_AUDIO_PREFIXES.some((prefix) => filename.startsWith(prefix));
+  const femaleAsset = `assets/audio/female_${filename}.mp3`;
+  const maleAsset = `assets/audio/male_${filename}.mp3`;
+
+  assertAssetExists(femaleAsset);
+  assertAssetExists(maleAsset);
+
   content += `  "${text}": {\n`;
   content += `    female: require("../../assets/audio/female_${filename}.mp3"),\n`;
-  content += `    male: require("../../assets/audio/male_${filename}.mp3")\n`;
+  content += `    male: require("../../assets/audio/male_${filename}.mp3")`;
+  if (hasRadioVariant) {
+    const femaleRadioAsset = `assets/audio/radio/female_${filename}.mp3`;
+    const maleRadioAsset = `assets/audio/radio/male_${filename}.mp3`;
+
+    assertAssetExists(
+      femaleRadioAsset,
+      "Run `npm run audio:radio-assets` before regenerating the audio map."
+    );
+    assertAssetExists(
+      maleRadioAsset,
+      "Run `npm run audio:radio-assets` before regenerating the audio map."
+    );
+
+    content += `,\n`;
+    content += `    femaleRadio: require("../../assets/audio/radio/female_${filename}.mp3"),\n`;
+    content += `    maleRadio: require("../../assets/audio/radio/male_${filename}.mp3")\n`;
+  } else {
+    content += `\n`;
+  }
   content += `  },\n`;
 }
 content += "};\n";

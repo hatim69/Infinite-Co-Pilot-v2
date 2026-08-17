@@ -30,7 +30,11 @@
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "audio:prepare-assets": "npm run audio:radio-assets && npm run audio:map",
+    "audio:radio-assets": "node generateRadioCallouts.js",
+    "audio:radio-callouts": "npm run audio:radio-assets",
+    "audio:map": "node generateAudioMap.js"
   },
   "private": true,
   "devDependencies": {

@@ -34,7 +34,7 @@ import { speechManager } from '../../utils/speech';
 import Slider from './Slider';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const APP_VERSION = '1.6.0';
+const APP_VERSION = '1.6.1';
 const DISCORD_URL = 'https://discord.gg/hb3HkrfBEK';
 
 // ─── Theme Swatch ─────────────────────────────────────────────────────────────
@@ -180,6 +180,7 @@ export default function Sidebar({ visible, onClose, isBackgroundMode, setIsBackg
     boardingMusicVolume: 0.5,
     safetyBriefingVolume: 1.0,
     chimeEnabled: true,
+    radioMicEffectEnabled: true,
   });
 
   // Sync volumes when sidebar opens
@@ -191,6 +192,7 @@ export default function Sidebar({ visible, onClose, isBackgroundMode, setIsBackg
         boardingMusicVolume: speechManager.boardingMusicVolume,
         safetyBriefingVolume: speechManager.safetyBriefingVolume,
         chimeEnabled: speechManager.chimeEnabled,
+        radioMicEffectEnabled: speechManager.radioMicEffectEnabled,
       });
     }
   }, [visible]);
@@ -238,6 +240,10 @@ export default function Sidebar({ visible, onClose, isBackgroundMode, setIsBackg
 
   const updateVolume = (key, value) => {
     setVolumes((prev) => ({ ...prev, [key]: value }));
+    if (key === 'radioMicEffectEnabled') {
+      speechManager.setRadioMicEffectEnabled(value);
+      return;
+    }
     speechManager.setVolumes({ [key]: value });
   };
 
@@ -396,6 +402,23 @@ export default function Sidebar({ visible, onClose, isBackgroundMode, setIsBackg
                   <TouchableOpacity onPress={toggleVoiceGender} style={[styles.voiceToggleBtn, { backgroundColor: theme.surfaceMid || 'rgba(255,255,255,0.05)', borderColor: theme.borderMid }]} activeOpacity={0.7}>
                     <Text style={{ color: theme.textPrimary, fontSize: 11, fontWeight: 'bold' }}>{voicePreference === 'female' ? 'FEMALE' : 'MALE'}</Text>
                   </TouchableOpacity>
+                </View>
+
+                {/* Radio mic effect toggle */}
+                <View style={[styles.toggleRow, { borderTopColor: theme.borderMid }]}>
+                  <View style={{ flex: 1, minWidth: 0, paddingRight: 16 }}>
+                    <Text style={[styles.sliderLabel, { color: theme.textLabel }]}>Radio Mic Effect</Text>
+                    <Text style={[styles.toggleSub, { color: theme.textMuted }]}>
+                      Use VHF radio processing for co-pilot voice lines
+                    </Text>
+                  </View>
+                  <Switch
+                    value={volumes.radioMicEffectEnabled}
+                    onValueChange={(val) => updateVolume('radioMicEffectEnabled', val)}
+                    trackColor={{ false: theme.borderMid, true: theme.switchTrack }}
+                    thumbColor="#FFFFFF"
+                    ios_backgroundColor={theme.sliderTrack}
+                  />
                 </View>
 
                 {/* Chime toggle */}
