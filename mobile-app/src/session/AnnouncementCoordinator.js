@@ -24,6 +24,9 @@ class AnnouncementCoordinator {
   constructor(engine = speechManager) {
     this.engine = engine;
     this._musicActionId = 0;
+    this._boardingMusicCacheActionId = 0;
+    this._boardingMusicCacheLivery = "";
+    this._boardingMusicCachePromise = null;
     this._longFormActionId = 0;
     this._safetyBriefingPromise = null;
     this._lastDecisionLogKey = "";
@@ -32,6 +35,9 @@ class AnnouncementCoordinator {
 
   resetFlightState() {
     this._musicActionId += 1;
+    this._boardingMusicCacheActionId += 1;
+    this._boardingMusicCacheLivery = "";
+    this._boardingMusicCachePromise = null;
     this._longFormActionId += 1;
     this._safetyBriefingPromise = null;
     this.state = {
@@ -216,6 +222,52 @@ class AnnouncementCoordinator {
     return this.state.boardingMusicStarted && !this.state.boardingMusicStopped;
   }
 
+  ensureBoardingMusicCached(livery, options = {}) {
+    if (!livery) return Promise.resolve(null);
+    if (this._boardingMusicCacheLivery === livery) {
+      return this._boardingMusicCachePromise || Promise.resolve(null);
+    }
+
+    const actionId = ++this._boardingMusicCacheActionId;
+    const reason = options.reason || "unspecified";
+    this._boardingMusicCacheLivery = livery;
+    this._trace("announcementCoordinator.boarding_music_cache_requested", {
+      reason,
+      livery,
+    });
+
+    const cachePromise = Promise.resolve(this.engine.ensureBoardingMusicCached?.(livery, { reason }))
+      .then((uri) => {
+        if (this._boardingMusicCacheActionId !== actionId || this._boardingMusicCacheLivery !== livery) {
+          this._trace("announcementCoordinator.boarding_music_cache_obsolete", {
+            reason,
+            livery,
+          });
+          return null;
+        }
+
+        this._trace("announcementCoordinator.boarding_music_cache_ready", {
+          reason,
+          livery,
+          cached: Boolean(uri),
+        });
+        return uri;
+      })
+      .catch((error) => {
+        if (this._boardingMusicCacheActionId === actionId) {
+          this._trace("announcementCoordinator.boarding_music_cache_failed", {
+            reason,
+            livery,
+            error: error?.message || String(error),
+          });
+        }
+        return null;
+      });
+
+    this._boardingMusicCachePromise = cachePromise;
+    return cachePromise;
+  }
+
   stopAll() {
     this.engine.stopAll();
     this.resetFlightState();
@@ -317,8 +369,16 @@ class AnnouncementCoordinator {
     });
 
     try {
-      const started = await this.engine.playBoardingMusic(livery, options);
-      if (this._musicActionId !== actionId) {
+      const isStartCurrent = () =>
+        this._musicActionId === actionId &&
+        this.state.safetyBriefingStatus !== "starting" &&
+        this.state.safetyBriefingStatus !== "playing" &&
+        !this.state.boardingMusicStopped;
+      const started = await this.engine.playBoardingMusic(livery, {
+        ...options,
+        isStartCurrent,
+      });
+      if (!isStartCurrent()) {
         this._logDecision([
           "Boarding Music",
           "Cancelled",
@@ -332,6 +392,7 @@ class AnnouncementCoordinator {
       }
 
       const active = Boolean(started && this.engine.getDiagnostics?.().boardingMusicActive);
+      if (!active && !isStartCurrent()) return false;
       this.state.boardingMusicStarted = active;
       this.state.boardingMusicStopped = false;
       this.state.boardingMusicStatus = active ? "playing" : "idle";

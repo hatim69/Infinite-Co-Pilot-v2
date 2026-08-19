@@ -19,7 +19,7 @@ import { Asset } from "expo-asset";
 import { createAudioPlayer, setAudioModeAsync, preload } from "expo-audio";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Platform } from "react-native";
-import { getCachedAudioUri } from "./audioCache";
+import { getCachedAudioUri, getExistingCachedAudioUri, isLocalCachedAudioUri } from "./audioCache";
 import { staticAudioMap } from "./staticAudioMap";
 import { runtimeTrace } from "./runtimeTrace";
 
@@ -143,6 +143,7 @@ class SpeechManager {
     this._backgroundKeepAliveTimer = null;
     this._backgroundAnchorPromise = null;
     this._boardingMusicPrefetches = new Map();
+    this._boardingMusicCachedUris = new Map();
     this._audioConfigured = false;
     this.isProcessingQueue = false;
     this.isProcessingCabinQueue = false;
@@ -2609,13 +2610,53 @@ class SpeechManager {
     return "music/fallback.mp3";
   }
 
-  _getBoardingMusicUri(livery) {
+  _getBoardingMusicFallbackFileName(remoteFileName) {
+    return remoteFileName === "music/american-airlines.mp3"
+      ? null
+      : "music/american-airlines.mp3";
+  }
+
+  async _getCachedBoardingMusicUri(livery) {
     const remoteFileName = this._getBoardingMusicFileName(livery);
+    const cachedUri = this._boardingMusicCachedUris.get(remoteFileName);
+    if (isLocalCachedAudioUri(cachedUri)) return cachedUri;
+
+    const localUri = await getExistingCachedAudioUri(remoteFileName);
+    if (localUri) {
+      this._boardingMusicCachedUris.set(remoteFileName, localUri);
+      return localUri;
+    }
+
+    return null;
+  }
+
+  ensureBoardingMusicCached(livery, options = {}) {
+    if (!livery) return Promise.resolve(null);
+
+    const remoteFileName = this._getBoardingMusicFileName(livery);
+    const cachedUri = this._boardingMusicCachedUris.get(remoteFileName);
+    if (isLocalCachedAudioUri(cachedUri)) return Promise.resolve(cachedUri);
     if (this._boardingMusicPrefetches.has(remoteFileName)) {
       return this._boardingMusicPrefetches.get(remoteFileName);
     }
 
-    const request = getCachedAudioUri(remoteFileName, "music/american-airlines.mp3")
+    const request = getCachedAudioUri(
+      remoteFileName,
+      this._getBoardingMusicFallbackFileName(remoteFileName),
+      { allowRemoteFallback: false }
+    )
+      .then((uri) => {
+        if (!isLocalCachedAudioUri(uri)) return null;
+        this._boardingMusicCachedUris.set(remoteFileName, uri);
+        runtimeTrace("speech.boarding_music_cached", {
+          source: "audio-cache",
+          owner: "SpeechManager",
+          livery,
+          remoteFileName,
+          reason: options.reason || "unspecified",
+        }, { throttleMs: 0 });
+        return uri;
+      })
       .catch((error) => {
         console.warn("[Speech] Boarding music prefetch failed:", error?.message || error);
         return null;
@@ -2629,14 +2670,17 @@ class SpeechManager {
   }
 
   preloadBoardingMusic(livery) {
-    if (!livery) return;
-    this._getBoardingMusicUri(livery);
+    return this.ensureBoardingMusicCached(livery, { reason: "preload" });
   }
 
   async playBoardingMusic(livery, options = {}) {
     const fade = options.fade !== false; // Default true
     const durationMs = options.durationMs || BOARDING_MUSIC_FADE_MS;
+    const isStartCurrent = typeof options.isStartCurrent === "function"
+      ? options.isStartCurrent
+      : () => true;
 
+    if (!isStartCurrent()) return false;
     if (this.boardingMusic) return true;
     if (this._isFetchingBoardingMusic && this._fetchingBoardingMusicFor === livery) return false;
 
@@ -2648,10 +2692,10 @@ class SpeechManager {
     this._boardingMusicRequestId = playRequestId;
 
     try {
-      const audioUri = await this._getBoardingMusicUri(livery);
+      const audioUri = await this._getCachedBoardingMusicUri(livery);
 
-      // If stopped or disconnected while downloading, abort
-      if (this._boardingMusicRequestId !== playRequestId) {
+      // If stopped or disconnected while checking the local cache, abort.
+      if (this._boardingMusicRequestId !== playRequestId || !isStartCurrent()) {
         this._isFetchingBoardingMusic = false;
         if (this._fetchingBoardingMusicFor === livery) {
           this._fetchingBoardingMusicFor = "";
@@ -2659,8 +2703,8 @@ class SpeechManager {
         return false;
       }
 
-      if (!audioUri) {
-        console.warn("[Speech] Could not get cached audio for boarding music.");
+      if (!isLocalCachedAudioUri(audioUri)) {
+        console.warn("[Speech] Boarding music is not cached locally yet; skipping immediate playback.");
         return false;
       }
 
@@ -2675,14 +2719,25 @@ class SpeechManager {
           this._boardingMusicFadeTimer = null;
         }
       }
-      this.boardingMusic = createAudioPlayer(audioUri, EFFECT_AUDIO_PLAYER_OPTIONS);
-      this.boardingMusic.loop = true;
+      const player = createAudioPlayer(audioUri, EFFECT_AUDIO_PLAYER_OPTIONS);
+      this.boardingMusic = player;
+      player.loop = true;
       const targetVolume = this.masterVolume * this.boardingMusicVolume;
-      this.boardingMusic.volume = fade ? 0 : targetVolume;
+      player.volume = fade ? 0 : targetVolume;
 
       if (this.voiceEnabled) {
         await this._ensureBackgroundAnchor();
-        this.boardingMusic.play();
+        if (
+          this._boardingMusicRequestId !== playRequestId ||
+          this.boardingMusic !== player ||
+          !isStartCurrent()
+        ) {
+          if (this.boardingMusic === player) this.boardingMusic = null;
+          this._disposePlayer(player);
+          this._scheduleBackgroundMediaRefresh();
+          return false;
+        }
+        player.play();
         runtimeTrace("speech.boarding_music_start", {
           source: "expo-audio",
           owner: "SpeechManager",
@@ -2700,8 +2755,17 @@ class SpeechManager {
         this._boardingMusicFadeTimer = setInterval(() => {
           step += 1;
           try {
+            if (
+              this._boardingMusicRequestId !== playRequestId ||
+              this.boardingMusic !== player ||
+              !isStartCurrent()
+            ) {
+              if (this._boardingMusicFadeTimer) clearInterval(this._boardingMusicFadeTimer);
+              this._boardingMusicFadeTimer = null;
+              return;
+            }
             if (this.boardingMusic) {
-              this.boardingMusic.volume = Math.min(targetVolume, targetVolume * (step / steps));
+              player.volume = Math.min(targetVolume, targetVolume * (step / steps));
             }
           } catch (e) {
             if (this._boardingMusicFadeTimer) clearInterval(this._boardingMusicFadeTimer);

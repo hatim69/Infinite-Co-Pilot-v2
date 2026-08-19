@@ -291,6 +291,9 @@ const createAnnouncementFlags = () => ({
   isManualConnection: false,
   turbulenceAnnounced: false,
   suppressNextAutoSeatbeltOff: false,
+  descentPrepAnnounced: false,
+  cabinPrepAnnounced: false,
+  landingStationsAnnounced: false,
 });
 
 class FlightSession {
@@ -444,6 +447,10 @@ class FlightSession {
   }
 
   _handleTelemetryEffects(prev, next) {
+    if (prev.livery !== next.livery || prev.name !== next.name) {
+      this._preloadSelectedBoardingMusic(next);
+    }
+
     const ambientChanged =
       prev.strobe !== next.strobe ||
       prev.phase !== next.phase ||
@@ -513,6 +520,7 @@ class FlightSession {
     });
     flags.pendingAnnouncements = [];
     flags.isManualConnection = manualState;
+    this.boardingMusicPrefetchLivery = "";
     announcementCoordinator.resetFlightState();
     return flags;
   }
@@ -1015,6 +1023,10 @@ class FlightSession {
               if (this.isAutoActionsEnabled && state.landing !== true) {
                 console.log(`[AutoActions] Passing 10k descent. Lights OFF (${state.landing}). Sending landing_lights_switch=true.`);
                 ifConnect.set("aircraft/0/systems/landing_lights_switch", true);
+              }
+              if (!flags.cabinPrepAnnounced) {
+                flags.cabinPrepAnnounced = true;
+                speak("10k cabin prep.", { channel: "cabin", tone: "briefing" });
               }
             });
             checkAltitudeCallout(15000, 'alt15k', "Passing one-five thousand.", "Passing one-five thousand.", {});
@@ -1539,6 +1551,33 @@ class FlightSession {
           next.performance = calculatePerformance(next.name, next.weight);
         }
 
+        // ── SOP Callouts ──────────────────────────────────────────────────
+        // 1. Descent Preparation
+        if (
+          !flags.descentPrepAnnounced &&
+          next.destDist !== null &&
+          next.destDist <= 120 &&
+          next.vs !== null &&
+          next.vs <= -500 &&
+          next.msl !== null &&
+          next.msl > 18000
+        ) {
+          flags.descentPrepAnnounced = true;
+          speak("Descent preparation.", { channel: "cabin", tone: "briefing" });
+        }
+
+        // 2. Landing Stations
+        if (
+          !flags.landingStationsAnnounced &&
+          next.gear === 1 &&
+          next.agl !== null &&
+          next.agl <= 2500 &&
+          next.onGround === false
+        ) {
+          flags.landingStationsAnnounced = true;
+          speak("Landing stations.", { channel: "cabin", tone: "briefing" });
+        }
+
         // ── Phase derivation ──────────────────────────────────────────────
         // Runs on every poll packet so time-hysteresis can mature even when
         // the simulator is holding perfectly steady values.
@@ -1714,6 +1753,17 @@ class FlightSession {
       telemetry,
       isConnected: this.isConnected,
       reason: "telemetry_effects",
+    });
+  }
+
+  _preloadSelectedBoardingMusic(telemetry) {
+    const livery = telemetry?.livery;
+    if (!this.isConnected || !livery) return;
+    if (this.boardingMusicPrefetchLivery === livery) return;
+
+    this.boardingMusicPrefetchLivery = livery;
+    announcementCoordinator.ensureBoardingMusicCached(livery, {
+      reason: "flight_livery_known",
     });
   }
 

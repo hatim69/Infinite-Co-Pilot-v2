@@ -257,6 +257,24 @@ export const staticAudioMap = {
     femaleRadio: require("../../assets/audio/radio/female_crew_prepare_for_takeoff.mp3"),
     maleRadio: require("../../assets/audio/radio/male_crew_prepare_for_takeoff.mp3")
   },
+  "Descent preparation.": {
+    female: require("../../assets/audio/female_crew_descent_prep.mp3"),
+    male: require("../../assets/audio/male_crew_descent_prep.mp3"),
+    femaleRadio: require("../../assets/audio/radio/female_crew_descent_prep.mp3"),
+    maleRadio: require("../../assets/audio/radio/male_crew_descent_prep.mp3")
+  },
+  "10k cabin prep.": {
+    female: require("../../assets/audio/female_crew_cabin_prep_10k.mp3"),
+    male: require("../../assets/audio/male_crew_cabin_prep_10k.mp3"),
+    femaleRadio: require("../../assets/audio/radio/female_crew_cabin_prep_10k.mp3"),
+    maleRadio: require("../../assets/audio/radio/male_crew_cabin_prep_10k.mp3")
+  },
+  "Landing stations.": {
+    female: require("../../assets/audio/female_crew_landing_stations.mp3"),
+    male: require("../../assets/audio/male_crew_landing_stations.mp3"),
+    femaleRadio: require("../../assets/audio/radio/female_crew_landing_stations.mp3"),
+    maleRadio: require("../../assets/audio/radio/male_crew_landing_stations.mp3")
+  },
   "Ladies and gentlemen, we're currently experiencing some turbulence. We ask that you return to your seats and ensure your seatbelts are securely fastened. The seatbelt sign will remain on until we're clear of the area. Thank you for your cooperation.": {
     female: require("../../assets/audio/female_crew_turbulence.mp3"),
     male: require("../../assets/audio/male_crew_turbulence.mp3"),

@@ -2,6 +2,26 @@ import * as FileSystem from 'expo-file-system/legacy';
 
 // Base URL from our environment variables
 const CDN_URL = process.env.EXPO_PUBLIC_AUDIO_CDN_URL || "";
+const AUDIO_CACHE_DIR = `${FileSystem.documentDirectory}audio_cache/`;
+
+const getAudioCacheFileUri = (remoteFileName) => {
+  const safeLocalName = remoteFileName.replace(/\//g, "_");
+  return {
+    safeLocalName,
+    localFileUri: `${AUDIO_CACHE_DIR}${safeLocalName}`,
+  };
+};
+
+export const isLocalCachedAudioUri = (uri) =>
+  typeof uri === "string" && uri.startsWith(AUDIO_CACHE_DIR);
+
+export const getExistingCachedAudioUri = async (remoteFileName) => {
+  if (!remoteFileName) return null;
+
+  const { localFileUri } = getAudioCacheFileUri(remoteFileName);
+  const fileInfo = await FileSystem.getInfoAsync(localFileUri);
+  return fileInfo.exists ? localFileUri : null;
+};
 
 /**
  * Downloads an audio file from the CDN if it isn't already cached.
@@ -10,24 +30,25 @@ const CDN_URL = process.env.EXPO_PUBLIC_AUDIO_CDN_URL || "";
  *
  * @param {string} remoteFileName - e.g., "announcements/air-france.mp3"
  * @param {string} fallbackFileName - e.g., "announcements/fallback.mp3"
+ * @param {{ allowRemoteFallback?: boolean }} options - Set allowRemoteFallback false for local-only playback paths.
  * @returns {Promise<string>} - The URI to the audio file (local file:// or remote https://).
  */
-export const getCachedAudioUri = async (remoteFileName, fallbackFileName = null) => {
+export const getCachedAudioUri = async (remoteFileName, fallbackFileName = null, options = {}) => {
+  const allowRemoteFallback = options.allowRemoteFallback !== false;
+
   if (!CDN_URL) {
     console.error("[AudioCache] CDN URL not set in .env! Did you restart the Expo server (npx expo start -c)?");
     return null;
   }
 
   const remoteUrl = `${CDN_URL.replace(/\/$/, '')}/${remoteFileName}`;
-  const localCacheDir = `${FileSystem.documentDirectory}audio_cache/`;
-  const safeLocalName = remoteFileName.replace(/\//g, "_");
-  const localFileUri = `${localCacheDir}${safeLocalName}`;
+  const { safeLocalName, localFileUri } = getAudioCacheFileUri(remoteFileName);
 
   try {
     // 1. Ensure the cache directory exists
-    const dirInfo = await FileSystem.getInfoAsync(localCacheDir);
+    const dirInfo = await FileSystem.getInfoAsync(AUDIO_CACHE_DIR);
     if (!dirInfo.exists) {
-      await FileSystem.makeDirectoryAsync(localCacheDir, { intermediates: true });
+      await FileSystem.makeDirectoryAsync(AUDIO_CACHE_DIR, { intermediates: true });
     }
 
     // 2. Check if the file is already downloaded
@@ -51,17 +72,21 @@ export const getCachedAudioUri = async (remoteFileName, fallbackFileName = null)
 
   } catch (error) {
     console.warn(`[AudioCache] Local caching failed for ${remoteFileName}:`, error.message);
-    console.log(`[AudioCache] Falling back to streaming directly from remote URL...`);
+    if (allowRemoteFallback) {
+      console.log(`[AudioCache] Falling back to streaming directly from remote URL...`);
+    } else {
+      console.log(`[AudioCache] Remote streaming fallback disabled for this request.`);
+    }
     
     // Fallback 1: Try to stream the requested file directly
-    if (error.message && !error.message.includes("404")) {
+    if (allowRemoteFallback && error.message && !error.message.includes("404")) {
       return remoteUrl;
     }
 
     // Fallback 2: Try the fallback file
     if (fallbackFileName && fallbackFileName !== remoteFileName) {
       console.log(`[AudioCache] Attempting to use fallback file: ${fallbackFileName}`);
-      return await getCachedAudioUri(fallbackFileName, null);
+      return await getCachedAudioUri(fallbackFileName, null, options);
     }
 
     return null;
