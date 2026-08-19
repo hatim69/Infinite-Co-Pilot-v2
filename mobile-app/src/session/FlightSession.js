@@ -294,6 +294,7 @@ const createAnnouncementFlags = () => ({
   descentPrepAnnounced: false,
   cabinPrepAnnounced: false,
   landingStationsAnnounced: false,
+  climb10kAnnounced: false,
 });
 
 class FlightSession {
@@ -1015,18 +1016,29 @@ class FlightSession {
               }
             });
             checkAltitudeCallout(10000, 'alt10k', "Ten thousand. Landing lights off.", "Ten thousand. Landing lights on.", { climb: { tone: "caution", priority: true }, descent: { tone: "notice", priority: true } }, () => {
-              if (this.isAutoActionsEnabled && state.landing !== false) {
-                console.log(`[AutoActions] Passing 10k climb. Lights ON (${state.landing}). Sending landing_lights_switch=false.`);
-                ifConnect.set("aircraft/0/systems/landing_lights_switch", false);
+              if (this.isAutoActionsEnabled) {
+                if (state.landing !== false) {
+                  console.log(`[AutoActions] Passing 10k climb. Lights ON (${state.landing}). Sending landing_lights_switch=false.`);
+                  ifConnect.set("aircraft/0/systems/landing_lights_switch", false);
+                }
+                if (state.seatbelt !== false) {
+                  console.log(`[AutoActions] Passing 10k climb. Seatbelts ON (${state.seatbelt}). Sending signs/seatbelt=false.`);
+                  flags.suppressNextAutoSeatbeltOff = true;
+                  ifConnect.set("aircraft/0/systems/signs/seatbelt", false);
+                }
+              }
+              if (!flags.climb10kAnnounced && ["initial_climb", "climb"].includes(state.phase)) {
+                flags.climb10kAnnounced = true;
+                speak("Ladies and gentlemen, from the flight deck. We've just cleared 10,000 feet on our way up to our cruising altitude. The Seatbelt sign has now been turned off, but please keep it securely fastened while seated in case of unexpected bumps along the way. Enjoy the rest of the flight.", { channel: "cabin", tone: "briefing" });
               }
             }, () => {
               if (this.isAutoActionsEnabled && state.landing !== true) {
                 console.log(`[AutoActions] Passing 10k descent. Lights OFF (${state.landing}). Sending landing_lights_switch=true.`);
                 ifConnect.set("aircraft/0/systems/landing_lights_switch", true);
               }
-              if (!flags.cabinPrepAnnounced) {
+              if (!flags.cabinPrepAnnounced && ["descent", "approach", "final_approach", "landing"].includes(state.phase)) {
                 flags.cabinPrepAnnounced = true;
-                speak("10k cabin prep.", { channel: "cabin", tone: "briefing" });
+                speak("Cabin crew, we are now passing through ten thousand feet. Please prepare the cabin for landing.", { channel: "cabin", tone: "briefing" });
               }
             });
             checkAltitudeCallout(15000, 'alt15k', "Passing one-five thousand.", "Passing one-five thousand.", {});
@@ -1560,10 +1572,11 @@ class FlightSession {
           next.vs !== null &&
           next.vs <= -500 &&
           next.msl !== null &&
-          next.msl > 18000
+          next.msl > 18000 &&
+          ["descent", "approach", "final_approach", "landing"].includes(next.phase)
         ) {
           flags.descentPrepAnnounced = true;
-          speak("Descent preparation.", { channel: "cabin", tone: "briefing" });
+          speak("Ladies and gentlemen, we will shortly begin our descent and will be landing shortly. Please return to your seats and fasten your seat belts. Ensure your seat backs and tray tables are in the upright position, window shades are open, and all electronic devices are set to flight mode. Please securely stow your hand baggage and refrain from using the lavatories. Thank you.", { channel: "cabin", tone: "briefing" });
         }
 
         // 2. Landing Stations
@@ -1572,10 +1585,11 @@ class FlightSession {
           next.gear === 1 &&
           next.agl !== null &&
           next.agl <= 2500 &&
-          next.onGround === false
+          next.onGround === false &&
+          ["descent", "approach", "final_approach", "landing"].includes(next.phase)
         ) {
           flags.landingStationsAnnounced = true;
-          speak("Landing stations.", { channel: "cabin", tone: "briefing" });
+          speak("Cabin crew, landing stations.", { channel: "cabin", tone: "briefing" });
         }
 
         // ── Phase derivation ──────────────────────────────────────────────

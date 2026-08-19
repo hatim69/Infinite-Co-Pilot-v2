@@ -34,7 +34,7 @@ import { speechManager } from '../../utils/speech';
 import Slider from './Slider';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const APP_VERSION = '1.6.3';
+const APP_VERSION = '1.6.4';
 const DISCORD_URL = 'https://discord.gg/hb3HkrfBEK';
 
 // ─── Theme Swatch ─────────────────────────────────────────────────────────────
@@ -179,6 +179,8 @@ export default function Sidebar({ visible, onClose, isBackgroundMode, setIsBackg
     coPilotVolume: 1.0,
     boardingMusicVolume: 0.5,
     safetyBriefingVolume: 1.0,
+    passengerNoisesVolume: 0.5,
+    passengerNoisesEnabled: true,
     chimeEnabled: true,
     radioMicEffectEnabled: true,
   });
@@ -191,6 +193,8 @@ export default function Sidebar({ visible, onClose, isBackgroundMode, setIsBackg
         coPilotVolume: speechManager.coPilotVolume,
         boardingMusicVolume: speechManager.boardingMusicVolume,
         safetyBriefingVolume: speechManager.safetyBriefingVolume,
+        passengerNoisesVolume: speechManager.passengerNoisesVolume,
+        passengerNoisesEnabled: speechManager.passengerNoisesEnabled,
         chimeEnabled: speechManager.chimeEnabled,
         radioMicEffectEnabled: speechManager.radioMicEffectEnabled,
       });
@@ -390,6 +394,32 @@ export default function Sidebar({ visible, onClose, isBackgroundMode, setIsBackg
                   onValueChange={(val) => updateVolume('safetyBriefingVolume', val)}
                   theme={theme}
                 />
+                
+                {/* Passenger Noises toggle */}
+                <View style={[styles.toggleRow, { borderTopColor: theme.borderMid }]}>
+                  <View style={{ flex: 1, minWidth: 0, paddingRight: 16 }}>
+                    <Text style={[styles.sliderLabel, { color: theme.textLabel }]}>Passenger Noises</Text>
+                    <Text style={[styles.toggleSub, { color: theme.textMuted }]}>
+                      Play ambient passenger sounds during boarding and deboarding
+                    </Text>
+                  </View>
+                  <Switch
+                    value={volumes.passengerNoisesEnabled}
+                    onValueChange={(val) => updateVolume('passengerNoisesEnabled', val)}
+                    trackColor={{ false: theme.borderMid, true: theme.switchTrack }}
+                    thumbColor="#FFFFFF"
+                    ios_backgroundColor={theme.sliderTrack}
+                  />
+                </View>
+                
+                {volumes.passengerNoisesEnabled && (
+                  <VolumeSliderRow
+                    label="Noises Volume"
+                    value={volumes.passengerNoisesVolume}
+                    onValueChange={(val) => updateVolume('passengerNoisesVolume', val)}
+                    theme={theme}
+                  />
+                )}
 
                 {/* Voice Gender toggle */}
                 <View style={[styles.toggleRow, { borderTopColor: theme.borderMid }]}>

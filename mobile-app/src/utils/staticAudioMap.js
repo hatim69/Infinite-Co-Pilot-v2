@@ -257,23 +257,29 @@ export const staticAudioMap = {
     femaleRadio: require("../../assets/audio/radio/female_crew_prepare_for_takeoff.mp3"),
     maleRadio: require("../../assets/audio/radio/male_crew_prepare_for_takeoff.mp3")
   },
-  "Descent preparation.": {
+  "Ladies and gentlemen, we will shortly begin our descent and will be landing shortly. Please return to your seats and fasten your seat belts. Ensure your seat backs and tray tables are in the upright position, window shades are open, and all electronic devices are set to flight mode. Please securely stow your hand baggage and refrain from using the lavatories. Thank you.": {
     female: require("../../assets/audio/female_crew_descent_prep.mp3"),
     male: require("../../assets/audio/male_crew_descent_prep.mp3"),
     femaleRadio: require("../../assets/audio/radio/female_crew_descent_prep.mp3"),
     maleRadio: require("../../assets/audio/radio/male_crew_descent_prep.mp3")
   },
-  "10k cabin prep.": {
+  "Cabin crew, we are now passing through ten thousand feet. Please prepare the cabin for landing.": {
     female: require("../../assets/audio/female_crew_cabin_prep_10k.mp3"),
     male: require("../../assets/audio/male_crew_cabin_prep_10k.mp3"),
     femaleRadio: require("../../assets/audio/radio/female_crew_cabin_prep_10k.mp3"),
     maleRadio: require("../../assets/audio/radio/male_crew_cabin_prep_10k.mp3")
   },
-  "Landing stations.": {
+  "Cabin crew, landing stations.": {
     female: require("../../assets/audio/female_crew_landing_stations.mp3"),
     male: require("../../assets/audio/male_crew_landing_stations.mp3"),
     femaleRadio: require("../../assets/audio/radio/female_crew_landing_stations.mp3"),
     maleRadio: require("../../assets/audio/radio/male_crew_landing_stations.mp3")
+  },
+  "Ladies and gentlemen, from the flight deck. We've just cleared 10,000 feet on our way up to our cruising altitude. The Seatbelt sign has now been turned off, but please keep it securely fastened while seated in case of unexpected bumps along the way. Enjoy the rest of the flight.": {
+    female: require("../../assets/audio/female_crew_climb_10k.mp3"),
+    male: require("../../assets/audio/male_crew_climb_10k.mp3"),
+    femaleRadio: require("../../assets/audio/radio/female_crew_climb_10k.mp3"),
+    maleRadio: require("../../assets/audio/radio/male_crew_climb_10k.mp3")
   },
   "Ladies and gentlemen, we're currently experiencing some turbulence. We ask that you return to your seats and ensure your seatbelts are securely fastened. The seatbelt sign will remain on until we're clear of the area. Thank you for your cooperation.": {
     female: require("../../assets/audio/female_crew_turbulence.mp3"),

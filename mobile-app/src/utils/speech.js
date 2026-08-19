@@ -81,6 +81,7 @@ const STATIC_PLAYER_HEALTH = Object.freeze({
 const STATIC_AUDIO_MAX_RETRY_COUNT = 1;
 const CHIME_AUDIO_ASSET = require("../../assets/chime.mp3");
 const PTU_BARK_ASSET = require("../../assets/audio/ptu-bark.mp3");
+const PASSENGER_NOISES_ASSET = require("../../assets/audio/boarding_noise.mp3");
 const BACKGROUND_AUDIO_ASSET = require("../../assets/silent.m4a");
 const LOCK_SCREEN_ARTWORK_ASSET = require("../../assets/images/icon.png");
 
@@ -112,9 +113,12 @@ class SpeechManager {
     this.coPilotVolume = 1.0;
     this.boardingMusicVolume = 0.5;
     this.safetyBriefingVolume = 1.0;
+    this.passengerNoisesVolume = 0.5;
+    this.passengerNoisesEnabled = true;
     this.chimeEnabled = true;
 
     this.boardingMusic = null;
+    this.passengerNoisePlayer = null;
     this.sirenPlayer = null;
     this.chimePlayer = null;
     this.boardingAnnouncePlayer = null;
@@ -1833,6 +1837,8 @@ class SpeechManager {
         this.coPilotVolume = parsed.coPilotVolume ?? 1.0;
         this.boardingMusicVolume = parsed.boardingMusicVolume ?? 1.0;
         this.safetyBriefingVolume = parsed.safetyBriefingVolume ?? 1.0;
+        this.passengerNoisesVolume = parsed.passengerNoisesVolume ?? 0.5;
+        this.passengerNoisesEnabled = parsed.passengerNoisesEnabled ?? true;
         this.chimeEnabled = parsed.chimeEnabled ?? true;
       }
     } catch (e) { }
@@ -1965,6 +1971,8 @@ class SpeechManager {
     this.coPilotVolume = volumes.coPilotVolume ?? this.coPilotVolume;
     this.boardingMusicVolume = volumes.boardingMusicVolume ?? this.boardingMusicVolume;
     this.safetyBriefingVolume = volumes.safetyBriefingVolume ?? this.safetyBriefingVolume;
+    this.passengerNoisesVolume = volumes.passengerNoisesVolume ?? this.passengerNoisesVolume;
+    this.passengerNoisesEnabled = volumes.passengerNoisesEnabled ?? this.passengerNoisesEnabled;
     this.chimeEnabled = volumes.chimeEnabled ?? this.chimeEnabled;
 
     try {
@@ -1973,6 +1981,8 @@ class SpeechManager {
         coPilotVolume: this.coPilotVolume,
         boardingMusicVolume: this.boardingMusicVolume,
         safetyBriefingVolume: this.safetyBriefingVolume,
+        passengerNoisesVolume: this.passengerNoisesVolume,
+        passengerNoisesEnabled: this.passengerNoisesEnabled,
         chimeEnabled: this.chimeEnabled,
       }));
     } catch (e) {
@@ -1982,6 +1992,12 @@ class SpeechManager {
     // Apply live volume updates to any currently-playing players
     if (this.boardingMusic && !this._boardingMusicFadeTimer) {
       this.boardingMusic.volume = this.masterVolume * this.boardingMusicVolume;
+    }
+    if (this.passengerNoisePlayer && !this._passengerNoiseFadeTimer) {
+      this.passengerNoisePlayer.volume = this.masterVolume * this.passengerNoisesVolume;
+      if (!this.passengerNoisesEnabled) {
+        this.stopPassengerNoises({ fade: true });
+      }
     }
     if (this.boardingAnnouncePlayer) {
       this.boardingAnnouncePlayer.volume = this.masterVolume * this.safetyBriefingVolume;
@@ -2858,11 +2874,131 @@ class SpeechManager {
     });
   }
 
+  async playPassengerNoises(options = {}) {
+    if (!this.passengerNoisesEnabled) return false;
+    if (this.passengerNoisePlayer) return true;
+
+    const fade = options.fade !== false;
+    const durationMs = options.durationMs || BOARDING_MUSIC_FADE_MS;
+
+    try {
+      if (this._passengerNoiseFadeTimer) {
+        if (this._passengerNoiseFadeFinish) {
+          this._passengerNoiseFadeFinish();
+        } else {
+          clearInterval(this._passengerNoiseFadeTimer);
+          this._passengerNoiseFadeTimer = null;
+        }
+      }
+
+      const player = createAudioPlayer(PASSENGER_NOISES_ASSET, EFFECT_AUDIO_PLAYER_OPTIONS);
+      this.passengerNoisePlayer = player;
+      player.loop = true;
+      
+      const targetVolume = this.masterVolume * this.passengerNoisesVolume;
+      player.volume = fade ? 0 : targetVolume;
+
+      if (this.voiceEnabled) {
+        await this._ensureBackgroundAnchor();
+        if (this.passengerNoisePlayer !== player) {
+          this._disposePlayer(player);
+          return false;
+        }
+        player.play();
+        this._scheduleBackgroundMediaRefresh([0, 500]);
+      }
+
+      if (fade && this.voiceEnabled) {
+        const steps = 14;
+        const intervalMs = Math.max(50, Math.round(durationMs / steps));
+        let step = 0;
+        this._passengerNoiseFadeTimer = setInterval(() => {
+          step += 1;
+          try {
+            if (this.passengerNoisePlayer !== player) {
+              if (this._passengerNoiseFadeTimer) clearInterval(this._passengerNoiseFadeTimer);
+              this._passengerNoiseFadeTimer = null;
+              return;
+            }
+            player.volume = Math.min(targetVolume, targetVolume * (step / steps));
+          } catch (e) {
+            if (this._passengerNoiseFadeTimer) clearInterval(this._passengerNoiseFadeTimer);
+            return;
+          }
+          if (step >= steps) {
+            if (this._passengerNoiseFadeTimer) clearInterval(this._passengerNoiseFadeTimer);
+            this._passengerNoiseFadeTimer = null;
+          }
+        }, intervalMs);
+      }
+      return true;
+    } catch (e) {
+      console.log("[Speech] Passenger noises failed:", e);
+      return false;
+    }
+  }
+
+  stopPassengerNoises({ fade = false, durationMs = BOARDING_MUSIC_FADE_MS } = {}) {
+    const player = this.passengerNoisePlayer;
+    if (!player) return Promise.resolve(false);
+
+    if (this._passengerNoiseFadeTimer) {
+      if (this._passengerNoiseFadeFinish) {
+        this._passengerNoiseFadeFinish();
+      } else {
+        clearInterval(this._passengerNoiseFadeTimer);
+        this._passengerNoiseFadeTimer = null;
+      }
+    }
+
+    return new Promise((resolve) => {
+      let resolved = false;
+      const cleanup = () => {
+        if (resolved) return;
+        resolved = true;
+        if (this._passengerNoiseFadeTimer) {
+          clearInterval(this._passengerNoiseFadeTimer);
+          this._passengerNoiseFadeTimer = null;
+        }
+        if (this._passengerNoiseFadeFinish === cleanup) {
+          this._passengerNoiseFadeFinish = null;
+        }
+        if (this.passengerNoisePlayer === player) {
+          this.passengerNoisePlayer = null;
+        }
+        this._disposePlayer(player);
+        resolve(true);
+      };
+
+      if (fade && this.voiceEnabled) {
+        const steps = 14;
+        const intervalMs = Math.max(50, Math.round(durationMs / steps));
+        const startVolume = typeof player.volume === "number" ? player.volume : this.masterVolume * this.passengerNoisesVolume;
+        let step = 0;
+        this._passengerNoiseFadeFinish = cleanup;
+
+        this._passengerNoiseFadeTimer = setInterval(() => {
+          step += 1;
+          try {
+            player.volume = Math.max(0, startVolume * (1 - step / steps));
+          } catch (e) {
+            cleanup();
+            return;
+          }
+          if (step >= steps) cleanup();
+        }, intervalMs);
+      } else {
+        cleanup();
+      }
+    });
+  }
+
   stopAll() {
     this._stopSpeechPlayback({ clearQueues: true });
     this.isProcessingQueue = false;
     this.isProcessingCabinQueue = false;
     this.stopBoardingMusic();
+    this.stopPassengerNoises();
     if (this.chimePlayer) {
       this._disposePlayer(this.chimePlayer);
       this.chimePlayer = null;

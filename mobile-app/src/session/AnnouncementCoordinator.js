@@ -659,6 +659,12 @@ class AnnouncementCoordinator {
       strobe: telemetry.strobe,
       livery: telemetry.livery,
     });
+
+    if (telemetry.phase === "boarding" || telemetry.phase === "deboarding") {
+      this.engine.playPassengerNoises({ fade: true });
+    } else {
+      this.engine.stopPassengerNoises({ fade: true });
+    }
   }
 
   playSiren() {

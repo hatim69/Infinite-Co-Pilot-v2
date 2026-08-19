@@ -56,9 +56,10 @@ const mappings = {
   "Welcome to the flight Captain.": "crew_welcome_captain_ground",
   "Welcome back to the flight Captain.": "crew_welcome_back_captain_airborne",
   "Cabin crew prepare for take off.": "crew_prepare_for_takeoff",
-  "Descent preparation.": "crew_descent_prep",
-  "10k cabin prep.": "crew_cabin_prep_10k",
-  "Landing stations.": "crew_landing_stations",
+  "Ladies and gentlemen, we will shortly begin our descent and will be landing shortly. Please return to your seats and fasten your seat belts. Ensure your seat backs and tray tables are in the upright position, window shades are open, and all electronic devices are set to flight mode. Please securely stow your hand baggage and refrain from using the lavatories. Thank you.": "crew_descent_prep",
+  "Cabin crew, we are now passing through ten thousand feet. Please prepare the cabin for landing.": "crew_cabin_prep_10k",
+  "Cabin crew, landing stations.": "crew_landing_stations",
+  "Ladies and gentlemen, from the flight deck. We've just cleared 10,000 feet on our way up to our cruising altitude. The Seatbelt sign has now been turned off, but please keep it securely fastened while seated in case of unexpected bumps along the way. Enjoy the rest of the flight.": "crew_climb_10k",
   "Ladies and gentlemen, we're currently experiencing some turbulence. We ask that you return to your seats and ensure your seatbelts are securely fastened. The seatbelt sign will remain on until we're clear of the area. Thank you for your cooperation.": "crew_turbulence",
   "Ladies and gentlemen, we've now returned to smooth air and the seat belt sign has been switched off. You are free to move around the cabin if needed, though we recommend keeping your seat belt fastened whenever you're seated. Thank you.": "crew_post_turbulence",
   
