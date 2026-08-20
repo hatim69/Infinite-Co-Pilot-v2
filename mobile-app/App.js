@@ -71,24 +71,8 @@ import BackgroundReliability from "./src/components/cards/BackgroundReliability"
 import Sidebar from "./src/components/ui/Sidebar";
 import Gatekeeper from "./src/components/ui/Gatekeeper";
 import { BETA_EXPIRY_DATE, SUPABASE_URL } from "./src/utils/beta";
-import * as Sentry from '@sentry/react-native';
-
 const FLIGHT_DECK_MIN_PREP_MS = 900;
 const FLIGHT_DECK_PREP_TIMEOUT_MS = 6000;
-
-Sentry.init({
-  dsn: 'https://66233b21396117323bd0f22ac62893bf@o4511750585450496.ingest.de.sentry.io/4511750588399696',
-
-  // Adds more context data to events (IP address, cookies, user, etc.)
-  // For more information, visit: https://docs.sentry.io/platforms/react-native/data-management/data-collected/
-  sendDefaultPii: true,
-
-  // Enable Logs
-  enableLogs: true,
-
-  // uncomment the line below to enable Spotlight (https://spotlightjs.com)
-  // spotlight: __DEV__,
-});
 
 // ─── Section Header ────────────────────────────────────────────────────────────
 const SectionHeader = ({ title, icon: Icon, color }) => {
@@ -913,7 +897,7 @@ function AppInner() {
 }
 
 // ─── Root Export (wraps with ThemeProvider) ────────────────────────────────────
-export default Sentry.wrap(function App() {
+export default function App() {
   return (
     <SafeAreaProvider>
       <ThemeProvider>
@@ -921,7 +905,7 @@ export default Sentry.wrap(function App() {
       </ThemeProvider>
     </SafeAreaProvider>
   );
-});
+}
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
