@@ -111,7 +111,7 @@ class SpeechManager {
     // Volumes — 100% by default; user adjusts via settings
     this.masterVolume = 1.0;
     this.coPilotVolume = 1.0;
-    this.boardingMusicVolume = 0.5;
+    this.boardingMusicVolume = 0.25;
     this.safetyBriefingVolume = 1.0;
     this.passengerNoisesVolume = 0.5;
     this.passengerNoisesEnabled = true;

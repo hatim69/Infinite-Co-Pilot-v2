@@ -33,7 +33,7 @@ import { speechManager } from '../../utils/speech';
 import Slider from './Slider';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const APP_VERSION = '1.6.5';
+const APP_VERSION = '1.6.6';
 const DISCORD_URL = 'https://discord.gg/hb3HkrfBEK';
 
 // ─── Theme Swatch ─────────────────────────────────────────────────────────────
@@ -146,7 +146,7 @@ export default function Sidebar({ visible, onClose, isBackgroundMode, setIsBackg
   const [volumes, setVolumes] = useState({
     masterVolume: 1.0,
     coPilotVolume: 1.0,
-    boardingMusicVolume: 0.5,
+    boardingMusicVolume: 0.25,
     safetyBriefingVolume: 1.0,
     passengerNoisesVolume: 0.5,
     passengerNoisesEnabled: true,
