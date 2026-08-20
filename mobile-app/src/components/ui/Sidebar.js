@@ -31,9 +31,11 @@ import { X, Volume2, Palette, Info, MessageCircle, Check, Settings, Bug } from '
 import { useTheme, THEMES } from '../../context/ThemeContext';
 import { speechManager } from '../../utils/speech';
 import Slider from './Slider';
+import LegalModal from './LegalModal';
+import { TERMS_OF_SERVICE, PRIVACY_POLICY } from '../../utils/legalText';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const APP_VERSION = '1.6.6';
+const APP_VERSION = '1.7.0';
 const DISCORD_URL = 'https://discord.gg/hb3HkrfBEK';
 
 // ─── Theme Swatch ─────────────────────────────────────────────────────────────
@@ -141,6 +143,9 @@ export default function Sidebar({ visible, onClose, isBackgroundMode, setIsBackg
 
   // Control modal mount state for exit animations
   const [isModalVisible, setModalVisible] = useState(visible);
+  
+  // Legal modals state
+  const [legalModalConfig, setLegalModalConfig] = useState({ visible: false, title: '', content: '' });
 
 
   const [volumes, setVolumes] = useState({
@@ -511,10 +516,27 @@ export default function Sidebar({ visible, onClose, isBackgroundMode, setIsBackg
                     <Text style={[styles.discordArrowText, { color: theme.accent }]}>↗</Text>
                   </View>
                 </TouchableOpacity>
+
+                {/* Legal links */}
+                <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 16, marginTop: 4, marginBottom: 8 }}>
+                  <TouchableOpacity onPress={() => setLegalModalConfig({ visible: true, title: 'Terms of Service', content: TERMS_OF_SERVICE })}>
+                    <Text style={{ fontSize: 12, color: theme.textMuted, textDecorationLine: 'underline' }}>Terms of Service</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => setLegalModalConfig({ visible: true, title: 'Privacy Policy', content: PRIVACY_POLICY })}>
+                    <Text style={{ fontSize: 12, color: theme.textMuted, textDecorationLine: 'underline' }}>Privacy Policy</Text>
+                  </TouchableOpacity>
+                </View>
               </SidebarSection>
             </ScrollView>
           </KeyboardAvoidingView>
         </Animated.View>
+        
+        <LegalModal
+          visible={legalModalConfig.visible}
+          title={legalModalConfig.title}
+          content={legalModalConfig.content}
+          onClose={() => setLegalModalConfig({ visible: false, title: '', content: '' })}
+        />
       </View>
     </Modal>
   );
