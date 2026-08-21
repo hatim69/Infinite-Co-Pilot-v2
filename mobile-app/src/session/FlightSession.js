@@ -983,25 +983,67 @@ class FlightSession {
               inDescentAnnouncementPhase || (this.phaseTracker.phaseReady && isDescendingForCallout(state));
 
             const HYSTERESIS = 300;
+            // How long an opposite-direction re-arm granted purely by "we just fired
+            // the other way" (see below) stays on cooldown before it's honored. A
+            // real 300ft excursion (the arming branch below) bypasses this entirely
+            // and is honored immediately — it's independent proof of a genuine,
+            // sustained move, not just a threshold straddle.
+            const REARM_COOLDOWN_MS = 5000;
 
+            // Threshold-crossing detector with hysteresis + cooldown-gated cross-arming.
+            //
+            // Root cause of "lights turn ON descending through 10,000ft but don't turn
+            // OFF climbing back through it": each direction's `_armedForX` flag was
+            // ONLY re-armed by traveling `HYSTERESIS` (300ft) past the line on its OWN
+            // side. A descent that fires (arming happens during the long cruise before
+            // it, so it always worked) never re-arms the CLIMB direction unless the
+            // aircraft then travels 300ft below the line — so any climb back through
+            // 10,000ft that doesn't first drop that far below it (a go-around, step
+            // climb, missed approach, holding pattern) silently never re-fires. That
+            // matches the reported asymmetry exactly: descent (ON) looks reliable
+            // because cruise spends a long time arming it every flight, while climb
+            // (OFF) breaks the moment there's any reversal, because nothing re-arms it.
+            //
+            // Fix: the moment a crossing fires, immediately re-arm the *opposite*
+            // direction (we know for a fact which side we're now on) — but gate it with
+            // REARM_COOLDOWN_MS so an aircraft held level at exactly `alt` (a common
+            // ATC-assigned altitude) can't chatter on telemetry noise that straddles the
+            // exact line repeatedly. Firing itself still requires an actual
+            // crossedThreshold() straddle, so the cooldown only suppresses *repeat*
+            // fires close together — a single genuine crossing is never blocked.
             const checkAltitudeCallout = (alt, flagPrefix, climbText, descentText, options, onClimb, onDescent) => {
-              // Hysteresis Arming
+              const armedForClimbKey = `${flagPrefix}_armedForClimb`;
+              const armedForDescentKey = `${flagPrefix}_armedForDescent`;
+              const climbReadyAtKey = `${flagPrefix}_climbReadyAt`;
+              const descentReadyAtKey = `${flagPrefix}_descentReadyAt`;
+
+              // Hysteresis arming — bootstraps readiness before the first crossing, and
+              // re-arms (with NO cooldown — this is a real sustained excursion, not
+              // just a crossing) after traveling HYSTERESIS past the line.
               if (currentAlt > alt + HYSTERESIS) {
-                flags[`${flagPrefix}_armedForDescent`] = true;
+                flags[armedForDescentKey] = true;
+                flags[descentReadyAtKey] = 0;
               } else if (currentAlt < alt - HYSTERESIS) {
-                flags[`${flagPrefix}_armedForClimb`] = true;
+                flags[armedForClimbKey] = true;
+                flags[climbReadyAtKey] = 0;
               }
 
-              // Callouts
               const crossing = crossedThreshold(prevMsl, currentAlt, alt);
-              if (allowClimbAltitudeCallout && crossing.ascending && flags[`${flagPrefix}_armedForClimb`]) {
+              const climbReady = flags[armedForClimbKey] && now >= (flags[climbReadyAtKey] || 0);
+              const descentReady = flags[armedForDescentKey] && now >= (flags[descentReadyAtKey] || 0);
+
+              if (allowClimbAltitudeCallout && crossing.ascending && climbReady) {
                 speak(climbText, options.climb || "notice");
-                flags[`${flagPrefix}_armedForClimb`] = false;
+                flags[armedForClimbKey] = false;
+                flags[armedForDescentKey] = true;
+                flags[descentReadyAtKey] = now + REARM_COOLDOWN_MS;
                 if (onClimb) onClimb();
               }
-              if (allowDescentAltitudeCallout && crossing.descending && flags[`${flagPrefix}_armedForDescent`]) {
+              if (allowDescentAltitudeCallout && crossing.descending && descentReady) {
                 speak(descentText, options.descent || "notice");
-                flags[`${flagPrefix}_armedForDescent`] = false;
+                flags[armedForDescentKey] = false;
+                flags[armedForClimbKey] = true;
+                flags[climbReadyAtKey] = now + REARM_COOLDOWN_MS;
                 if (onDescent) onDescent();
               }
             };
