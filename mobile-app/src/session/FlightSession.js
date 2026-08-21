@@ -77,6 +77,26 @@ const DESCENT_CALLOUT_MAX_VS_FPM = -150;
 const POSITIVE_RATE_MIN_AGL_FT = 50;
 const POSITIVE_RATE_MAX_AGL_FT = 1500;
 const POSITIVE_RATE_MIN_VS_FPM = 150;
+// Ceiling for a single LandingGear command to reach its target physical
+// state before the pending flag is released without an auto-retry. Real
+// gear transit is a few seconds; this is intentionally generous so it
+// doesn't fire during a normal transit, while still recovering (rather than
+// staying stuck refusing all future commands) if the command was lost —
+// e.g. sent right as the connection dropped.
+const GEAR_COMMAND_TIMEOUT_MS = 15000;
+// aircraft/0/systems/landing_gear/state (Int32) is the ACTUAL physical
+// deployment state. 1 = fully extended, {0, 2, 5} = fully retracted
+// (observed values across aircraft in IF Connect — the same classification
+// the existing "Gears down."/"Landing gear up." callouts below already use).
+// Any other value, including the transitional values IF reports while the
+// gear is actually moving, means it hasn't reached either end state yet.
+const GEAR_STATE_UP_VALUES = new Set([0, 2, 5]);
+const classifyGearState = (data) => {
+  if (data === -1 || data === null || data === undefined) return "unknown";
+  if (data === 1) return "down";
+  if (GEAR_STATE_UP_VALUES.has(data)) return "up";
+  return "transit";
+};
 const PHASE_READY_COMMANDS = [
   "infiniteflight/app_state",
   "aircraft/0/is_on_ground",
@@ -320,6 +340,9 @@ class FlightSession {
     this.phaseSync = createPhaseSyncState();
     this.boardingMusicPrefetchLivery = "";
     this.flags = createAnnouncementFlags();
+    this._gearCommandPending = false;
+    this._gearCommandTargetClass = null;
+    this._gearCommandTimer = null;
     this.discoverySocket = null;
     this.ptuPreviousEngines = {};
     this.ptuPreviousGroundSpeed = 0;
@@ -524,6 +547,80 @@ class FlightSession {
     this.boardingMusicPrefetchLivery = "";
     announcementCoordinator.resetFlightState();
     return flags;
+  }
+
+  _resetGearCommandState() {
+    clearTimeout(this._gearCommandTimer);
+    this._gearCommandTimer = null;
+    this._gearCommandPending = false;
+    this._gearCommandTargetClass = null;
+  }
+
+  /**
+   * Called whenever a fresh, changed landing_gear/state classification
+   * (down/up/transit) arrives. If a command is pending and the aircraft has
+   * now genuinely reached the requested end state, this is the ONLY thing
+   * that clears the pending flag on success — never just "a command was
+   * sent", and never a fixed delay.
+   */
+  _resolveGearCommand(nextClass) {
+    if (!this._gearCommandPending) return;
+    if (nextClass === this._gearCommandTargetClass) {
+      console.log(`[GEAR] Command confirmed: reached ${nextClass.toUpperCase()}`);
+      this._resetGearCommandState();
+    }
+  }
+
+  /**
+   * Requests the landing gear move to `desired` ("down" or "up") via the
+   * commands/LandingGear toggle. commands/LandingGear flips gear state
+   * rather than setting it directly, so this refuses to send unless it can
+   * establish that a toggle will actually move the gear the intended
+   * direction: current state must be a known, settled end state (not
+   * "transit", not "unknown"), it must differ from `desired`, and no other
+   * gear command may already be in flight. Returns { sent, reason }.
+   */
+  setLandingGear(desired) {
+    if (desired !== "down" && desired !== "up") {
+      return { sent: false, reason: "invalid_target" };
+    }
+    if (!this.isConnected) {
+      console.log(`[GEAR] Ignoring ${desired} request — not connected.`);
+      return { sent: false, reason: "not_connected" };
+    }
+
+    const currentClass = classifyGearState(this.state.telemetry.gear);
+
+    if (this._gearCommandPending) {
+      console.log(`[GEAR] Ignoring ${desired} request — a gear command is already in flight (target=${this._gearCommandTargetClass}).`);
+      return { sent: false, reason: "command_in_flight" };
+    }
+    if (currentClass === "transit") {
+      console.log(`[GEAR] Ignoring ${desired} request — gear is already in transit.`);
+      return { sent: false, reason: "already_in_transit" };
+    }
+    if (currentClass === "unknown") {
+      console.log(`[GEAR] Ignoring ${desired} request — current gear state is not yet known.`);
+      return { sent: false, reason: "state_unknown" };
+    }
+    if (currentClass === desired) {
+      console.log(`[GEAR] Ignoring ${desired} request — gear is already ${desired}.`);
+      return { sent: false, reason: "already_at_target" };
+    }
+
+    this._gearCommandPending = true;
+    this._gearCommandTargetClass = desired;
+    console.log(`[GEAR] LandingGear command sent (${currentClass} -> ${desired})`);
+    ifConnect.set("commands/LandingGear", true);
+
+    clearTimeout(this._gearCommandTimer);
+    this._gearCommandTimer = setTimeout(() => {
+      if (!this._gearCommandPending) return;
+      console.log(`[GEAR] No confirmed state change ${GEAR_COMMAND_TIMEOUT_MS}ms after command — clearing pending flag without retrying (state may be ambiguous).`);
+      this._resetGearCommandState();
+    }, GEAR_COMMAND_TIMEOUT_MS);
+
+    return { sent: true };
   }
 
   _resetPtuState() {
@@ -1064,14 +1161,12 @@ class FlightSession {
               speak("Positive rate. Gear up.", { tone: "callout", ignoreConnectGate: true });
               flags.positiveRate = true;
               if (this.isAutoActionsEnabled) {
-                /*
-                // Temporarily disabled until official solution is available
-                const isUp = state.gear === 2 || state.gear === 5;
-                console.log(`[AutoActions] Positive rate. Gear isUp=${isUp} (state.gear=${state.gear}). Sending gear_button/on=true`);
-                if (!isUp) {
-                  ifConnect.set("simulator/ui_helpers/gear_button/on", true);
-                }
-                */
+                // setLandingGear checks the actual physical gear state itself
+                // (never blindly toggles) and refuses if gear is already up,
+                // already moving, or a command is already in flight — so it's
+                // safe to call unconditionally here.
+                const result = this.setLandingGear("up");
+                console.log(`[AutoActions] Positive rate. ${result.sent ? "Retracting gear." : `Not retracting (${result.reason}).`}`);
               } else {
                 console.log(`[AutoActions] Positive rate. Automation disabled.`);
               }
@@ -1493,6 +1588,11 @@ class FlightSession {
               speak("Landing gear up.", "callout");
             }
           }
+          const nextGearClass = classifyGearState(data);
+          if (nextGearClass !== classifyGearState(state.gear)) {
+            console.log(`[GEAR] Physical state: ${nextGearClass.toUpperCase()}`);
+            this._resolveGearCommand(nextGearClass);
+          }
           updateNext("gear", data);
         }
 
@@ -1676,6 +1776,7 @@ class FlightSession {
     this._setTelemetry({ ...INITIAL_TELEMETRY });
     this._resetPhaseState();
     this._resetPtuState();
+    this._resetGearCommandState();
     const flags = this._resetAnnouncementState({ isManualConnection: isManual });
 
     // Close any existing connection, then connect fresh
@@ -1904,6 +2005,7 @@ class FlightSession {
 
     this._resetAnnouncementState({ isManualConnection: false });
     this._resetPtuState();
+    this._resetGearCommandState();
     await announcementCoordinator.onClientDisconnected({ reason });
     await this._stopAndroidRuntime(reason);
   }
