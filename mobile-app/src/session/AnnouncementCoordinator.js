@@ -530,8 +530,8 @@ class AnnouncementCoordinator {
       if (this._longFormActionId !== actionId) return false;
       this.state.safetyBriefingStatus = "playing";
       return this.engine.enqueueCabinAction(() => this.engine.playBoardingAnnouncement(livery, {
-        onFinish: () => {
-          if (this._longFormActionId === actionId) {
+        onFinish: (result) => {
+          if (this._longFormActionId === actionId && result?.reason === "native_finished") {
             this.state.safetyBriefingEnded = true;
           }
         },
@@ -559,16 +559,24 @@ class AnnouncementCoordinator {
         "Safety Briefing",
         completed ? "Completed" : "Cancelled",
       ], `safety-${completed ? "completed" : "cancelled"}:${livery}`);
-      this._trace("announcementCoordinator.safety_briefing_completed", {
-        livery,
-        completed,
-        result,
-      });
       if (completed) {
+        this._trace("announcementCoordinator.safety_briefing_completed", {
+          livery,
+          completed,
+          completionReason: result?.reason || "unknown",
+          result,
+        });
         this.evaluateAmbientBoardingMusic({
           telemetry: this.state.lastTelemetry,
           isConnected: this.state.isConnected,
           reason: "safety_briefing_finished",
+        });
+      } else {
+        this._trace("announcementCoordinator.safety_briefing_cancelled", {
+          livery,
+          completed,
+          completionReason: result?.reason || "unknown",
+          result,
         });
       }
       return result;

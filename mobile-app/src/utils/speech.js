@@ -868,7 +868,7 @@ class SpeechManager {
     if (this.currentChimeFinish) this.currentChimeFinish({ interrupted: true });
     else this._disposePlayer(this.chimePlayer);
     this.chimePlayer = null;
-    if (this.boardingAnnounceFinish) this.boardingAnnounceFinish({ interrupted: true });
+    if (this.boardingAnnounceFinish) this.boardingAnnounceFinish({ reason: "interrupted", interrupted: true });
     else this._disposePlayer(this.boardingAnnouncePlayer);
     this.boardingAnnouncePlayer = null;
     this._speechPlaybackDepth = 0;
@@ -2429,14 +2429,134 @@ class SpeechManager {
       let cleanup = null;
       let checkInterval = null;
       let startTimer = null;
-      let safetyTimer = null;
+      let watchdogTimer = null;
       let finished = false;
       let hasStartedPlayback = false;
+      let playbackProgressed = false;
+      let lastPositionMillis = null;
+      let lastProgressAt = 0;
+      let durationMillis = null;
       let player = null;
 
-      const finishCallback = ({ interrupted = false } = {}) => {
+      const statusTimeMillis = (status, key) => {
+        const value = status?.[key];
+        if (typeof value === "number") return value;
+        if (key === "positionMillis" && typeof status?.currentTime === "number") {
+          return Math.round(status.currentTime * 1000);
+        }
+        if (key === "durationMillis" && typeof status?.duration === "number") {
+          return Math.round(status.duration * 1000);
+        }
+        return null;
+      };
+
+      const snapshotPlayback = (status = null) => {
+        const now = Date.now();
+        const positionMillis =
+          statusTimeMillis(status, "positionMillis") ??
+          (typeof player?.currentTime === "number"
+            ? Math.round(player.currentTime * 1000)
+            : null);
+        const nextDurationMillis = statusTimeMillis(status, "durationMillis");
+        if (typeof nextDurationMillis === "number" && nextDurationMillis > 0) {
+          durationMillis = nextDurationMillis;
+        }
+
+        if (
+          status?.playing ||
+          status?.didJustFinish ||
+          (typeof positionMillis === "number" && positionMillis > 0) ||
+          player?.playing
+        ) {
+          hasStartedPlayback = true;
+        }
+
+        if (typeof positionMillis === "number") {
+          if (
+            lastPositionMillis === null ||
+            positionMillis > lastPositionMillis + 20
+          ) {
+            if (lastPositionMillis !== null) playbackProgressed = true;
+            lastProgressAt = now;
+          }
+          lastPositionMillis = positionMillis;
+        }
+
+        return {
+          positionMillis,
+          durationMillis,
+          isPlaying: Boolean(status?.playing || player?.playing),
+        };
+      };
+
+      const buildResult = ({ reason, completed = false, interrupted = false, error = null } = {}) => ({
+        reason,
+        completed,
+        interrupted,
+        started: hasStartedPlayback,
+        playbackProgressed,
+        positionMillis: lastPositionMillis,
+        durationMillis,
+        error: error ? error?.message || String(error) : undefined,
+      });
+
+      const traceWatchdog = (reason, payload = {}) => {
+        runtimeTrace("speech.boarding_announcement_watchdog", {
+          source: "expo-audio",
+          owner: "SpeechManager",
+          reason,
+          started: hasStartedPlayback,
+          playbackProgressed,
+          positionMillis: lastPositionMillis,
+          durationMillis,
+          queueSize: this.speechQueue.length,
+          playerCount: this._getActivePlayerCount(),
+          ...payload,
+        }, { throttleMs: 0 });
+      };
+
+      const scheduleWatchdog = () => {
+        if (watchdogTimer) clearTimeout(watchdogTimer);
+        watchdogTimer = setTimeout(() => {
+          if (finished) return;
+          const snapshot = snapshotPlayback();
+          const now = Date.now();
+          const progressAgeMs = lastProgressAt ? now - lastProgressAt : Infinity;
+          const hasRecentProgress = progressAgeMs < BOARDING_ANNOUNCEMENT_MAX_WAIT_MS;
+          const stillPlaying = snapshot.isPlaying;
+
+          if (hasStartedPlayback && hasRecentProgress) {
+            traceWatchdog("max_wait_timeout_progressing", {
+              progressAgeMs,
+              isPlaying: stillPlaying,
+            });
+            scheduleWatchdog();
+            return;
+          }
+
+          if (!hasStartedPlayback) {
+            traceWatchdog("max_wait_timeout_not_started");
+            finishCallback({ reason: "start_timeout", completed: false });
+            return;
+          }
+
+          traceWatchdog("stalled", {
+            progressAgeMs,
+            isPlaying: stillPlaying,
+          });
+          finishCallback({ reason: "stalled", completed: false });
+        }, BOARDING_ANNOUNCEMENT_MAX_WAIT_MS);
+      };
+
+      const finishCallback = ({
+        reason = "unknown",
+        completed = false,
+        interrupted = false,
+        error = null,
+      } = {}) => {
         if (finished) return;
         finished = true;
+        const result = buildResult({ reason, completed, interrupted, error });
         if (cleanup) {
           try { cleanup.remove(); } catch (e) { }
           cleanup = null;
@@ -2446,7 +2566,7 @@ class SpeechManager {
           checkInterval = null;
         }
         if (startTimer) clearTimeout(startTimer);
-        if (safetyTimer) clearTimeout(safetyTimer);
+        if (watchdogTimer) clearTimeout(watchdogTimer);
         if (this.boardingAnnouncePlayer === player) {
           this.boardingAnnouncePlayer = null;
         }
@@ -2454,12 +2574,12 @@ class SpeechManager {
           this.boardingAnnounceFinish = null;
         }
 
-        if (interrupted) {
-          this._disposePlayer(player, { pause: true });
-        } else {
+        if (completed) {
           setTimeout(() => {
             this._disposePlayer(player, { pause: false });
           }, 2000);
+        } else {
+          this._disposePlayer(player, { pause: true });
         }
         this._endSpeechAudio();
         this._recoverBackgroundAudioSession();
@@ -2468,29 +2588,22 @@ class SpeechManager {
           this._isFetchingBoardingAnnounce = false;
           this._fetchingBoardingAnnounceFor = "";
         }
-        if (!interrupted && onFinish) onFinish();
+        if (completed && onFinish) onFinish(result);
         runtimeTrace("speech.boarding_announcement_finish", {
           source: "expo-audio",
           owner: "SpeechManager",
+          reason,
+          completed,
           interrupted,
           started: hasStartedPlayback,
+          playbackProgressed,
+          positionMillis: lastPositionMillis,
+          durationMillis,
+          error: result.error,
           queueSize: this.speechQueue.length,
           playerCount: this._getActivePlayerCount(),
         }, { throttleMs: 0 });
-        resolve(interrupted || hasStartedPlayback);
-      };
-
-      const markPlaybackStarted = (status) => {
-        if (hasStartedPlayback) return;
-        if (
-          status?.playing ||
-          status?.didJustFinish ||
-          status?.currentTime > 0 ||
-          player?.playing ||
-          player?.currentTime > 0
-        ) {
-          hasStartedPlayback = true;
-        }
+        resolve(result);
       };
 
       try {
@@ -2499,13 +2612,13 @@ class SpeechManager {
 
         // If we were stopped or disconnected while downloading, abort
         if (this._boardingAnnounceRequestId !== playRequestId) {
-          finishCallback({ interrupted: true });
+          finishCallback({ reason: "interrupted", interrupted: true });
           return;
         }
 
         if (!audioUri) {
           console.warn("[Speech] Could not get cached audio for boarding announcement.");
-          finishCallback();
+          finishCallback({ reason: "error", completed: false });
           return;
         }
 
@@ -2518,37 +2631,39 @@ class SpeechManager {
         this.boardingAnnounceFinish = finishCallback;
 
         cleanup = player.addListener("playbackStatusUpdate", (status) => {
-          markPlaybackStarted(status);
-          if (status.didJustFinish || status.error) {
-            finishCallback();
+          snapshotPlayback(status);
+          if (status.didJustFinish) {
+            finishCallback({ reason: "native_finished", completed: true });
+          } else if (status.error) {
+            finishCallback({ reason: "error", completed: false, error: status.error });
           }
         });
 
         checkInterval = setInterval(() => {
           try {
-            markPlaybackStarted();
+            snapshotPlayback();
             if (!player) {
-              finishCallback();
+              finishCallback({ reason: "error", completed: false });
               return;
             }
           } catch (e) {
-            finishCallback();
+            finishCallback({ reason: "error", completed: false, error: e });
           }
         }, 100);
 
         startTimer = setTimeout(() => {
           if (hasStartedPlayback) return;
           console.warn("[Speech] Boarding announcement did not start; continuing queue.");
-          finishCallback();
+          finishCallback({ reason: "start_timeout", completed: false });
         }, BOARDING_ANNOUNCEMENT_START_TIMEOUT_MS);
 
-        safetyTimer = setTimeout(finishCallback, BOARDING_ANNOUNCEMENT_MAX_WAIT_MS);
+        scheduleWatchdog();
 
         if (this.voiceEnabled) {
           await this._ensureBackgroundAnchor();
           this._beginSpeechAudio();
           player.play();
-          markPlaybackStarted();
+          snapshotPlayback();
           runtimeTrace("speech.boarding_announcement_start", {
             source: "expo-audio",
             owner: "SpeechManager",
@@ -2558,11 +2673,11 @@ class SpeechManager {
           }, { throttleMs: 0 });
           this._scheduleBackgroundMediaRefresh([0, 500, 1500]);
         } else {
-          finishCallback(); // if voice disabled, finish immediately
+          finishCallback({ reason: "interrupted", interrupted: true }); // if voice disabled, finish immediately
         }
       } catch (e) {
         console.log("[Speech] Boarding announcement failed:", e);
-        finishCallback();
+        finishCallback({ reason: "error", completed: false, error: e });
       }
     });
   }
@@ -2570,7 +2685,7 @@ class SpeechManager {
   stopBoardingAnnouncement() {
     this._boardingAnnounceRequestId = null;
     if (this.boardingAnnounceFinish) {
-      this.boardingAnnounceFinish({ interrupted: true });
+      this.boardingAnnounceFinish({ reason: "interrupted", interrupted: true });
       return;
     }
     if (this.boardingAnnouncePlayer) {

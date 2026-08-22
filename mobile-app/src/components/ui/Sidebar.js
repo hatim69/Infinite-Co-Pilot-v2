@@ -35,7 +35,7 @@ import LegalModal from './LegalModal';
 import { TERMS_OF_SERVICE, PRIVACY_POLICY } from '../../utils/legalText';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const APP_VERSION = '1.7.0';
+const APP_VERSION = '1.8.0';
 const DISCORD_URL = 'https://discord.gg/hb3HkrfBEK';
 
 // ─── Theme Swatch ─────────────────────────────────────────────────────────────
