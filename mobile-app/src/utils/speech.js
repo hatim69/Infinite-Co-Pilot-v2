@@ -3112,8 +3112,8 @@ class SpeechManager {
     this._stopSpeechPlayback({ clearQueues: true });
     this.isProcessingQueue = false;
     this.isProcessingCabinQueue = false;
-    this.stopBoardingMusic();
-    this.stopPassengerNoises();
+    this.stopBoardingMusic({ fade: false });
+    this.stopPassengerNoises({ fade: false });
     if (this.chimePlayer) {
       this._disposePlayer(this.chimePlayer);
       this.chimePlayer = null;

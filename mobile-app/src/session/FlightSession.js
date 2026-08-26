@@ -15,6 +15,7 @@ import dgram from "react-native-udp";
 import ifConnect from "../utils/ifConnectClient";
 import androidFlightRuntime from "../runtime/androidFlightRuntime";
 import { announcementCoordinator } from "./AnnouncementCoordinator";
+import { speechManager } from "../utils/speech";
 import { runtimeTrace } from "../utils/runtimeTrace";
 import { calculatePerformance, getFlapString } from "../utils/calculatePerformance";
 import { formatTime } from "../utils/flightMath";
@@ -101,6 +102,22 @@ const isActiveStateValue = (value) =>
   value === true ||
   value === 1 ||
   (typeof value === "number" && value > 0);
+
+const normalizeSimulatorAppState = (value) => {
+  if (value === true || value === "Playing" || value === 1) return "playing";
+  if (value === false) return "not_playing";
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return "unknown";
+    if (normalized === "playing" || normalized === "1" || normalized === "true") return "playing";
+    return "not_playing";
+  }
+  if (typeof value === "number") {
+    if (value === 1) return "playing";
+    return "not_playing";
+  }
+  return "unknown";
+};
 
 const normalizeConnectionIp = (ip) => {
   const value = String(ip || "").trim();
@@ -311,6 +328,11 @@ class FlightSession {
     this.autoConnectTimer = null;
     this.verifyTimer = null;
     this.verifyMode = "initial";
+    this.lastSimulatorAppState = null;
+    this.lastSimulatorAppStateAt = 0;
+    this.lastPlayingAppStateAt = 0;
+    this.lastNonPlayingAppStateAt = 0;
+    this.lastAppStateSource = "";
     this.androidRuntimeSessionRetained = false;
     this.androidRuntimeStartPromise = null;
     this.disconnectPromise = null;
@@ -501,8 +523,57 @@ class FlightSession {
         }
       }
 
-      this.disconnect(true, "verify_timeout");
+      this._disconnectForNetworkLoss("app_state_verify_timeout", {
+        previousStatus,
+        verifyMode: this.verifyMode,
+      });
     }, VERIFY_TIMEOUT_MS);
+  }
+
+  _trackSimulatorAppState(value, source = "unknown", forcedNormalized = null) {
+    const normalized = forcedNormalized || normalizeSimulatorAppState(value);
+    const now = Date.now();
+    this.lastSimulatorAppState = value;
+    this.lastSimulatorAppStateAt = now;
+    this.lastAppStateSource = source;
+
+    if (normalized === "playing") {
+      this.lastPlayingAppStateAt = now;
+    } else if (normalized === "not_playing") {
+      this.lastNonPlayingAppStateAt = now;
+    }
+
+    runtimeTrace("flightSession.simulator_app_state", {
+      source,
+      owner: "FlightSession",
+      state: value,
+      normalized,
+      appStateFreshness: this._getAppStateFreshness(),
+      telemetryPacketSeq: this.telemetryPacketSeq,
+      telemetryUpdateSeq: this.telemetryUpdateSeq,
+      ifConnect: ifConnect.getDiagnostics?.(),
+    }, { throttleMs: normalized === "unknown" ? 0 : 5000 });
+
+    return normalized;
+  }
+
+  _getAppStateFreshness(now = Date.now()) {
+    const age = (timestamp) => (timestamp ? now - timestamp : null);
+    return {
+      lastSimulatorAppState: this.lastSimulatorAppState,
+      lastSimulatorAppStateAgeMs: age(this.lastSimulatorAppStateAt),
+      lastPlayingAppStateAgeMs: age(this.lastPlayingAppStateAt),
+      lastNonPlayingAppStateAgeMs: age(this.lastNonPlayingAppStateAt),
+      lastAppStateSource: this.lastAppStateSource,
+    };
+  }
+
+  _resetSimulatorAppStateTracking() {
+    this.lastSimulatorAppState = null;
+    this.lastSimulatorAppStateAt = 0;
+    this.lastPlayingAppStateAt = 0;
+    this.lastNonPlayingAppStateAt = 0;
+    this.lastAppStateSource = "";
   }
 
   _resetPhaseState(connectedAt = 0) {
@@ -730,7 +801,11 @@ class FlightSession {
                 source: "udp-discovery",
                 owner: "FlightSession",
               }, { throttleMs: 0 });
-              this.disconnect(true, "main_menu_udp");
+              this._trackSimulatorAppState(stateStr, "udp", "not_playing");
+              this._disconnectForMainMenu("main_menu_udp", {
+                state: stateStr,
+                senderIp: ip,
+              });
             }
           }
         } catch (e) {
@@ -846,12 +921,14 @@ class FlightSession {
         // ── Basic aircraft info ──────────────────────────────────────────
         if (command === "infiniteflight/app_state") {
           updateNext("appState", data);
-          if (data !== "Playing" && data !== 1) {
+          const normalizedAppState = this._trackSimulatorAppState(data, "telemetry");
+          if (normalizedAppState === "not_playing") {
             // Client is in main menu!
             runtimeTrace("flightSession.main_menu_detected", {
               source: "telemetry-app-state",
               owner: "FlightSession",
               state: data,
+              normalizedAppState,
             }, { throttleMs: 0 });
             setTimeout(() => {
               if (this.disconnect) {
@@ -859,13 +936,22 @@ class FlightSession {
                   source: "telemetry-app-state",
                   owner: "FlightSession",
                 }, { throttleMs: 0 });
-                this.disconnect(true, "main_menu_telemetry"); // Pass true to indicate main menu exit
+                this._disconnectForMainMenu("main_menu_app_state", {
+                  state: data,
+                  normalizedAppState,
+                });
               }
             }, 0);
             return prev;
-          } else if (data === "Playing" || data === 1) {
+          } else if (normalizedAppState === "playing") {
             this.verifyMode = "verified";
             this._setConnectionStatus(prevStatus => prevStatus !== "FLIGHT LINK ACTIVE" ? "FLIGHT LINK ACTIVE" : prevStatus);
+          } else {
+            runtimeTrace("flightSession.app_state_unknown", {
+              source: "telemetry-app-state",
+              owner: "FlightSession",
+              state: data,
+            }, { throttleMs: 0 });
           }
         }
         
@@ -1620,17 +1706,13 @@ class FlightSession {
     // ─── 3. IF Connect error handler ──────────────────────────────────────
     this.errorHandler = (err) => {
       console.log("[FlightSession] Connection error:", err.message);
-      this._requestDisconnect({
-        isMainMenuExit: false,
-        reason: "network_error",
+      this._disconnectForNetworkLoss(err?.reason || "network_error", {
+        message: err?.message,
       });
     };
 
     this.disconnectHandler = () => {
-      this._requestDisconnect({
-        isMainMenuExit: false,
-        reason: "socket_disconnected",
-      });
+      this._disconnectForNetworkLoss("socket_disconnected");
     };
 
     this.reconnectHandler = () => {
@@ -1667,6 +1749,7 @@ class FlightSession {
       ifConnect: ifConnect.getDiagnostics?.(),
     }, { throttleMs: 0 });
     this.verifyMode = "initial";
+    this._resetSimulatorAppStateTracking();
     this._startAndroidRuntime(targetIp).catch(() => {});
     this._setConnectionStatus("CONNECTING...");
     this._setConnectedIp(targetIp);
@@ -1724,10 +1807,7 @@ class FlightSession {
     }, { throttleMs: 0 });
 
     if (this.isConnected) {
-      this._requestDisconnect({
-        isMainMenuExit: false,
-        reason: "stop_requested",
-      });
+      this._disconnectForUserRequest("stop_requested");
     }
 
     try {
@@ -1849,12 +1929,38 @@ class FlightSession {
     this.ptuPreviousGroundSpeed = currGs;
   }
 
-  _requestDisconnect({ isMainMenuExit = false, reason = "user_requested" } = {}) {
+  _disconnectForMainMenu(reason = "main_menu", details = {}) {
+    return this._requestDisconnect({
+      isMainMenuExit: true,
+      reason,
+      details,
+    });
+  }
+
+  _disconnectForNetworkLoss(reason = "network_error", details = {}) {
+    return this._requestDisconnect({
+      isMainMenuExit: false,
+      reason,
+      details,
+    });
+  }
+
+  _disconnectForUserRequest(reason = "user_requested", details = {}) {
+    return this._requestDisconnect({
+      isMainMenuExit: false,
+      reason,
+      details,
+    });
+  }
+
+  _requestDisconnect({ isMainMenuExit = false, reason = "user_requested", details = {} } = {}) {
     runtimeTrace("flightSession.disconnect_requested", {
       source: isMainMenuExit ? "simulator-main-menu" : "session-lifecycle",
       owner: "FlightSession",
       reason,
       isMainMenuExit,
+      details,
+      appStateFreshness: this._getAppStateFreshness(),
       telemetryPacketSeq: this.telemetryPacketSeq,
       telemetryUpdateSeq: this.telemetryUpdateSeq,
       speech: announcementCoordinator.getDiagnostics?.(),
@@ -1867,6 +1973,7 @@ class FlightSession {
     this.disconnectPromise = this._terminateMonitoringSession({
       isMainMenuExit,
       reason,
+      details,
     }).finally(() => {
       this.disconnectPromise = null;
       this.disconnectReason = "";
@@ -1874,11 +1981,14 @@ class FlightSession {
     return this.disconnectPromise;
   }
 
-  async _terminateMonitoringSession({ isMainMenuExit = false, reason = "unknown" } = {}) {
+  async _terminateMonitoringSession({ isMainMenuExit = false, reason = "unknown", details = {} } = {}) {
     runtimeTrace("flightSession.disconnect", {
       source: isMainMenuExit ? "simulator-main-menu" : "session-lifecycle",
       owner: "FlightSession",
       reason,
+      isMainMenuExit,
+      details,
+      appStateFreshness: this._getAppStateFreshness(),
       telemetryPacketSeq: this.telemetryPacketSeq,
       telemetryUpdateSeq: this.telemetryUpdateSeq,
       speech: announcementCoordinator.getDiagnostics?.(),
@@ -1890,9 +2000,13 @@ class FlightSession {
     this.phaseTracker = createPhaseTracker();
     this.phaseSync = createPhaseSyncState();
     this.verifyMode = "initial";
-    this._setTelemetry({ ...INITIAL_TELEMETRY });
     this.isConnected = false;
+    this._setTelemetry({ ...INITIAL_TELEMETRY });
     ifConnect.close(() => {});
+    announcementCoordinator.stopAll();
+    speechManager.stopBoardingMusic?.({ fade: false, reason: "disconnect" });
+    speechManager.stopAll?.();
+    this._resetSimulatorAppStateTracking();
 
     if (isMainMenuExit && this.flags.isManualConnection) {
       this._emitEvent({
@@ -1930,7 +2044,8 @@ class FlightSession {
   }
 
   disconnect(isMainMenuExit = false, reason = "user_requested") {
-    return this._requestDisconnect({ isMainMenuExit, reason });
+    if (isMainMenuExit) return this._disconnectForMainMenu(reason);
+    return this._disconnectForUserRequest(reason);
   }
 
   resetForConnectingFlight() {

@@ -129,8 +129,11 @@ The Android Application does not directly need to communicate with Amazon Polly 
 TTS audio may be cached locally within the Application's private Android storage.
 
 16. Background Operation
-Infinite Co-Pilot may use Android foreground-service functionality to support continued operation and audio playback while the user is operating Infinite Flight.
-Android and device manufacturers may restrict background operation.
+Infinite Co-Pilot is designed to operate in the background for extended periods while the user is operating Infinite Flight. The Application may use Android foreground-service functionality to support continued operation and audio playback.
+For extended flights, users may need to disable battery optimization for Infinite Co-Pilot or allow unrestricted background activity, depending on their Android version and device manufacturer.
+Some Android device manufacturers (OEMs) apply additional battery-saving, background-process, memory-management, or application-management restrictions that may suspend or terminate Infinite Co-Pilot even when the Application has been configured correctly.
+Android and device manufacturers ultimately control how background applications are managed on a particular device. DH Studios cannot control or override all such restrictions and cannot guarantee uninterrupted background operation where Android or device-manufacturer restrictions interfere with the Application.
+
 Possible restrictions include:
 Battery optimization.
 Background process termination.
@@ -140,7 +143,9 @@ Notification restrictions.
 Manufacturer-specific application management.
 Power-saving modes.
 Other Android system restrictions.
-DH Studios does not guarantee uninterrupted background operation.
+
+Users are responsible for configuring their device's applicable battery, background activity, and power-management settings where necessary to permit extended background operation.
+DH Studios does not guarantee uninterrupted background execution, audio playback, connectivity, or availability during extended flights.
 
 17. Android Permissions
 Infinite Co-Pilot may request Android permissions required for its functionality.
@@ -177,7 +182,9 @@ DH Studios does not warrant that these calculations are suitable for real-world 
 20. Third-Party Intellectual Property
 Infinite Flight and its associated intellectual property belong to their respective owners.
 Airline names, trademarks, aircraft names, logos, audio recordings, and other third-party materials remain the property of their respective owners.
+Some audio content used by Infinite Co-Pilot may have been obtained from publicly available sources on the internet. Such content may be subject to the rights of third parties, and DH Studios does not claim ownership of third-party material that it does not own.
 The inclusion of third-party references or compatible audio does not necessarily imply sponsorship, endorsement, or affiliation.
+If you are a rights holder or otherwise believe that audio or other third-party content included in Infinite Co-Pilot should be removed or replaced, please contact DH Studios at dhstudios420@gmail.com with sufficient information to identify the relevant material. DH Studios may review such requests and, where appropriate, remove or replace the identified content.
 
 21. Intellectual Property of DH Studios
 Unless otherwise indicated, the Application, its software, original content, interface, branding, documentation, original audio, and related materials are owned by or licensed to DH Studios.
@@ -407,9 +414,11 @@ Cached files may be removed automatically or when the Application's data is clea
 
 13. Airline and Third-Party Audio
 Infinite Co-Pilot may use audio associated with particular airlines, aircraft, or other aviation content.
+Some audio content used by Infinite Co-Pilot may have been obtained from publicly available sources on the internet. Such content may be subject to the rights of third parties, and DH Studios does not claim ownership of third-party material that it does not own.
 Such audio may be stored locally or obtained through the Application's supported infrastructure.
 DH Studios does not use the presence of airline-related audio to imply that the airline has access to the user's information or that the airline endorses Infinite Co-Pilot.
 Third-party intellectual property remains subject to the rights of its respective owners.
+If you are a rights holder or otherwise believe that audio or other third-party content included in Infinite Co-Pilot should be removed or replaced, please contact DH Studios at dhstudios420@gmail.com with sufficient information to identify the relevant material. DH Studios may review such requests and, where appropriate, remove or replace the identified content.
 
 14. Android Permissions
 Infinite Co-Pilot may request Android permissions necessary for its functionality.
@@ -438,7 +447,11 @@ The precise permissions requested may change as Android requirements and Applica
 
 15. Background Operation and Android
 Infinite Co-Pilot may operate in the background while the user is actively using Infinite Flight.
-Android and device manufacturers may impose restrictions on:
+For extended flights, users may need to disable battery optimization for Infinite Co-Pilot or allow unrestricted background activity, depending on their Android version and device manufacturer.
+Some Android device manufacturers (OEMs) apply additional battery-saving, background-process, memory-management, or application-management restrictions that may suspend or terminate Infinite Co-Pilot.
+Android and device manufacturers ultimately control how background applications are managed on a particular device. DH Studios cannot control or override all such restrictions.
+
+These restrictions may affect:
 Background applications.
 Battery usage.
 Foreground services.
@@ -447,7 +460,8 @@ Memory usage.
 Notifications.
 Network access.
 Application execution.
-These restrictions may affect Infinite Co-Pilot's behavior.
+
+Users may need to configure their device's applicable battery, background activity, and power-management settings to obtain the intended extended-background behavior.
 DH Studios does not receive private Android device information merely because the Application is affected by these restrictions.
 
 16. Device Information

@@ -24,6 +24,7 @@ const DEFAULT_PORT = 10112;
 const MANIFEST_TIMEOUT_MS = 15000;
 const WATCHDOG_INTERVAL_MS = 3000;
 const WATCHDOG_STALE_RECONNECT_MS = 5000;
+const WATCHDOG_STALE_DISCONNECT_MS = 10000;
 const WATCHDOG_STALE_FORCE_RECONNECT_MS = 15000;
 const RECONNECT_DELAY_BASE_MS = 2000;
 const RECONNECT_MAX_DELAY_MS = 15000;
@@ -69,6 +70,8 @@ class IFConnectClient {
     this._mTimeout = null;
     this._manifestPollTimer = null;
     this._lastDataTime = 0;
+    this._staleDataSince = 0;
+    this._staleDisconnectEmitted = false;
     this._reconnectAttempt = 0;
     this._pollRequestSeq = 0;
     this._pollResponseSeq = 0;
@@ -111,6 +114,7 @@ class IFConnectClient {
       pollRequestSeq: this._pollRequestSeq,
       pollResponseSeq: this._pollResponseSeq,
       lastDataAgeMs: this._lastDataTime ? Date.now() - this._lastDataTime : null,
+      staleDataAgeMs: this._staleDataSince ? Date.now() - this._staleDataSince : null,
       reconnectAttempt: this._reconnectAttempt,
       connectionGeneration: this._connectionGeneration,
     };
@@ -331,7 +335,10 @@ class IFConnectClient {
       if (!done) {
         done = true;
         cleanup();
-        this._emit('error', { message: 'TCP socket not supported in this environment' });
+        this._emit('error', {
+          message: 'TCP socket not supported in this environment',
+          reason: 'network_error',
+        });
       }
       return;
     }
@@ -376,7 +383,7 @@ class IFConnectClient {
       console.log('[IFConnect] Manifest error:', err.message);
       done = true;
       cleanup();
-      this._emit('error', { message: err.message });
+      this._emit('error', { message: err.message, reason: 'manifest_error' });
     });
 
     manifestSocket.on('close', () => {
@@ -391,7 +398,10 @@ class IFConnectClient {
         done = true;
         console.log('[IFConnect] Manifest fetch timed out');
         cleanup();
-        this._emit('error', { message: 'Manifest fetch timed out. Is Infinite Flight running?' });
+        this._emit('error', {
+          message: 'Manifest fetch timed out. Is Infinite Flight running?',
+          reason: 'manifest_timeout',
+        });
       }
     }, MANIFEST_TIMEOUT_MS);
     this._mTimeout = manifestTimeout;
@@ -426,7 +436,7 @@ class IFConnectClient {
     let socket;
     let pollConnected = false;
     let preConnectFailureEmitted = false;
-    const emitPreConnectFailure = (message) => {
+    const emitPreConnectFailure = (message, reason = 'network_error') => {
       if (preConnectFailureEmitted || pollConnected || !this._isCurrentGeneration(generation)) return;
       preConnectFailureEmitted = true;
       if (this._pollSocket === socket) {
@@ -434,7 +444,7 @@ class IFConnectClient {
       }
       this._receiveBuffer = null;
       this._isPollWaiting = false;
-      this._emit('error', { message });
+      this._emit('error', { message, reason });
     };
 
     try {
@@ -481,13 +491,18 @@ class IFConnectClient {
       this._pollSocket = socket;
     } catch (e) {
       console.log('[IFConnect] TCP Poll socket creation error (unsupported environment):', e);
-      this._emit('error', { message: 'TCP socket not supported in this environment' });
+      this._emit('error', {
+        message: 'TCP socket not supported in this environment',
+        reason: 'network_error',
+      });
       return;
     }
 
     socket.on('data', (rawData) => {
       if (!this._isCurrentGeneration(generation) || this._pollSocket !== socket) return;
       this._lastDataTime = Date.now();
+      this._staleDataSince = 0;
+      this._staleDisconnectEmitted = false;
       this._reconnectAttempt = 0;
       const chunk = Buffer.isBuffer(rawData) ? rawData : Buffer.from(rawData);
       this._receiveBuffer = this._receiveBuffer
@@ -512,7 +527,7 @@ class IFConnectClient {
       if (this._isConnected) {
         this._scheduleReconnect('poll-socket-closed', generation);
       } else {
-        emitPreConnectFailure('Poll socket closed before connection');
+        emitPreConnectFailure('Poll socket closed before connection', 'socket_disconnected');
       }
     });
   }
@@ -641,13 +656,31 @@ class IFConnectClient {
     this._watchdogTimer = setInterval(() => {
       if (!this._isCurrentGeneration(generation) || !this._isConnected) return;
       const staleTime = Date.now() - this._lastDataTime;
+      const now = Date.now();
+      if (staleTime > WATCHDOG_STALE_RECONNECT_MS && !this._staleDataSince) {
+        this._staleDataSince = this._lastDataTime || now;
+      }
+      const staleDuration = this._staleDataSince ? now - this._staleDataSince : 0;
       runtimeTrace("ifconnect.watchdog_tick", {
         source: "setInterval",
         staleTimeMs: staleTime,
+        staleDurationMs: staleDuration,
         ...this.getDiagnostics(),
       }, { throttleMs: 30000 });
 
-      if (staleTime > WATCHDOG_STALE_FORCE_RECONNECT_MS) {
+      if (
+        this._staleDataSince &&
+        staleDuration >= WATCHDOG_STALE_DISCONNECT_MS &&
+        !this._staleDisconnectEmitted
+      ) {
+        this._staleDisconnectEmitted = true;
+        console.log('[IFConnect] Watchdog: telemetry stale — disconnecting session.');
+        this._emit('error', {
+          message: 'Telemetry stream stale. No data received after recovery attempts.',
+          reason: 'telemetry_stale',
+          staleDurationMs: staleDuration,
+        });
+      } else if (staleTime > WATCHDOG_STALE_FORCE_RECONNECT_MS) {
         console.log('[IFConnect] Watchdog: data stale for 15s — forcing poll socket recovery...');
         this._reconnectPollSocket('watchdog-stale-timeout', generation);
       } else if (staleTime > WATCHDOG_STALE_RECONNECT_MS) {
@@ -709,6 +742,8 @@ class IFConnectClient {
     this._manifestByName = {};
     this._manifestByCommand = {};
     this._lastDataTime = 0;
+    this._staleDataSince = 0;
+    this._staleDisconnectEmitted = false;
     this._successCallback = null;
     this._reconnectAttempt = 0;
     this._pollRequestSeq = 0;
