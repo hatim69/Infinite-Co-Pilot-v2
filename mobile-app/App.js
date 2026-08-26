@@ -70,7 +70,7 @@ import CrewAssistant from "./src/components/assistant/CrewAssistant";
 import BackgroundReliability from "./src/components/cards/BackgroundReliability";
 import Sidebar from "./src/components/ui/Sidebar";
 import Gatekeeper from "./src/components/ui/Gatekeeper";
-import { BETA_EXPIRY_DATE, SUPABASE_URL } from "./src/utils/beta";
+// import { BETA_EXPIRY_DATE, SUPABASE_URL } from "./src/utils/beta";
 const FLIGHT_DECK_MIN_PREP_MS = 900;
 const FLIGHT_DECK_PREP_TIMEOUT_MS = 6000;
 
@@ -206,9 +206,9 @@ function AppInner() {
   const [isBackgroundMode, setIsBackgroundMode] = useState(false);
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const [isSplashVisible, setIsSplashVisible] = useState(true);
-  const [isBetaVerified, setIsBetaVerified] = useState(false);
-  const [isBetaExpired, setIsBetaExpired] = useState(false);
-  const [betaNetworkError, setBetaNetworkError] = useState(false);
+  // const [isBetaVerified, setIsBetaVerified] = useState(false);
+  // const [isBetaExpired, setIsBetaExpired] = useState(false);
+  // const [betaNetworkError, setBetaNetworkError] = useState(false);
 
   const {
     connectionStatus,
@@ -226,7 +226,7 @@ function AppInner() {
     getVoicePreference,
     toggleVoice: toggleSessionVoice,
     setVoicePreference: setSessionVoicePreference,
-  } = useTelemetry(disableAutoConnect || !isBetaVerified || isBetaExpired || betaNetworkError, isAutoActionsEnabled);
+  } = useTelemetry(disableAutoConnect /* || !isBetaVerified || isBetaExpired || betaNetworkError */, isAutoActionsEnabled);
 
   useEffect(() => {
     let isMounted = true;
@@ -236,6 +236,7 @@ function AppInner() {
       new Promise((resolve) => setTimeout(resolve, FLIGHT_DECK_PREP_TIMEOUT_MS)),
     ]);
 
+    /*
     const checkBetaStatus = async () => {
       try {
         const verified = await AsyncStorage.getItem('beta_verified');
@@ -267,8 +268,9 @@ function AppInner() {
         setBetaNetworkError(true);
       }
     };
+    */
 
-    Promise.all([minimumPrep, audioReady, checkBetaStatus()]).finally(() => {
+    Promise.all([minimumPrep, audioReady]).finally(() => {
       if (isMounted) setIsSplashVisible(false);
     });
 
@@ -844,7 +846,7 @@ function AppInner() {
           <FadeTransition key="splash">
             {renderSplashScreen()}
           </FadeTransition>
-        ) : betaNetworkError ? (
+        ) : /* betaNetworkError ? (
           <FadeTransition key="networkError">
             <View style={[styles.splashContainer, { backgroundColor: theme.surface, borderColor: theme.border }]}>
               <View style={[styles.splashLogoWrapper, responsive.isShort && styles.splashLogoWrapperCompact, { backgroundColor: 'rgba(248, 113, 113, 0.1)', borderColor: '#F87171' }]}>
@@ -872,7 +874,7 @@ function AppInner() {
           <FadeTransition key="gatekeeper">
             <Gatekeeper onVerify={() => setIsBetaVerified(true)} />
           </FadeTransition>
-        ) : (
+        ) : */ (
           <FadeTransition key={isConnected ? (isBackgroundMode ? "backgroundMode" : "dashboard") : "connection"}>
             {isConnected ? (isBackgroundMode ? renderBackgroundMode() : renderDashboard()) : renderConnectionScreen()}
           </FadeTransition>
