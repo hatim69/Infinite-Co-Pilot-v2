@@ -2015,17 +2015,17 @@ class SpeechManager {
 
   formatText(text, tone) {
     if (tone === "briefing") {
-      return text.replace(/,\s*/g, ", ").replace(/\s+/g, " ").trim();
+      return text.replace(/,(?!\d)\s*/g, ", ").replace(/\s+/g, " ").trim();
     }
     if (tone === "callout") {
       return text
-        .replace(/,\s*/g, ". ")
+        .replace(/,(?!\d)\s*/g, ". ")
         .replace(/\b(Gear up|Flaps up|Landing gear up)\b/ig, "$1.")
         .replace(/\.\.+/g, ".")
         .trim();
     }
     if (tone === "caution") {
-      return text.replace(/,\s*/g, ". ").replace(/\s+/g, " ").trim();
+      return text.replace(/,(?!\d)\s*/g, ". ").replace(/\s+/g, " ").trim();
     }
     return String(text).trim();
   }

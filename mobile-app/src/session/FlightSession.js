@@ -1576,7 +1576,7 @@ class FlightSession {
           ["descent", "approach", "final_approach", "landing"].includes(next.phase)
         ) {
           flags.descentPrepAnnounced = true;
-          speak("Ladies and gentlemen, we will shortly begin our descent and will be landing shortly. Please return to your seats and fasten your seat belts. Ensure your seat backs and tray tables are in the upright position, window shades are open, and all electronic devices are set to flight mode. Please securely stow your hand baggage and refrain from using the lavatories. Thank you.", { channel: "cabin", tone: "briefing" });
+          speak("Ladies and gentlemen, we have begun our descent and will be landing shortly. Please return to your seats and fasten your seat belts. Ensure your seat backs and tray tables are in the upright position, window shades are open, and all electronic devices are set to flight mode. Please securely stow your hand baggage and refrain from using the lavatories. Thank you.", { channel: "cabin", tone: "briefing" });
         }
 
         // 2. Landing Stations

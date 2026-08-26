@@ -257,7 +257,7 @@ export const staticAudioMap = {
     femaleRadio: require("../../assets/audio/radio/female_crew_prepare_for_takeoff.mp3"),
     maleRadio: require("../../assets/audio/radio/male_crew_prepare_for_takeoff.mp3")
   },
-  "Ladies and gentlemen, we will shortly begin our descent and will be landing shortly. Please return to your seats and fasten your seat belts. Ensure your seat backs and tray tables are in the upright position, window shades are open, and all electronic devices are set to flight mode. Please securely stow your hand baggage and refrain from using the lavatories. Thank you.": {
+  "Ladies and gentlemen, we have begun our descent and will be landing shortly. Please return to your seats and fasten your seat belts. Ensure your seat backs and tray tables are in the upright position, window shades are open, and all electronic devices are set to flight mode. Please securely stow your hand baggage and refrain from using the lavatories. Thank you.": {
     female: require("../../assets/audio/female_crew_descent_prep.mp3"),
     male: require("../../assets/audio/male_crew_descent_prep.mp3"),
     femaleRadio: require("../../assets/audio/radio/female_crew_descent_prep.mp3"),

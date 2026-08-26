@@ -56,7 +56,7 @@ const mappings = {
   "Welcome to the flight Captain.": "crew_welcome_captain_ground",
   "Welcome back to the flight Captain.": "crew_welcome_back_captain_airborne",
   "Cabin crew prepare for take off.": "crew_prepare_for_takeoff",
-  "Ladies and gentlemen, we will shortly begin our descent and will be landing shortly. Please return to your seats and fasten your seat belts. Ensure your seat backs and tray tables are in the upright position, window shades are open, and all electronic devices are set to flight mode. Please securely stow your hand baggage and refrain from using the lavatories. Thank you.": "crew_descent_prep",
+  "Ladies and gentlemen, we have begun our descent and will be landing shortly. Please return to your seats and fasten your seat belts. Ensure your seat backs and tray tables are in the upright position, window shades are open, and all electronic devices are set to flight mode. Please securely stow your hand baggage and refrain from using the lavatories. Thank you.": "crew_descent_prep",
   "Cabin crew, we are now passing through ten thousand feet. Please prepare the cabin for landing.": "crew_cabin_prep_10k",
   "Cabin crew, landing stations.": "crew_landing_stations",
   "Ladies and gentlemen, from the flight deck. We've just cleared 10,000 feet on our way up to our cruising altitude. The Seatbelt sign has now been turned off, but please keep it securely fastened while seated in case of unexpected bumps along the way. Enjoy the rest of the flight.": "crew_climb_10k",
