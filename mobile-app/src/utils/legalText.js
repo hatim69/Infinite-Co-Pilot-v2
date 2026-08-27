@@ -17,31 +17,33 @@ You must meet the applicable legal age or other legal requirements of your count
 If you are below the applicable age of legal capacity, you may only use the Application where permitted with the required consent of a parent or legal guardian.
 
 3. Subscription
-Infinite Co-Pilot is provided through a recurring monthly subscription.
+Infinite Co-Pilot is provided through recurring subscription plans.
 The subscription provides access to the full Application and its available features.
 The current subscription structure is:
 3-day free trial, where the user is eligible for the trial.
-US$1.50 for the first paid month following the applicable trial period.
-US$2.50 per month from the second paid month onward.
+Launch Pricing, available to new subscribers during the first month after the Application's Google Play release: US$2.49 per month, US$14.99 per 6 months, or US$26.99 per year.
+Normal Pricing, available to new subscribers after the launch-pricing window ends: US$3.49 per month, US$17.99 per 6 months, or US$31.49 per year.
+Existing subscribers who join during the launch-pricing window may retain their applicable launch price where supported by Google Play or the applicable billing/subscription system.
 Regional pricing may result in a different local-currency amount.
-The subscription automatically renews monthly unless cancelled.
+The subscription automatically renews according to the selected billing period unless cancelled.
 The exact pricing, currency, taxes, trial eligibility, renewal date, and other subscription information displayed by Google Play at the time of purchase are controlling.
 
 4. Free Trial
 Eligible users may receive a three-day free trial.
 The availability of the trial may depend on Google Play eligibility requirements, previous subscription history, account status, regional availability, or other conditions determined by Google Play.
-Unless cancelled in accordance with the applicable Google Play subscription process before the trial ends, the subscription will proceed to the applicable paid subscription and the relevant introductory price will be charged.
+Unless cancelled in accordance with the applicable Google Play subscription process before the trial ends, the subscription will proceed to the applicable paid subscription and the price displayed by Google Play for the selected plan will be charged.
 DH Studios does not control Google Play's eligibility determination.
 A user may not necessarily receive a new free trial simply by reinstalling the Application or creating another installation of the Application.
 
-5. Introductory and Recurring Pricing
-Following the applicable free trial:
-The first paid month is charged at US$1.50, or the applicable regional equivalent.
-Beginning with the second paid month, the subscription is charged at US$2.50 per month, or the applicable regional equivalent.
+5. Launch and Standard Pricing
+For the first month after the Application's Google Play release, eligible new subscribers may see Launch Pricing for the available plans: US$2.49 per month, US$14.99 per 6 months, or US$26.99 per year, or the applicable regional equivalent.
+After the launch-pricing window ends, new subscribers may see Normal Pricing for the available plans: US$3.49 per month, US$17.99 per 6 months, or US$31.49 per year, or the applicable regional equivalent.
+Launch Pricing is a launch-period discount for users who subscribe during the first month after release; it is not a discount that applies only to the first billing cycle of every subscription.
+Existing subscribers who joined during the launch-pricing window may retain their applicable launch price where supported by Google Play or the applicable billing/subscription system.
 Taxes, currency conversion, regional pricing, and other Google Play pricing mechanisms may affect the amount ultimately charged.
 
 6. Automatic Renewal
-The subscription automatically renews on a monthly basis unless cancelled before the applicable renewal date.
+The subscription automatically renews according to the selected billing period unless cancelled before the applicable renewal date.
 By subscribing, you authorize the applicable Google Play billing system to process recurring subscription charges according to the subscription terms presented during purchase.
 The subscription may continue renewing until cancelled.
 
@@ -478,10 +480,10 @@ DH Studios does not need to collect a separate username and password merely to p
 Infinite Co-Pilot is distributed and monetized through Google Play.
 The subscription consists of:
 A three-day free trial for eligible users.
-US$1.50 for the first paid month.
-US$2.50 per month thereafter.
+Launch Pricing during the first month after Google Play release: US$2.49 per month, US$14.99 per 6 months, or US$26.99 per year, where available.
+Normal Pricing after the launch window: US$3.49 per month, US$17.99 per 6 months, or US$31.49 per year.
 Regional pricing where applicable.
-Automatic monthly renewal unless cancelled.
+Automatic renewal according to the selected billing period unless cancelled.
 Google Play may process information necessary for:
 Account management.
 Subscription management.

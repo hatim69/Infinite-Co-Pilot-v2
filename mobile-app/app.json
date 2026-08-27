@@ -28,6 +28,7 @@
     },
     "android": {
       "package": "com.infinitecopilot.app",
+      "versionCode": 1,
       "allowBackup": false,
       "adaptiveIcon": {
         "backgroundColor": "#282829",
@@ -44,7 +45,8 @@
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE",
         "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
-        "android.permission.POST_NOTIFICATIONS"
+        "android.permission.POST_NOTIFICATIONS",
+        "com.android.vending.BILLING"
       ]
     },
     "web": {

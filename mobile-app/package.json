@@ -19,6 +19,7 @@
     "lucide-react-native": "^1.24.0",
     "react": "19.2.3",
     "react-native": "0.86.0",
+    "react-native-purchases": "^10.8.0",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-svg": "15.15.4",
     "react-native-tcp-socket": "^6.4.1",

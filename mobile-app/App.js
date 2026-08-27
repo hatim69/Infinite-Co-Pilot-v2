@@ -70,6 +70,8 @@ import CrewAssistant from "./src/components/assistant/CrewAssistant";
 import BackgroundReliability from "./src/components/cards/BackgroundReliability";
 import Sidebar from "./src/components/ui/Sidebar";
 import Gatekeeper from "./src/components/ui/Gatekeeper";
+import Paywall from "./src/components/ui/Paywall";
+import Purchases from 'react-native-purchases';
 // import { BETA_EXPIRY_DATE, SUPABASE_URL } from "./src/utils/beta";
 const FLIGHT_DECK_MIN_PREP_MS = 900;
 const FLIGHT_DECK_PREP_TIMEOUT_MS = 6000;
@@ -206,6 +208,7 @@ function AppInner() {
   const [isBackgroundMode, setIsBackgroundMode] = useState(false);
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const [isSplashVisible, setIsSplashVisible] = useState(true);
+  const [isPro, setIsPro] = useState(false);
   // const [isBetaVerified, setIsBetaVerified] = useState(false);
   // const [isBetaExpired, setIsBetaExpired] = useState(false);
   // const [betaNetworkError, setBetaNetworkError] = useState(false);
@@ -226,7 +229,7 @@ function AppInner() {
     getVoicePreference,
     toggleVoice: toggleSessionVoice,
     setVoicePreference: setSessionVoicePreference,
-  } = useTelemetry(disableAutoConnect /* || !isBetaVerified || isBetaExpired || betaNetworkError */, isAutoActionsEnabled);
+  } = useTelemetry(disableAutoConnect || !isPro, isAutoActionsEnabled);
 
   useEffect(() => {
     let isMounted = true;
@@ -235,6 +238,22 @@ function AppInner() {
       whenAudioReady().catch(() => undefined),
       new Promise((resolve) => setTimeout(resolve, FLIGHT_DECK_PREP_TIMEOUT_MS)),
     ]);
+
+    const initRC = async () => {
+      try {
+        if (Platform.OS === 'android') {
+          Purchases.configure({ apiKey: 'goog_BEnpjzrkyXkJJmWagtuyZzRBPNp' }); // Replace with your actual Google Play API key
+        }
+        const customerInfo = await Purchases.getCustomerInfo();
+        // Fallback: If ANY entitlement is active, unlock the app (avoids string mismatch issues)
+        if (Object.keys(customerInfo.entitlements.active).length > 0) {
+          if (isMounted) setIsPro(true);
+        }
+      } catch (e) {
+        console.warn('Failed to init RevenueCat', e);
+      }
+    };
+    initRC();
 
     /*
     const checkBetaStatus = async () => {
@@ -770,76 +789,78 @@ function AppInner() {
 
       <View style={[styles.scrollContent, { flex: 1, padding: responsive.outerPadding, paddingBottom: responsive.outerPadding }]}>
         {/* ── Header ──────────────────────────────────────────────────── */}
-        <View style={[styles.header, responsive.isTinyWidth && styles.headerCompact]}>
-          <View style={styles.headerLeft}>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Image 
-                source={activeTheme === 'silver' ? require('./assets/images/in_app_logo_light.png') : require('./assets/images/in_app_logo_dark.png')} 
-                style={{ height: 24, width: 32, marginRight: 8 }}
-                resizeMode="contain"
-              />
-              {responsive.showHeaderTitle && (
-                <Text
-                  style={[styles.title, { color: theme.textPrimary, fontSize: 16, lineHeight: 18, flexShrink: 1 }]}
-                  numberOfLines={2}
-                  adjustsFontSizeToFit
-                >
-                  Infinite{"\n"}Co-Pilot
-                </Text>
-              )}
-            </View>
-            {isInBackground && isConnected && (
-              <View style={[styles.backgroundBadge, { backgroundColor: theme.accentBg }]}>
-                <Text style={[styles.backgroundBadgeText, { color: theme.accentText }]}>RUNNING IN BACKGROUND</Text>
+        {isPro && (
+          <View style={[styles.header, responsive.isTinyWidth && styles.headerCompact]}>
+            <View style={styles.headerLeft}>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Image 
+                  source={activeTheme === 'silver' ? require('./assets/images/in_app_logo_light.png') : require('./assets/images/in_app_logo_dark.png')} 
+                  style={{ height: 24, width: 32, marginRight: 8 }}
+                  resizeMode="contain"
+                />
+                {responsive.showHeaderTitle && (
+                  <Text
+                    style={[styles.title, { color: theme.textPrimary, fontSize: 16, lineHeight: 18, flexShrink: 1 }]}
+                    numberOfLines={2}
+                    adjustsFontSizeToFit
+                  >
+                    Infinite{"\n"}Co-Pilot
+                  </Text>
+                )}
               </View>
-            )}
-          </View>
-          <View style={[styles.headerRight, responsive.isCompactWidth && styles.headerRightCompact]}>
-            <TouchableOpacity onPress={() => setSidebarVisible(true)} style={[styles.iconBtn, { backgroundColor: theme.iconBtn, borderColor: theme.iconBtnBorder }]} activeOpacity={0.7}>
-              <Settings size={18} color={theme.textSlate} />
-            </TouchableOpacity>
-
-
-
-            <TouchableOpacity onPress={toggleVoice} style={[styles.iconBtn, { backgroundColor: theme.iconBtn, borderColor: theme.iconBtnBorder }]} activeOpacity={0.7}>
-              {voiceEnabled ? (
-                <Volume2 size={18} color="#34D399" />
-              ) : (
-                <VolumeX size={18} color="#F59E0B" />
-              )}
-            </TouchableOpacity>
-
-            {isConnected && (
-              <TouchableOpacity
-                onPress={handleDisconnect}
-                style={[styles.iconBtn, styles.iconBtnDanger]}
-                activeOpacity={0.7}
-              >
-                <RefreshCw size={16} color="#F87171" />
-              </TouchableOpacity>
-            )}
-
-            <View
-              style={[
-                styles.statusBadge,
-                isActive
-                  ? { backgroundColor: theme.accentBg, borderWidth: 1, borderColor: theme.accent }
-                  : isReconnecting
-                    ? { backgroundColor: 'rgba(245, 158, 11, 0.2)', borderWidth: 1, borderColor: '#F59E0B' }
-                    : isConnecting
-                      ? styles.statusConnecting
-                      : { backgroundColor: 'rgba(71, 85, 105, 0.3)', borderWidth: 1, borderColor: theme.border },
-              ]}
-            >
-              <PulseDot active={isActive} />
-              {responsive.showStatusLabel && (
-                <Text style={[styles.statusText, { color: theme.textPrimary }]} numberOfLines={1}>
-                  {isActive ? 'ACTIVE' : isReconnecting ? 'RECONNECTING' : isConnecting ? 'CONNECTING' : 'WAITING'}
-                </Text>
+              {isInBackground && isConnected && (
+                <View style={[styles.backgroundBadge, { backgroundColor: theme.accentBg }]}>
+                  <Text style={[styles.backgroundBadgeText, { color: theme.accentText }]}>RUNNING IN BACKGROUND</Text>
+                </View>
               )}
             </View>
+            <View style={[styles.headerRight, responsive.isCompactWidth && styles.headerRightCompact]}>
+              <TouchableOpacity onPress={() => setSidebarVisible(true)} style={[styles.iconBtn, { backgroundColor: theme.iconBtn, borderColor: theme.iconBtnBorder }]} activeOpacity={0.7}>
+                <Settings size={18} color={theme.textSlate} />
+              </TouchableOpacity>
+
+
+
+              <TouchableOpacity onPress={toggleVoice} style={[styles.iconBtn, { backgroundColor: theme.iconBtn, borderColor: theme.iconBtnBorder }]} activeOpacity={0.7}>
+                {voiceEnabled ? (
+                  <Volume2 size={18} color="#34D399" />
+                ) : (
+                  <VolumeX size={18} color="#F59E0B" />
+                )}
+              </TouchableOpacity>
+
+              {isConnected && (
+                <TouchableOpacity
+                  onPress={handleDisconnect}
+                  style={[styles.iconBtn, styles.iconBtnDanger]}
+                  activeOpacity={0.7}
+                >
+                  <RefreshCw size={16} color="#F87171" />
+                </TouchableOpacity>
+              )}
+
+              <View
+                style={[
+                  styles.statusBadge,
+                  isActive
+                    ? { backgroundColor: theme.accentBg, borderWidth: 1, borderColor: theme.accent }
+                    : isReconnecting
+                      ? { backgroundColor: 'rgba(245, 158, 11, 0.2)', borderWidth: 1, borderColor: '#F59E0B' }
+                      : isConnecting
+                        ? styles.statusConnecting
+                        : { backgroundColor: 'rgba(71, 85, 105, 0.3)', borderWidth: 1, borderColor: theme.border },
+                ]}
+              >
+                <PulseDot active={isActive} />
+                {responsive.showStatusLabel && (
+                  <Text style={[styles.statusText, { color: theme.textPrimary }]} numberOfLines={1}>
+                    {isActive ? 'ACTIVE' : isReconnecting ? 'RECONNECTING' : isConnecting ? 'CONNECTING' : 'WAITING'}
+                  </Text>
+                )}
+              </View>
+            </View>
           </View>
-        </View>
+        )}
 
         {/* ── Main content ──────────────────────────────────────────── */}
         {isSplashVisible ? (
@@ -874,7 +895,11 @@ function AppInner() {
           <FadeTransition key="gatekeeper">
             <Gatekeeper onVerify={() => setIsBetaVerified(true)} />
           </FadeTransition>
-        ) : */ (
+        ) : */ !isPro ? (
+          <FadeTransition key="paywall">
+            <Paywall onPurchaseSuccess={() => setIsPro(true)} />
+          </FadeTransition>
+        ) : (
           <FadeTransition key={isConnected ? (isBackgroundMode ? "backgroundMode" : "dashboard") : "connection"}>
             {isConnected ? (isBackgroundMode ? renderBackgroundMode() : renderDashboard()) : renderConnectionScreen()}
           </FadeTransition>
