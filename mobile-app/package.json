@@ -38,6 +38,7 @@
   },
   "private": true,
   "devDependencies": {
+    "babel-plugin-transform-remove-console": "^6.9.4",
     "patch-package": "^8.0.1",
     "postinstall-postinstall": "^2.1.0"
   }
