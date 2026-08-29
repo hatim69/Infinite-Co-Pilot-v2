@@ -21,9 +21,8 @@ Infinite Co-Pilot is provided through recurring subscription plans.
 The subscription provides access to the full Application and its available features.
 The current subscription structure is:
 3-day free trial, where the user is eligible for the trial.
-Launch Pricing, available to new subscribers during the first month after the Application's Google Play release: US$2.49 per month, US$14.99 per 6 months, or US$26.99 per year.
-Normal Pricing, available to new subscribers after the launch-pricing window ends: US$3.49 per month, US$17.99 per 6 months, or US$31.49 per year.
-Existing subscribers who join during the launch-pricing window may retain their applicable launch price where supported by Google Play or the applicable billing/subscription system.
+Launch Pricing, available for the first payment by new subscribers during the first month after the Application's Google Play release: US$2.49 per month, US$14.99 per 6 months, or US$26.99 per year.
+Normal Pricing, used for renewals after the launch-priced first payment and for new subscribers after the launch-pricing window ends: US$3.49 per month, US$17.99 per 6 months, or US$31.49 per year.
 Regional pricing may result in a different local-currency amount.
 The subscription automatically renews according to the selected billing period unless cancelled.
 The exact pricing, currency, taxes, trial eligibility, renewal date, and other subscription information displayed by Google Play at the time of purchase are controlling.
@@ -36,10 +35,10 @@ DH Studios does not control Google Play's eligibility determination.
 A user may not necessarily receive a new free trial simply by reinstalling the Application or creating another installation of the Application.
 
 5. Launch and Standard Pricing
-For the first month after the Application's Google Play release, eligible new subscribers may see Launch Pricing for the available plans: US$2.49 per month, US$14.99 per 6 months, or US$26.99 per year, or the applicable regional equivalent.
+For the first month after the Application's Google Play release, eligible new subscribers may see Launch Pricing for the first payment of the available plans: US$2.49 per month, US$14.99 per 6 months, or US$26.99 per year, or the applicable regional equivalent.
+After the launch-priced first payment, renewals use Normal Pricing for the selected plan unless different terms are displayed by Google Play at the time of purchase or renewal.
 After the launch-pricing window ends, new subscribers may see Normal Pricing for the available plans: US$3.49 per month, US$17.99 per 6 months, or US$31.49 per year, or the applicable regional equivalent.
-Launch Pricing is a launch-period discount for users who subscribe during the first month after release; it is not a discount that applies only to the first billing cycle of every subscription.
-Existing subscribers who joined during the launch-pricing window may retain their applicable launch price where supported by Google Play or the applicable billing/subscription system.
+Launch Pricing is a first-payment launch discount for users who subscribe during the first month after release; it is not a permanent discounted renewal price.
 Taxes, currency conversion, regional pricing, and other Google Play pricing mechanisms may affect the amount ultimately charged.
 
 6. Automatic Renewal
@@ -480,8 +479,8 @@ DH Studios does not need to collect a separate username and password merely to p
 Infinite Co-Pilot is distributed and monetized through Google Play.
 The subscription consists of:
 A three-day free trial for eligible users.
-Launch Pricing during the first month after Google Play release: US$2.49 per month, US$14.99 per 6 months, or US$26.99 per year, where available.
-Normal Pricing after the launch window: US$3.49 per month, US$17.99 per 6 months, or US$31.49 per year.
+Launch Pricing for the first payment during the first month after Google Play release: US$2.49 per month, US$14.99 per 6 months, or US$26.99 per year, where available.
+Normal Pricing for renewals after the launch-priced first payment and for new subscribers after the launch window: US$3.49 per month, US$17.99 per 6 months, or US$31.49 per year.
 Regional pricing where applicable.
 Automatic renewal according to the selected billing period unless cancelled.
 Google Play may process information necessary for:
