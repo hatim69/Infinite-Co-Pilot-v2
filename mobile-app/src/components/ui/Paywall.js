@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, SafeAreaView, ScrollView, useWindowDimensions } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, SafeAreaView, ScrollView, useWindowDimensions, Linking, Platform, AppState, TextInput } from 'react-native';
 import Purchases from 'react-native-purchases';
 import { useTheme } from '../../context/ThemeContext';
 import { Star } from 'lucide-react-native';
@@ -10,6 +10,9 @@ export default function Paywall({ onPurchaseSuccess }) {
   const [packages, setPackages] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isPurchasing, setIsPurchasing] = useState(false);
+  const [promoCode, setPromoCode] = useState('');
+  const [isApplyingPromo, setIsApplyingPromo] = useState(false);
+  const [promoSuccess, setPromoSuccess] = useState(false);
   const isCompactWidth = width < 380;
   const isShortHeight = height < 720;
 
@@ -30,10 +33,53 @@ export default function Paywall({ onPurchaseSuccess }) {
     fetchOfferings();
   }, []);
 
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', async (nextAppState) => {
+      if (nextAppState === 'active') {
+        try {
+          const customerInfo = await Purchases.getCustomerInfo();
+          if (Object.keys(customerInfo.entitlements.active).length > 0) {
+            onPurchaseSuccess();
+          }
+        } catch (e) {
+          console.warn('Error refreshing RC info:', e);
+        }
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [onPurchaseSuccess]);
+
   const purchasePackage = async (pack) => {
     try {
       setIsPurchasing(true);
-      const { customerInfo } = await Purchases.purchasePackage(pack);
+      let customerInfo;
+
+      if (Platform.OS === 'android' && pack.product.subscriptionOptions && pack.product.subscriptionOptions.length > 0) {
+        // Timer: Launch period ends Sept 30, 2026, 11:59 PM (Local Device Time)
+        const isLaunchPeriod = new Date() <= new Date('2026-09-30T23:59:59');
+        
+        const targetOfferId = promoSuccess 
+          ? (isLaunchPeriod ? 'discord-launch' : 'discord-normal') 
+          : (isLaunchPeriod ? 'launch-offer' : 'normal-offer');
+
+        const targetedOffer = pack.product.subscriptionOptions.find(option => option.id.includes(targetOfferId));
+        
+        if (targetedOffer) {
+          const result = await Purchases.purchaseSubscriptionOption(targetedOffer);
+          customerInfo = result.customerInfo;
+        } else {
+          // Fallback just in case
+          const result = await Purchases.purchasePackage(pack);
+          customerInfo = result.customerInfo;
+        }
+      } else {
+        const result = await Purchases.purchasePackage(pack);
+        customerInfo = result.customerInfo;
+      }
+
       if (Object.keys(customerInfo.entitlements.active).length > 0) {
         onPurchaseSuccess();
       } else {
@@ -68,6 +114,35 @@ export default function Paywall({ onPurchaseSuccess }) {
       Alert.alert('Error restoring', e.message);
     } finally {
       setIsPurchasing(false);
+    }
+  };
+
+  const applyPromoCode = async () => {
+    if (!promoCode.trim()) {
+      Alert.alert('Notice', 'Please enter a valid promo code.');
+      return;
+    }
+    
+    if (promoCode.trim().toUpperCase() !== 'DISCORD2026') {
+      Alert.alert('Error', 'Invalid or expired promo code.');
+      return;
+    }
+
+    try {
+      setIsApplyingPromo(true);
+      const offerings = await Purchases.getOfferings();
+      
+      if (offerings.all['discord_launch'] && offerings.all['discord_launch'].availablePackages.length !== 0) {
+        setPackages(offerings.all['discord_launch'].availablePackages);
+        setPromoSuccess(true);
+        Alert.alert('Success', 'Promo code applied! Prices have been updated with your 10% discount.');
+      } else {
+        Alert.alert('Notice', 'This promo is currently unavailable.');
+      }
+    } catch (e) {
+      Alert.alert('Error', e.message);
+    } finally {
+      setIsApplyingPromo(false);
     }
   };
 
@@ -114,6 +189,28 @@ export default function Paywall({ onPurchaseSuccess }) {
           ) : (
             packages.map((pkg, index) => {
               const isAnnual = pkg.packageType === 'ANNUAL' || pkg.product.identifier.includes('annual');
+              
+              // --- TIMER LOGIC FOR UI DISPLAY ---
+              let displayPrice = pkg.product.priceString;
+              const isLaunchPeriod = new Date() <= new Date('2026-09-30T23:59:59');
+
+              if (Platform.OS === 'android' && pkg.product.subscriptionOptions && pkg.product.subscriptionOptions.length > 0) {
+                const targetOfferId = promoSuccess 
+                  ? (isLaunchPeriod ? 'discord-launch' : 'discord-normal') 
+                  : (isLaunchPeriod ? 'launch-offer' : 'normal-offer');
+                  
+                const targetedOffer = pkg.product.subscriptionOptions.find(option => option.id.includes(targetOfferId));
+                
+                if (targetedOffer) {
+                  // Find the first phase that actually charges money to display on the button
+                  const paidPhase = targetedOffer.pricingPhases.find(p => p.price.amountMicros > 0);
+                  if (paidPhase) {
+                    displayPrice = paidPhase.price.formatted;
+                  }
+                }
+              }
+              // ----------------------------------
+
               return (
                 <TouchableOpacity
                   key={index}
@@ -150,7 +247,7 @@ export default function Paywall({ onPurchaseSuccess }) {
                       )}
                     </View>
                     <Text style={[styles.packageDescription, { color: isAnnual ? theme.accentText : theme.textMuted }]}>
-                      Includes 3-Day Free Trial
+                      Try 3 days free, cancel anytime
                     </Text>
                   </View>
                   <View style={styles.packagePriceWrap}>
@@ -164,7 +261,7 @@ export default function Paywall({ onPurchaseSuccess }) {
                       adjustsFontSizeToFit
                       minimumFontScale={0.72}
                     >
-                      {pkg.product.priceString}
+                      {displayPrice}
                     </Text>
                   </View>
                 </TouchableOpacity>
@@ -175,9 +272,38 @@ export default function Paywall({ onPurchaseSuccess }) {
 
         {isPurchasing && <ActivityIndicator size="large" color={theme.accent} style={{ marginTop: 24 }} />}
 
-        <TouchableOpacity onPress={restorePurchases} disabled={isPurchasing} style={styles.restoreButton}>
+        <TouchableOpacity onPress={restorePurchases} disabled={isPurchasing || isApplyingPromo} style={styles.restoreButton}>
           <Text style={[styles.restoreText, { color: theme.textMuted }]}>Restore Purchases</Text>
         </TouchableOpacity>
+
+        {!promoSuccess ? (
+          <View style={styles.promoContainer}>
+            <TextInput
+              style={[styles.promoInput, { color: theme.textPrimary, borderColor: theme.borderMid, backgroundColor: theme.surfaceMid }]}
+              placeholder="Enter Promo Code"
+              placeholderTextColor={theme.textMuted}
+              value={promoCode}
+              onChangeText={setPromoCode}
+              autoCapitalize="characters"
+              editable={!isApplyingPromo}
+            />
+            <TouchableOpacity 
+              onPress={applyPromoCode} 
+              disabled={isApplyingPromo || !promoCode.trim()} 
+              style={[styles.promoApplyBtn, { backgroundColor: promoCode.trim() ? theme.accent : theme.surfaceMid }]}
+            >
+              {isApplyingPromo ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={[styles.promoApplyText, { color: promoCode.trim() ? theme.surface : theme.textMuted }]}>Apply</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View style={styles.promoSuccessContainer}>
+            <Text style={[styles.promoSuccessText, { color: theme.accent }]}>✓ Promo Code Applied</Text>
+          </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -329,4 +455,38 @@ const styles = StyleSheet.create({
     textDecorationLine: 'underline',
     fontWeight: '600',
   },
+  promoContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
+    paddingBottom: 24,
+    gap: 10,
+  },
+  promoInput: {
+    flex: 1,
+    height: 48,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    fontSize: 14,
+  },
+  promoApplyBtn: {
+    height: 48,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  promoApplyText: {
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  promoSuccessContainer: {
+    paddingBottom: 24,
+    alignItems: 'center',
+  },
+  promoSuccessText: {
+    fontWeight: '700',
+    fontSize: 14,
+  }
 });
