@@ -60,7 +60,11 @@ export const getCachedAudioUri = async (remoteFileName, fallbackFileName = null,
 
     // 3. Download the file from R2
     console.log(`[AudioCache] Downloading to device: ${remoteUrl}`);
-    const downloadResult = await FileSystem.downloadAsync(remoteUrl, localFileUri);
+    const downloadResult = await FileSystem.downloadAsync(remoteUrl, localFileUri, {
+      headers: {
+        "User-Agent": "InfiniteCoPilotApp/1.0"
+      }
+    });
     
     if (downloadResult.status === 200) {
       console.log(`[AudioCache] Successfully saved locally: ${safeLocalName}`);

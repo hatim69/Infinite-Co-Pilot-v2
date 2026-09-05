@@ -2146,7 +2146,10 @@ class SpeechManager {
     try {
       const response = await fetch(`${POLLY_BACKEND_URL}/api/tts`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "User-Agent": "InfiniteCoPilotApp/1.0"
+        },
         body: JSON.stringify({ text, voiceId }),
         signal: controller.signal,
       });
