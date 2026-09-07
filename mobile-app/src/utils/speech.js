@@ -18,7 +18,7 @@ import * as Speech from "expo-speech";
 import { Asset } from "expo-asset";
 import { createAudioPlayer, setAudioModeAsync, preload } from "expo-audio";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Platform } from "react-native";
+import { Platform, Alert } from "react-native";
 import { getCachedAudioUri, getExistingCachedAudioUri, isLocalCachedAudioUri } from "./audioCache";
 import { staticAudioMap } from "./staticAudioMap";
 import { runtimeTrace } from "./runtimeTrace";
@@ -2126,6 +2126,7 @@ class SpeechManager {
     if (!POLLY_BACKEND_URL) {
       // No backend configured — fall back immediately
       console.log("[Polly] No backend URL configured, using expo-speech fallback.");
+      Alert.alert("Missing Config", "EXPO_PUBLIC_POLLY_BACKEND_URL is not set in this build.");
       return fallbackToSpeech();
     }
 
@@ -2148,7 +2149,7 @@ class SpeechManager {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",
-          "User-Agent": "InfiniteCoPilotApp/1.0"
+          "User-Agent": "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36"
         },
         body: JSON.stringify({ text, voiceId }),
         signal: controller.signal,
@@ -2158,6 +2159,11 @@ class SpeechManager {
 
       if (!response.ok) {
         throw new Error(`Polly backend returned ${response.status}`);
+      }
+      
+      const contentType = response.headers.get("content-type");
+      if (contentType && contentType.includes("text/html")) {
+        throw new Error("Backend returned HTML. Cloudflare challenge suspected.");
       }
 
       // Convert audio/mpeg response to base64 data URI
@@ -2179,8 +2185,10 @@ class SpeechManager {
       clearTimeout(timeoutId);
       if (err.name === "AbortError") {
         console.warn("[Polly] Request timed out (>3s), falling back to expo-speech.");
+        Alert.alert("Polly Error", "Request timed out (>3s), falling back to TTS");
       } else {
         console.warn("[Polly] Request failed:", err.message, "— falling back to expo-speech.");
+        Alert.alert("Polly Error", `Request failed: ${err.message}`);
       }
       return fallbackToSpeech();
     }
@@ -2262,8 +2270,10 @@ class SpeechManager {
 
         cleanup = player.addListener("playbackStatusUpdate", (status) => {
           markPlaybackStarted(status);
-          if (
-            status.error ||
+          if (status.error) {
+            Alert.alert("Polly Status Error", `Audio error: ${status.error}`);
+            finish();
+          } else if (
             status.didJustFinish ||
             (status.currentTime > 0 &&
               status.duration > 0 &&
@@ -2287,8 +2297,9 @@ class SpeechManager {
         startTimer = setTimeout(() => {
           if (hasStartedPlayback) return;
           console.warn("[Polly] Audio did not start; falling back to expo-speech.");
+          Alert.alert("Polly Timeout", "Polly audio took too long to start decoding. Falling back to TTS.");
           finish();
-        }, POLLY_AUDIO_START_TIMEOUT_MS);
+        }, 8000); // Increased from 2500ms to 8000ms for slow Android decoders
 
         safetyTimer = setTimeout(finish, 60000);
 
@@ -2304,6 +2315,7 @@ class SpeechManager {
         this._scheduleBackgroundMediaRefresh([0, 350, 1200]);
       } catch (err) {
         console.warn("[Polly] Audio playback failed:", err.message);
+        Alert.alert("Polly Playback Error", `Failed to play TTS: ${err.message}`);
         finish();
       }
     });
@@ -2638,6 +2650,7 @@ class SpeechManager {
           if (status.didJustFinish) {
             finishCallback({ reason: "native_finished", completed: true });
           } else if (status.error) {
+            Alert.alert("Announcement Status Error", `Audio error: ${status.error}`);
             finishCallback({ reason: "error", completed: false, error: status.error });
           }
         });
@@ -2871,6 +2884,15 @@ class SpeechManager {
           this._scheduleBackgroundMediaRefresh();
           return false;
         }
+        
+        player.addListener("playbackStatusUpdate", (status) => {
+          if (status.error) {
+            console.error("[Speech] Boarding music playback error:", status.error);
+            Alert.alert("Boarding Music Error", `Playback failed: ${status.error}`);
+            this.stopBoardingMusic({ fade: false });
+          }
+        });
+
         player.play();
         runtimeTrace("speech.boarding_music_start", {
           source: "expo-audio",
@@ -2914,6 +2936,7 @@ class SpeechManager {
       return Boolean(this.boardingMusic);
     } catch (e) {
       console.log("[Speech] Boarding music failed:", e);
+      Alert.alert("Playback Error", `Boarding music failed: ${e.message}`);
       return false;
     } finally {
       if (this._boardingMusicRequestId === playRequestId) {

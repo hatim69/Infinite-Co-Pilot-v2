@@ -12,7 +12,12 @@
       "distribution": "internal"
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_POLLY_BACKEND_URL": "https://infinite-co-pilot-tts.dakshaggarwal2006.workers.dev",
+        "EXPO_PUBLIC_AUDIO_CDN_URL": "https://cdn.dakshaggarwal.dev",
+        "EXPO_PUBLIC_RUNTIME_TRACE_ENABLED": "true"
+      }
     }
   },
   "submit": {
