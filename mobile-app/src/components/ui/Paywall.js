@@ -58,12 +58,7 @@ export default function Paywall({ onPurchaseSuccess }) {
       let customerInfo;
 
       if (Platform.OS === 'android' && pack.product.subscriptionOptions && pack.product.subscriptionOptions.length > 0) {
-        // Timer: Launch period ends Sept 30, 2026, 11:59 PM (Local Device Time)
-        const isLaunchPeriod = new Date() <= new Date('2026-09-30T23:59:59');
-        
-        const targetOfferId = promoSuccess 
-          ? (isLaunchPeriod ? 'discord-launch' : 'discord-normal') 
-          : (isLaunchPeriod ? 'launch-offer' : 'normal-offer');
+        const targetOfferId = promoSuccess ? 'discord-normal' : 'normal-offer';
 
         const targetedOffer = pack.product.subscriptionOptions.find(option => option.id.includes(targetOfferId));
         
@@ -123,24 +118,33 @@ export default function Paywall({ onPurchaseSuccess }) {
       return;
     }
     
-    if (promoCode.trim().toUpperCase() !== 'DISCORD2026') {
-      Alert.alert('Error', 'Invalid or expired promo code.');
-      return;
-    }
-
     try {
       setIsApplyingPromo(true);
+
+      const configRes = await fetch(`${process.env.EXPO_PUBLIC_POLLY_BACKEND_URL}/api/app-config?code=${promoCode.trim()}`);
+      if (!configRes.ok) throw new Error('Failed to verify code.');
+      
+      const configData = await configRes.json();
+      if (!configData.isValidCode) {
+        Alert.alert('Error', 'Invalid or expired promo/creator code.');
+        return;
+      }
+
+      await Purchases.setAttributes({ creator_code: promoCode.trim().toUpperCase() });
+
       const offerings = await Purchases.getOfferings();
       
-      if (offerings.all['discord_launch'] && offerings.all['discord_launch'].availablePackages.length !== 0) {
-        setPackages(offerings.all['discord_launch'].availablePackages);
-        setPromoSuccess(true);
-        Alert.alert('Success', 'Promo code applied! Prices have been updated with your 10% discount.');
-      } else {
-        Alert.alert('Notice', 'This promo is currently unavailable.');
+      // Look for a discord_normal or discord offering, otherwise just use current offering but set promoSuccess to true (which changes Android targetOfferId)
+      if (offerings.all['discord_normal'] && offerings.all['discord_normal'].availablePackages.length !== 0) {
+        setPackages(offerings.all['discord_normal'].availablePackages);
+      } else if (offerings.all['discord'] && offerings.all['discord'].availablePackages.length !== 0) {
+        setPackages(offerings.all['discord'].availablePackages);
       }
+      
+      setPromoSuccess(true);
+      Alert.alert('Success', 'Creator code applied! Prices have been updated with your discount.');
     } catch (e) {
-      Alert.alert('Error', e.message);
+      Alert.alert('Error', e.message || 'Something went wrong while applying the code.');
     } finally {
       setIsApplyingPromo(false);
     }
@@ -190,14 +194,9 @@ export default function Paywall({ onPurchaseSuccess }) {
             packages.map((pkg, index) => {
               const isAnnual = pkg.packageType === 'ANNUAL' || pkg.product.identifier.includes('annual');
               
-              // --- TIMER LOGIC FOR UI DISPLAY ---
               let displayPrice = pkg.product.priceString;
-              const isLaunchPeriod = new Date() <= new Date('2026-09-30T23:59:59');
-
               if (Platform.OS === 'android' && pkg.product.subscriptionOptions && pkg.product.subscriptionOptions.length > 0) {
-                const targetOfferId = promoSuccess 
-                  ? (isLaunchPeriod ? 'discord-launch' : 'discord-normal') 
-                  : (isLaunchPeriod ? 'launch-offer' : 'normal-offer');
+                const targetOfferId = promoSuccess ? 'discord-normal' : 'normal-offer';
                   
                 const targetedOffer = pkg.product.subscriptionOptions.find(option => option.id.includes(targetOfferId));
                 
@@ -280,7 +279,7 @@ export default function Paywall({ onPurchaseSuccess }) {
           <View style={styles.promoContainer}>
             <TextInput
               style={[styles.promoInput, { color: theme.textPrimary, borderColor: theme.borderMid, backgroundColor: theme.surfaceMid }]}
-              placeholder="Enter Promo Code"
+              placeholder="Creator / Promo Code"
               placeholderTextColor={theme.textMuted}
               value={promoCode}
               onChangeText={setPromoCode}
@@ -301,7 +300,7 @@ export default function Paywall({ onPurchaseSuccess }) {
           </View>
         ) : (
           <View style={styles.promoSuccessContainer}>
-            <Text style={[styles.promoSuccessText, { color: theme.accent }]}>✓ Promo Code Applied</Text>
+            <Text style={[styles.promoSuccessText, { color: theme.accent }]}>✓ Creator / Promo Code Applied</Text>
           </View>
         )}
       </ScrollView>

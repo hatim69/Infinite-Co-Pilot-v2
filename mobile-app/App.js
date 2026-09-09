@@ -241,12 +241,23 @@ function AppInner() {
 
     const initRC = async () => {
       try {
+        let isFreePeriodActive = false;
+        try {
+          const configRes = await fetch(`${process.env.EXPO_PUBLIC_POLLY_BACKEND_URL}/api/app-config`);
+          if (configRes.ok) {
+            const configData = await configRes.json();
+            isFreePeriodActive = configData.isFreePeriod;
+          }
+        } catch (err) {
+          console.warn('Failed to fetch app-config:', err);
+        }
+
         if (Platform.OS === 'android') {
           Purchases.configure({ apiKey: 'goog_BEnpjzrkyXkJJmWagtuyZzRBPNp' }); // Replace with your actual Google Play API key
         }
         const customerInfo = await Purchases.getCustomerInfo();
         // Fallback: If ANY entitlement is active, unlock the app (avoids string mismatch issues)
-        if (Object.keys(customerInfo.entitlements.active).length > 0) {
+        if (Object.keys(customerInfo.entitlements.active).length > 0 || isFreePeriodActive) {
           if (isMounted) setIsPro(true);
         }
       } catch (e) {

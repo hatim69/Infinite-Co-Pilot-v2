@@ -112,6 +112,36 @@ export default {
       }
     }
 
+    // ─── App Config (Free Period & Creator Codes) ──────────────────────────────────
+    if (url.pathname === "/api/app-config" && request.method === "GET") {
+      const code = url.searchParams.get("code");
+      
+      // Free period expires exactly 1 month from now: October 9, 2026
+      const freePeriodEndDate = new Date("2026-10-10T00:00:00Z");
+      const isFreePeriod = new Date() < freePeriodEndDate;
+
+      // Maintain list of valid creator/promo codes here
+      // These are checked case-insensitively
+      const validCodes = ["DISCORD26", "CAPTAIN123"];
+      
+      let isValidCode = false;
+      if (code) {
+        isValidCode = validCodes.includes(code.toUpperCase().trim());
+      }
+
+      return new Response(JSON.stringify({ 
+        isFreePeriod,
+        isValidCode,
+        requestedCode: code 
+      }), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
+      });
+    }
+
     // ─── Default 404 For Unmatched Routes ───────────────────────────────────────
     return new Response("Not Found", { status: 404 });
   },
