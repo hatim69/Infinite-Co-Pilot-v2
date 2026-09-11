@@ -116,13 +116,14 @@ export default {
     if (url.pathname === "/api/app-config" && request.method === "GET") {
       const code = url.searchParams.get("code");
       
-      // Free period expires exactly 1 month from now: October 9, 2026
-      const freePeriodEndDate = new Date("2026-10-10T00:00:00Z");
+      // Read the date from the environment variable (with a fallback)
+      const endDateString = env.FREE_PERIOD_END_DATE || "2026-10-10T23:59:59Z";
+      const freePeriodEndDate = new Date(endDateString);
       const isFreePeriod = new Date() < freePeriodEndDate;
 
-      // Maintain list of valid creator/promo codes here
-      // These are checked case-insensitively
-      const validCodes = ["DISCORD26", "CAPTAIN123"];
+      // Read comma-separated codes from environment variable
+      const codesString = env.CREATOR_CODES || "DISCORD26";
+      const validCodes = codesString.split(",").map(c => c.trim().toUpperCase());
       
       let isValidCode = false;
       if (code) {
