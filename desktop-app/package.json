@@ -1,0 +1,59 @@
+{
+  "name": "infinite-copilot-desktop",
+  "version": "1.0.0",
+  "description": "Infinite Co-Pilot Desktop Companion for Mac and Windows",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron .",
+    "build:mac": "electron-builder --mac",
+    "build:win": "electron-builder --win",
+    "build:all": "electron-builder -mw"
+  },
+  "author": "Infinite Co-Pilot",
+  "license": "ISC",
+  "devDependencies": {
+    "electron": "^34.5.8",
+    "electron-builder": "^25.1.8",
+    "ws": "^8.21.3"
+  },
+  "build": {
+    "appId": "dev.infinitecopilot.desktop",
+    "productName": "Infinite Co-Pilot",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.simulation-games",
+      "target": [
+        {
+          "target": "default",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ]
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    }
+  }
+}

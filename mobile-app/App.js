@@ -208,7 +208,7 @@ function AppInner() {
   const [isBackgroundMode, setIsBackgroundMode] = useState(false);
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const [isSplashVisible, setIsSplashVisible] = useState(true);
-  const [isPro, setIsPro] = useState(false);
+  const [isPro, setIsPro] = useState(Platform.OS === 'web');
   // const [isBetaVerified, setIsBetaVerified] = useState(false);
   // const [isBetaExpired, setIsBetaExpired] = useState(false);
   // const [betaNetworkError, setBetaNetworkError] = useState(false);
@@ -664,7 +664,7 @@ function AppInner() {
                       { backgroundColor: theme.logsBg, borderColor: theme.logsBorder },
                     ]}
                   >
-                    <ScrollView ref={logScrollRef} showsVerticalScrollIndicator={true} contentContainerStyle={{ flexGrow: 1 }}>
+                    <ScrollView ref={logScrollRef} showsVerticalScrollIndicator={Platform.OS !== 'web'} contentContainerStyle={{ flexGrow: 1 }}>
                       {logs.map((log, index) => (
                         <View key={index} style={styles.logEntry}>
                           <Text style={[styles.logTime, { color: theme.textFaint }]}>{log.time}</Text>
