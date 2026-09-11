@@ -14,7 +14,7 @@ let mainWindow = null;
 const BRIDGE_PORT = 8088;
 
 // Production Vercel URL or local development fallback
-const PRODUCTION_URL = "https://infinite-copilot.vercel.app";
+const PRODUCTION_URL = "https://infinite-co-pilot.vercel.app";
 const TARGET_URL =
   process.env.COPILOT_WEB_URL ||
   (process.env.NODE_ENV === "development"

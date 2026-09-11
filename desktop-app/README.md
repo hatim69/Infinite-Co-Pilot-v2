@@ -27,7 +27,7 @@ The native desktop companion for **Infinite Co-Pilot**. It loads the live cockpi
 
 To specify a custom remote Vercel URL:
 ```bash
-COPILOT_WEB_URL="https://your-app.vercel.app" npm start
+COPILOT_WEB_URL="https://infinite-co-pilot.vercel.app" npm start
 ```
 
 ---
