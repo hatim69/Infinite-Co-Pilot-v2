@@ -38,13 +38,17 @@ COPILOT_WEB_URL="https://infinite-co-pilot.vercel.app" npm start
 ```bash
 npm run build:mac
 ```
-Output: `dist-electron/Infinite Co-Pilot-1.0.0.dmg` and `Infinite Co-Pilot-1.0.0-mac.zip`.
+Output:
+* Apple Silicon (M1/M2/M3/M4): `dist-electron/Infinite Co-Pilot-1.0.0-arm64.dmg`
+* Intel Mac: `dist-electron/Infinite Co-Pilot-1.0.0.dmg`
 
 ### Windows (`.exe` NSIS installer & portable)
 ```bash
 npm run build:win
 ```
-Output: `dist-electron/Infinite Co-Pilot Setup 1.0.0.exe` and portable `.exe`.
+Output:
+* NSIS Installer: `dist-electron/Infinite Co-Pilot Setup 1.0.0.exe`
+* Portable: `dist-electron/Infinite Co-Pilot 1.0.0.exe`
 
 ### Multi-Platform (Mac + Windows)
 ```bash

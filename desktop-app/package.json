@@ -6,16 +6,18 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron .",
-    "build:mac": "electron-builder --mac",
-    "build:win": "electron-builder --win",
-    "build:all": "electron-builder -mw"
+    "build:mac": "ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ electron-builder --mac",
+    "build:win": "ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ electron-builder --win",
+    "build:all": "ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ electron-builder -mw"
   },
   "author": "Infinite Co-Pilot",
   "license": "ISC",
+  "dependencies": {
+    "ws": "^8.21.3"
+  },
   "devDependencies": {
     "electron": "^34.5.8",
-    "electron-builder": "^25.1.8",
-    "ws": "^8.21.3"
+    "electron-builder": "^25.1.8"
   },
   "build": {
     "appId": "dev.infinitecopilot.desktop",
@@ -25,9 +27,12 @@
     },
     "files": [
       "src/**/*",
+      "build/**/*",
+      "node_modules/ws/**/*",
       "package.json"
     ],
     "mac": {
+      "icon": "build/icon.icns",
       "category": "public.app-category.simulation-games",
       "target": [
         {
@@ -40,6 +45,7 @@
       ]
     },
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         {
           "target": "nsis",

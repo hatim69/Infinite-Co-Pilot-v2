@@ -264,7 +264,7 @@ function AppInner() {
         console.warn('Failed to init RevenueCat', e);
       }
     };
-    initRC();
+    const rcPromise = initRC();
 
     /*
     const checkBetaStatus = async () => {
@@ -300,7 +300,12 @@ function AppInner() {
     };
     */
 
-    Promise.all([minimumPrep, audioReady]).finally(() => {
+    const rcPromiseWithTimeout = Promise.race([
+      rcPromise,
+      new Promise((resolve) => setTimeout(resolve, 8000))
+    ]);
+
+    Promise.all([minimumPrep, audioReady, rcPromiseWithTimeout]).finally(() => {
       if (isMounted) setIsSplashVisible(false);
     });
 

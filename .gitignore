@@ -1,20 +1,34 @@
+# Dependencies
 **/node_modules/
+
+# Environment files
 .env
-flight_deck_dashboard.html
-.DS_Store
-test*.js
+.env*.local
+**/.env.local
+
+# Build outputs
+**/dist-electron/
+dist-electron/
+**/dist/
+**/out/
+
+# Logs
 *.log
-Global Airport Database (ICAO) - airport-codes.csv
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS & Editor
+**/.DS_Store
 .DS_Store
+**/.idea/
+
+# Repository specific
+flight_deck_dashboard.html
+test*.js
+Global Airport Database (ICAO) - airport-codes.csv
+scratch_audio
 mobile-app/assets/mic_click_off.wav
 mobile-app/assets/radio_static.wav
 mobile-app/assets/mic_click_on.wav
 mobile-app/resize_icons.py
-# mobile-app/assets/audio
-scratch_audio
-mobile-app/.idea/deviceManager.xml
-mobile-app/.idea/caches/deviceStreaming.xml
-mobile-app/.idea/modules.xml
-mobile-app/.idea/misc.xml
-mobile-app/.idea/vcs.xml
-mobile-app/.idea/mobile-app.iml

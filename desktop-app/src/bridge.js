@@ -11,7 +11,16 @@ const net = require("net");
 const dgram = require("dgram");
 const fs = require("fs");
 const path = require("path");
-const WebSocket = require("ws");
+let WebSocket;
+try {
+  WebSocket = require("ws");
+} catch (e) {
+  try {
+    WebSocket = require("./vendor/ws");
+  } catch (err) {
+    console.error("[Desktop Bridge] Failed to load WebSocket module:", err.message);
+  }
+}
 
 const DEFAULT_WS_PORT = 8088;
 const IF_DISCOVERY_PORT = 15000;
@@ -459,7 +468,34 @@ class InfiniteFlightTcpSession {
   }
 }
 
-function startBridge({ port = DEFAULT_WS_PORT, staticDir = null } = {}) {
+async function startBridge({ port = DEFAULT_WS_PORT, staticDir = null } = {}) {
+  // Check if an Infinite Co-Pilot bridge is already running on this port
+  const isBridgeAlreadyRunning = await new Promise((resolve) => {
+    const req = http.get(`http://127.0.0.1:${port}`, { timeout: 800 }, (res) => {
+      let data = "";
+      res.on("data", (c) => (data += c));
+      res.on("end", () => {
+        try {
+          const json = JSON.parse(data);
+          if (json && typeof json.status === "string" && json.status.includes("Bridge Active")) {
+            return resolve(true);
+          }
+        } catch (e) {}
+        resolve(false);
+      });
+    });
+    req.on("error", () => resolve(false));
+    req.on("timeout", () => {
+      req.destroy();
+      resolve(false);
+    });
+  });
+
+  if (isBridgeAlreadyRunning) {
+    console.log(`[Desktop Bridge] ✅ Existing bridge already active on port ${port}. Reusing connection.`);
+    return { port, reused: true };
+  }
+
   return new Promise((resolve, reject) => {
     server = http.createServer(async (req, res) => {
       res.setHeader("Access-Control-Allow-Origin", "*");
@@ -539,6 +575,9 @@ function startBridge({ port = DEFAULT_WS_PORT, staticDir = null } = {}) {
     });
 
     wss = new WebSocket.Server({ server });
+    wss.on("error", (err) => {
+      console.warn("[Desktop Bridge WS] WebSocket server error:", err.message);
+    });
 
     wss.on("connection", (ws) => {
       const session = new InfiniteFlightTcpSession(ws);
@@ -583,7 +622,12 @@ function startBridge({ port = DEFAULT_WS_PORT, staticDir = null } = {}) {
     }, 2500);
 
     server.on("error", (err) => {
-      reject(err);
+      if (err.code === "EADDRINUSE") {
+        console.warn(`[Desktop Bridge] Port ${port} already bound. Proceeding with existing bridge instance.`);
+        resolve({ port, occupied: true });
+      } else {
+        reject(err);
+      }
     });
 
     server.listen(port, "0.0.0.0", () => {
