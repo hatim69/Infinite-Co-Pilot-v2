@@ -72,6 +72,7 @@ import Sidebar from "./src/components/ui/Sidebar";
 import Gatekeeper from "./src/components/ui/Gatekeeper";
 import Paywall from "./src/components/ui/Paywall";
 import Purchases from 'react-native-purchases';
+import VercelAnalytics from "./src/components/analytics/VercelAnalytics";
 // import { BETA_EXPIRY_DATE, SUPABASE_URL } from "./src/utils/beta";
 const FLIGHT_DECK_MIN_PREP_MS = 900;
 const FLIGHT_DECK_PREP_TIMEOUT_MS = 6000;
@@ -945,6 +946,7 @@ export default function App() {
     <SafeAreaProvider>
       <ThemeProvider>
         <AppInner />
+        <VercelAnalytics />
       </ThemeProvider>
     </SafeAreaProvider>
   );
