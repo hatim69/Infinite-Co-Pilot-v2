@@ -7,8 +7,8 @@
     "start": "electron .",
     "dev": "electron .",
     "build:mac": "ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ electron-builder --mac",
-    "build:win": "ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ electron-builder --win",
-    "build:all": "ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ electron-builder --mac dmg --universal && ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ electron-builder --win nsis"
+    "build:win": "ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ electron-builder --win --x64",
+    "build:all": "ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ electron-builder --mac dmg --universal && ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ electron-builder --win nsis --x64"
   },
   "author": "Infinite Co-Pilot",
   "license": "ISC",
@@ -35,17 +35,12 @@
       "icon": "build/icon.icns",
       "category": "public.app-category.simulation-games",
       "target": [
-        {
-          "target": "default",
-          "arch": [
-            "arm64",
-            "x64"
-          ]
-        }
+        "dmg"
       ]
     },
     "win": {
       "icon": "build/icon.ico",
+      "executableName": "Infinite Co-Pilot",
       "target": [
         {
           "target": "nsis",
@@ -60,6 +55,10 @@
           ]
         }
       ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false
     }
   }
 }
