@@ -102,7 +102,20 @@
     <div class="icon">✈️</div>
     <h1 id="title">Connecting to Infinite Co-Pilot...</h1>
     <p id="message">Attempting to establish connection with the flight deck services. Please ensure your internet connection is active.</p>
-    <button class="btn" onclick="window.location.reload()">Retry Connection</button>
+    <button class="btn" onclick="retryConnection()">Retry Connection</button>
+    
+    <script>
+      function retryConnection() {
+        const params = new URLSearchParams(window.location.search);
+        const url = params.get('url');
+        if (url) {
+          window.location.href = url;
+        } else {
+          // Default to the production web app if no URL is provided
+          window.location.href = 'https://infinite-co-pilot.vercel.app';
+        }
+      }
+    </script>
     <div>
       <div class="status-pill">
         <div class="dot"></div>

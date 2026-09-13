@@ -265,6 +265,11 @@ class InfiniteFlightTcpSession {
 
     while (this.receiveBuffer && this.receiveBuffer.length >= 8) {
       const dataLen = this.receiveBuffer.readInt32LE(4);
+      if (dataLen < 0 || dataLen > 10000000) {
+        console.warn(`[Desktop Bridge TCP] Invalid data length: ${dataLen}. Closing connection.`);
+        this.close();
+        return;
+      }
       const totalLen = 8 + dataLen;
       if (this.receiveBuffer.length < totalLen) break;
 
@@ -555,6 +560,15 @@ async function startBridge({ port = DEFAULT_WS_PORT, staticDir = null } = {}) {
         let reqPath = decodeURIComponent(parsedUrl.pathname);
         if (reqPath === "/" || reqPath === "") reqPath = "/index.html";
         let filePath = path.join(staticDir, reqPath);
+
+        const normalizedStaticDir = path.resolve(staticDir);
+        const normalizedFilePath = path.resolve(filePath);
+
+        if (!normalizedFilePath.startsWith(normalizedStaticDir + path.sep) && normalizedFilePath !== normalizedStaticDir) {
+          res.writeHead(403, { "Content-Type": "text/plain" });
+          res.end("Forbidden");
+          return;
+        }
 
         if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
           filePath = path.join(staticDir, "index.html");

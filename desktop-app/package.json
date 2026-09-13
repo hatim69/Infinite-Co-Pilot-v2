@@ -8,7 +8,7 @@
     "dev": "electron .",
     "build:mac": "ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ electron-builder --mac",
     "build:win": "ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ electron-builder --win",
-    "build:all": "ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ electron-builder -mw"
+    "build:all": "ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ electron-builder --mac dmg --universal && ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ electron-builder --win nsis"
   },
   "author": "Infinite Co-Pilot",
   "license": "ISC",

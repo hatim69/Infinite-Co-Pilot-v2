@@ -28,6 +28,22 @@ const TARGET_URL =
     : PRODUCTION_URL);
 
 async function createWindow() {
+  // Check for local exported web bundle (for local fallback)
+  const localDistPath = path.resolve(__dirname, "../../mobile-app/dist");
+  const staticDir = fs.existsSync(localDistPath) ? localDistPath : null;
+
+  try {
+    console.log(`[Desktop Main] Checking Infinite Flight bridge on port ${BRIDGE_PORT}...`);
+    const res = await startBridge({ port: BRIDGE_PORT, staticDir });
+    if (res?.reused) {
+      console.log(`[Desktop Main] ✅ Reusing active Infinite Flight bridge on port ${BRIDGE_PORT}.`);
+    } else {
+      console.log(`[Desktop Main] ✅ Infinite Flight bridge started on port ${BRIDGE_PORT}.`);
+    }
+  } catch (err) {
+    console.warn(`[Desktop Main] Bridge startup note:`, err.message);
+  }
+
   const iconPath =
     process.platform === "win32"
       ? path.join(__dirname, "../build/icon.ico")
@@ -70,11 +86,12 @@ async function createWindow() {
   // Handle remote URL load failure (e.g. offline, maintenance, or DNS failure)
   mainWindow.webContents.on(
     "did-fail-load",
-    (event, errorCode, errorDescription, validatedURL) => {
+    (event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+      if (isMainFrame === false || validatedURL.includes("fallback.html")) return;
       console.warn(`[Desktop Window] Failed to load ${validatedURL}: ${errorDescription} (${errorCode})`);
       const fallbackPath = path.join(__dirname, "fallback.html");
       if (fs.existsSync(fallbackPath)) {
-        mainWindow.loadFile(fallbackPath);
+        mainWindow.loadFile(fallbackPath, { query: { url: validatedURL } });
       }
     }
   );
@@ -95,27 +112,11 @@ app.whenReady().then(async () => {
     console.log(`[Desktop Main] Power save blocker active (ID: ${powerSaveId}) - App Nap and background suspension disabled.`);
   } catch (e) {}
 
-  try {
-    // Check for local exported web bundle (for local fallback)
-    const localDistPath = path.resolve(__dirname, "../../mobile-app/dist");
-    const staticDir = fs.existsSync(localDistPath) ? localDistPath : null;
+  await createWindow();
 
-    console.log(`[Desktop Main] Checking Infinite Flight bridge on port ${BRIDGE_PORT}...`);
-    const res = await startBridge({ port: BRIDGE_PORT, staticDir });
-    if (res?.reused) {
-      console.log(`[Desktop Main] ✅ Reusing active Infinite Flight bridge on port ${BRIDGE_PORT}.`);
-    } else {
-      console.log(`[Desktop Main] ✅ Infinite Flight bridge started on port ${BRIDGE_PORT}.`);
-    }
-  } catch (err) {
-    console.warn(`[Desktop Main] Bridge startup note:`, err.message);
-  }
-
-  createWindow();
-
-  app.on("activate", () => {
+  app.on("activate", async () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
+      await createWindow();
     }
   });
 });
